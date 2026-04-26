@@ -1,0 +1,115 @@
+C251 COMPILER V5.60.0,  main                                                               27/04/26  00:55:18  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE main
+OBJECT MODULE PLACED IN .\list\main.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\User\main.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\User;..\App
+                    -\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8
+                    -658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\main.lst) T
+                    -ABS(2) OBJECT(.\list\main.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include "config.h"
+    6          #include "system_init.h"
+    7          #include "Task.h"
+    8          #include "..\Code_boweny\Device\QMI8658\QMI8658.h"
+    9          #include "..\Code_boweny\Device\GPS\GPS.h"
+   10          #include "..\Code_boweny\Device\WIRELESS\wireless.h"
+   11          #include "..\Code_boweny\Device\WIRELESS\ship_protocol.h"
+   12          #include "..\Code_boweny\Function\Log\Log.h"
+   13          
+   14          #define IMU_ACC_LOG_DECIMATION  128
+   15          
+   16          static void Wireless_MinimalTestUnit(void)
+   17          {
+   18   1          s8 rc;
+   19   1      
+   20   1          /*
+   21   1           * LT8920 datasheet does not provide a dedicated WHO_AM_I style ID register.
+   22   1           * This one-shot test confirms SPI communication by reading back stable registers.
+   23   1           */
+   24   1          rc = Wireless_RunMinimalTest();
+   25   1          if (rc != SUCCESS) {
+   26   2              LOGE("WL", "minimal test fail rc=%d", rc);
+   27   2          }
+   28   1      }
+   29          
+   30          static void IMU_HighRatePoll(void)
+   31          {
+   32   1          static u16 sample_div = 0;
+   33   1          static u8  error_latched = 0;
+   34   1          int16 ax, ay, az;
+   35   1      
+   36   1          if (!g_qmi8658_ready) {
+   37   2              return;
+   38   2          }
+   39   1      
+   40   1          if (QMI8658_ReadAcc(&ax, &ay, &az) != 0) {
+   41   2              if (!error_latched) {
+   42   3                  LOGE("IMU", "high-rate acc read fail");
+   43   3                  error_latched = 1;
+   44   3              }
+   45   2              return;
+   46   2          }
+   47   1      
+   48   1          error_latched = 0;
+   49   1          sample_div++;
+   50   1          if (sample_div >= IMU_ACC_LOG_DECIMATION) {
+   51   2              sample_div = 0;
+   52   2              LOGI("IMU", "acc=%d %d %d", ax, ay, az);
+   53   2          }
+   54   1      }
+   55          
+   56          /*---------------------------------------------------------------------*/
+C251 COMPILER V5.60.0,  main                                                               27/04/26  00:55:18  PAGE 2   
+
+   57          /* 鍑芥暟: main                                                          */
+   58          /* 鎻忚堪: 绋嬪簭鍏ュ彛                                                      */
+   59          /* 鍙傛暟: 鏃?                                                            */
+   60          /* 杩斿洖: 鏃?                                                            */
+   61          /* 鐗堟湰: v1.0, 2026-04-22                                             */
+   62          /*---------------------------------------------------------------------*/
+   63          void main(void)
+   64          {
+   65   1          SYS_Init();
+   66   1          Wireless_MinimalTestUnit();
+   67   1      
+   68   1          while(1)
+   69   1          {
+   70   2              GPS_Poll();
+   71   2              Wireless_Poll();
+   72   2              ShipProtocol_Poll();
+   73   2              Wireless_SearchSignalPoll();
+   74   2              Task_Pro_Handler_Callback();
+   75   2              IMU_HighRatePoll();
+   76   2          }
+   77   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       191     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =         3          6
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        79     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

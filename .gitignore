@@ -1,0 +1,30 @@
+# build
+build/
+Debug/
+Release/
+
+# Keil
+*.uvproj*
+*.uvopt*
+*.uvgui*
+*.bak
+*.dep
+
+# output
+*.hex
+*.bin
+*.elf
+
+# logs
+*.log
+
+# system
+.DS_Store
+Thumbs.db
+
+# vscode
+.vscode/
+
+# cmake
+CMakeFiles/
+CMakeCache.txt

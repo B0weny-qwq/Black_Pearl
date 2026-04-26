@@ -1,0 +1,383 @@
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_LIN
+OBJECT MODULE PLACED IN .\list\STC32G_LIN.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_LIN.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..
+                    -\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny
+                    -\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list
+                    -\STC32G_LIN.lst) TABS(2) OBJECT(.\list\STC32G_LIN.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include "STC32G_LIN.h"
+    6          
+    7          //========================================================================
+    8          // 函数: u8 ReadReg(u8 addr)
+    9          // 描述: Lin功能寄存器读取函数。
+   10          // 参数: Lin功能寄存器地址.
+   11          // 返回: Lin功能寄存器数据.
+   12          // 版本: VER1.0
+   13          // 日期: 2021-01-05
+   14          // 备注: 
+   15          //========================================================================
+   16          u8 LinReadReg(u8 addr)
+   17          {
+   18   1        u8 dat;
+   19   1        LINAR = addr;
+   20   1        dat = LINDR;
+   21   1        return dat;
+   22   1      }
+   23          
+   24          //========================================================================
+   25          // 函数: void WriteReg(u8 addr, u8 dat)
+   26          // 描述: Lin功能寄存器配置函数。
+   27          // 参数: Lin功能寄存器地址, Lin功能寄存器数据.
+   28          // 返回: none.
+   29          // 版本: VER1.0
+   30          // 日期: 2021-01-05
+   31          // 备注: 
+   32          //========================================================================
+   33          void LinWriteReg(u8 addr, u8 dat)
+   34          {
+   35   1        LINAR = addr;
+   36   1        LINDR = dat;
+   37   1      }
+   38          
+   39          //========================================================================
+   40          // 函数: void LinReadMsg(u8 *pdat)
+   41          // 描述: Lin读取数据函数。
+   42          // 参数: *pdat: 接收数据缓冲区.
+   43          // 返回: none.
+   44          // 版本: VER1.0
+   45          // 日期: 2021-01-05
+   46          // 备注: 
+   47          //========================================================================
+   48          void LinReadMsg(u8 *pdat)
+   49          {
+   50   1        u8 i;
+   51   1      
+   52   1        LinWriteReg(LSEL,0x80); //地址自增，从0开始
+   53   1        for(i=0;i<FRAME_LEN;i++)
+   54   1        {
+   55   2          pdat[i] = LinReadReg(LBUF);
+   56   2        }
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 2   
+
+   57   1      }
+   58          
+   59          //========================================================================
+   60          // 函数: void LinSendMsg(u8 *pdat)
+   61          // 描述: Lin设置数据函数。
+   62          // 参数: *pdat: 设置数据缓冲区.
+   63          // 返回: Lin ID.
+   64          // 版本: VER1.0
+   65          // 日期: 2021-01-05
+   66          // 备注: 
+   67          //========================================================================
+   68          void LinSendMsg(u8 *pdat)
+   69          {
+   70   1        u8 i;
+   71   1      
+   72   1        LinWriteReg(LSEL,0x80);   //地址自增，从0开始
+   73   1        for(i=0;i<FRAME_LEN;i++)
+   74   1        {
+   75   2          LinWriteReg(LBUF,pdat[i]);
+   76   2        }
+   77   1      }
+   78          
+   79          //========================================================================
+   80          // 函数: void LinSetID(u8 lid)
+   81          // 描述: 设置LIN ID函数。
+   82          // 参数: none.
+   83          // 返回: none.
+   84          // 版本: VER1.0
+   85          // 日期: 2021-01-05
+   86          // 备注: 
+   87          //========================================================================
+   88          void LinSetID(u8 lid)
+   89          {
+   90   1        LinWriteReg(LID,lid);     //设置总线ID
+   91   1      }
+   92          
+   93          //========================================================================
+   94          // 函数: u8 GetLinError(void)
+   95          // 描述: 获取LIN总线错误寄存器状态。
+   96          // 参数: none.
+   97          // 返回: 错误寄存器状态.
+   98          // 版本: VER1.0
+   99          // 日期: 2021-01-05
+  100          // 备注: 
+  101          //========================================================================
+  102          u8 GetLinError(void)
+  103          {
+  104   1        u8 sta;
+  105   1        sta = LinReadReg(LER);    //读取清除错误寄存器
+  106   1        return sta;
+  107   1      }
+  108          
+  109          //========================================================================
+  110          // 函数: u8 WaitLinReady(void)
+  111          // 描述: 等待LIN总线就绪。
+  112          // 参数: none.
+  113          // 返回: LIN总线状态.
+  114          // 版本: VER1.0
+  115          // 日期: 2021-01-05
+  116          // 备注: 
+  117          //========================================================================
+  118          u8 WaitLinReady(void)
+  119          {
+  120   1        u8 lsr;
+  121   1        do{
+  122   2          lsr = LinReadReg(LSR);
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 3   
+
+  123   2        }while(!(lsr & 0x02));    //判断ready状态
+  124   1        return lsr;
+  125   1      }
+  126          
+  127          //========================================================================
+  128          // 函数: void SendAbortCmd(void)
+  129          // 描述: 主模式发送Lin总线Abort函数。
+  130          // 参数: none.
+  131          // 返回: none.
+  132          // 版本: VER1.0
+  133          // 日期: 2021-01-05
+  134          // 备注: 
+  135          //========================================================================
+  136          void SendAbortCmd(void)
+  137          {
+  138   1        LinWriteReg(LCR,0x80);    //主模式 Send Abort
+  139   1      }
+  140          
+  141          //========================================================================
+  142          // 函数: void SendHeadCmd(void)
+  143          // 描述: 主模式发送Lin总线Header函数。
+  144          // 参数: none.
+  145          // 返回: none.
+  146          // 版本: VER1.0
+  147          // 日期: 2021-01-05
+  148          // 备注: 
+  149          //========================================================================
+  150          void SendHeadCmd(void)
+  151          {
+  152   1        LinWriteReg(LCR,0x81);    //主模式 Send Header
+  153   1      }
+  154          
+  155          //========================================================================
+  156          // 函数: void SendDatCmd(void)
+  157          // 描述: 主模式发送Lin总线数据函数。
+  158          // 参数: none.
+  159          // 返回: none.
+  160          // 版本: VER1.0
+  161          // 日期: 2021-01-05
+  162          // 备注: 
+  163          //========================================================================
+  164          void SendDatCmd(void)
+  165          {
+  166   1        u8 lcr_val;
+  167   1        lcr_val = 0x82+(LIN_MODE<<6)+(FRAME_LEN<<2);
+  168   1        LinWriteReg(LCR,lcr_val);
+  169   1      }
+  170          
+  171          //========================================================================
+  172          // 函数: void ResponseTxCmd(void)
+  173          // 描述: 从模式发送Lin总线Tx Response函数。
+  174          // 参数: none.
+  175          // 返回: none.
+  176          // 版本: VER1.0
+  177          // 日期: 2021-01-05
+  178          // 备注: 
+  179          //========================================================================
+  180          void ResponseTxCmd(void)
+  181          {
+  182   1        u8 lcr_val;
+  183   1        lcr_val = 0x02+(LIN_MODE<<6)+(FRAME_LEN<<2);
+  184   1        LinWriteReg(LCR,lcr_val);
+  185   1      }
+  186          
+  187          //========================================================================
+  188          // 函数: void ResponseRxCmd(void)
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 4   
+
+  189          // 描述: 从模式发送Lin总线Rx Response函数。
+  190          // 参数: none.
+  191          // 返回: none.
+  192          // 版本: VER1.0
+  193          // 日期: 2021-01-05
+  194          // 备注: 
+  195          //========================================================================
+  196          void ResponseRxCmd(void)
+  197          {
+  198   1        u8 lcr_val;
+  199   1        lcr_val = 0x03+(LIN_MODE<<6)+(FRAME_LEN<<2);
+  200   1        LinWriteReg(LCR,lcr_val);
+  201   1      }
+  202          
+  203          //========================================================================
+  204          // 函数: void LinTxResponse(u8 *pdat)
+  205          // 描述: Lin从机发送应答数据，跟主机发送的Header拼成一个完整的帧。
+  206          // 参数: *pdat: 发送数据缓冲区.
+  207          // 返回: none.
+  208          // 版本: VER1.0
+  209          // 日期: 2021-01-05
+  210          // 备注: 
+  211          //========================================================================
+  212          void LinTxResponse(u8 *pdat)
+  213          {
+  214   1        LinSendMsg(pdat);
+  215   1        ResponseTxCmd();          //TX response
+  216   1        WaitLinReady();           //等待ready状态
+  217   1        GetLinError();            //读取清除错误寄存器
+  218   1      }
+  219          
+  220          //========================================================================
+  221          // 函数: void LinReadFrame(u8 *pdat)
+  222          // 描述: Lin主机发送完整帧函数。
+  223          // 参数: lid: Lin ID; *pdat: 发送数据缓冲区.
+  224          // 返回: none.
+  225          // 版本: VER1.0
+  226          // 日期: 2021-01-05
+  227          // 备注: 
+  228          //========================================================================
+  229          void LinReadFrame(u8 *pdat)
+  230          {
+  231   1        ResponseRxCmd();          //RX response
+  232   1        WaitLinReady();           //等待ready状态
+  233   1        GetLinError();            //读取清除错误寄存器
+  234   1      
+  235   1        LinReadMsg(pdat);         //接收Lin总线数据
+  236   1      }
+  237          
+  238          //========================================================================
+  239          // 函数: void LinSendFrame(u8 lid, u8 *pdat)
+  240          // 描述: Lin主机发送完整帧函数。
+  241          // 参数: lid: Lin ID; *pdat: 发送数据缓冲区.
+  242          // 返回: none.
+  243          // 版本: VER1.0
+  244          // 日期: 2021-01-05
+  245          // 备注: 
+  246          //========================================================================
+  247          void LinSendFrame(u8 lid, u8 *pdat)
+  248          {
+  249   1        LinSetID(lid);            //设置总线ID
+  250   1        LinSendMsg(pdat);
+  251   1      
+  252   1        SendHeadCmd();            //主模式 Send Seader
+  253   1        WaitLinReady();           //等待ready状态
+  254   1        GetLinError();            //读取清除错误寄存器
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 5   
+
+  255   1      
+  256   1        SendDatCmd();             //Send Data
+  257   1        WaitLinReady();           //等待ready状态
+  258   1        GetLinError();            //读取清除错误寄存器
+  259   1      }
+  260          
+  261          //========================================================================
+  262          // 函数: void LinSendHeaderRead(u8 lid, u8 *pdat)
+  263          // 描述: Lin主机发送Header，由从机发送应答数据，拼成一个完整的帧。
+  264          // 参数: lid: 发送应答从机的总线ID; *pdat: 接收数据缓冲区.
+  265          // 返回: none.
+  266          // 版本: VER1.0
+  267          // 日期: 2021-01-05
+  268          // 备注: 
+  269          //========================================================================
+  270          void LinSendHeaderRead(u8 lid, u8 *pdat)
+  271          {
+  272   1        LinSetID(lid);            //设置发送Response从机总线ID
+  273   1      
+  274   1        SendHeadCmd();            //主模式 send header
+  275   1        WaitLinReady();           //等待ready状态
+  276   1        GetLinError();            //读取清除错误寄存器
+  277   1        
+  278   1        ResponseRxCmd();          //RX response
+  279   1        WaitLinReady();           //等待ready状态
+  280   1        GetLinError();            //读取清除错误寄存器
+  281   1      
+  282   1        LinReadMsg(pdat);       //接收Lin总线从机发送的应答数据
+  283   1      }
+  284          
+  285          //========================================================================
+  286          // 函数: void LinSetBaudrate(u16 brt)
+  287          // 描述: Lin总线波特率设置函数。
+  288          // 参数: brt: 波特率.
+  289          // 返回: none.
+  290          // 版本: VER1.0
+  291          // 日期: 2021-01-05
+  292          // 备注: 
+  293          //========================================================================
+  294          void LinSetBaudrate(u16 brt)
+  295          {
+  296   1        u16 tmp;
+  297   1        tmp = (MAIN_Fosc >> 4) / brt;
+  298   1        LinWriteReg(DLH,(u8)(tmp>>8));
+  299   1        LinWriteReg(DLL,(u8)tmp);
+  300   1      }
+  301          
+  302          //========================================================================
+  303          // 函数: void LinSetHeadDelay(u8 base_ms, u8 prescaler)
+  304          // 描述: Lin总线设置帧头延时函数。
+  305          // 参数: base_ms:延时计数, prescaler:延时分频.
+  306          // 返回: none.
+  307          // 版本: VER1.0
+  308          // 日期: 2021-01-05
+  309          // 备注: 
+  310          //========================================================================
+  311          void LinSetHeadDelay(u8 base_ms, u8 prescaler)
+  312          {
+  313   1        u16 tmp;
+  314   1        tmp = (MAIN_Fosc * base_ms) / 1000;
+  315   1        LinWriteReg(HDRH,(u8)(tmp>>8));
+  316   1        LinWriteReg(HDRL,(u8)tmp);    //设置帧头延时计数
+  317   1      
+  318   1        LinWriteReg(HDP,prescaler);   //设置帧头延时分频
+  319   1      }
+  320          
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 6   
+
+  321          //========================================================================
+  322          // 函数: void LIN_Inilize(LIN_InitTypeDef *LIN)
+  323          // 描述: LIN 初始化程序.
+  324          // 参数: LIN: 结构参数,请参考LIN.h里的定义.
+  325          // 返回: none.
+  326          // 版本: V1.0, 2021-06-02
+  327          //========================================================================
+  328          void LIN_Inilize(LIN_InitTypeDef *LIN)
+  329          {
+  330   1        if(LIN->LIN_Enable == ENABLE) LINEN = 1;    //使能LIN模块
+  331   1        else                LINEN = 0;    //关闭LIN模块
+  332   1      
+  333   1        GetLinError();            //读取清除错误寄存器
+  334   1        LinWriteReg(LIE,LIN->LIN_IE);   //LIE中断使能寄存器
+  335   1        LinSetBaudrate(LIN->LIN_Baudrate);  //设置波特率
+  336   1        LinSetHeadDelay(LIN->LIN_HeadDelay,LIN->LIN_HeadPrescaler); //设置帧头延时
+  337   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       423     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------          2
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =    ------     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

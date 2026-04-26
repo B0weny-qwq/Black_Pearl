@@ -1,0 +1,624 @@
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_DMA_LCM
+OBJECT MODULE PLACED IN .\list\APP_DMA_LCM.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_DMA_LCM.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\U
+                    -ser;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\D
+                    -evice\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\A
+                    -PP_DMA_LCM.lst) TABS(2) OBJECT(.\list\APP_DMA_LCM.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include  "APP_DMA_LCM.h"
+    6          #include  "STC32G_GPIO.h"
+    7          #include  "STC32G_DMA.h"
+    8          #include  "STC32G_NVIC.h"
+    9          #include  "STC32G_LCM.h"
+   10          #include  "STC32G_Delay.h"
+   11          #include  "font.h"
+   12          
+   13          /*************  功能说明  **************
+   14          
+   15          LCM接口+DMA驱动液晶屏程序
+   16          
+   17          8bit I8080模式, P6口接数据口
+   18          
+   19          sbit LCD_RS = P4^5;      //数据/命令切换
+   20          sbit LCD_WR = P4^2;      //写控制
+   21          sbit LCD_RD = P4^4;      //读控制
+   22          sbit LCD_CS = P3^4;      //片选
+   23          sbit LCD_RESET = P4^3;   //复位
+   24          
+   25          LCM指令通过中断方式等待发送完成
+   26          
+   27          DMA设置长度2048字节，通过中断方式判断传输完成
+   28          
+   29          下载时, 选择时钟 24MHz (可以在配置文件"config.h"中修改).
+   30          
+   31          ******************************************/
+   32          
+   33          
+   34          //========================================================================
+   35          //                               本地常量声明 
+   36          //========================================================================
+   37          
+   38          //支持横竖屏快速定义切换
+   39          #define USE_HORIZONTAL      0   //定义液晶屏顺时针旋转方向  0-0度旋转，1-90度旋转，2-1
+             -80度旋转，3-270度旋转
+   40          
+   41          //画笔颜色
+   42          #define WHITE            0xFFFF
+   43          #define BLACK            0x0000   
+   44          #define BLUE             0x001F  
+   45          #define BRED             0XF81F
+   46          #define GRED             0XFFE0
+   47          #define GBLUE            0X07FF
+   48          #define RED              0xF800
+   49          #define MAGENTA          0xF81F
+   50          #define GREEN            0x07E0
+   51          #define CYAN             0x7FFF
+   52          #define YELLOW           0xFFE0
+   53          #define BROWN            0XBC40 //棕色
+   54          #define BRRED            0XFC07 //棕红色
+   55          #define GRAY             0X8430 //灰色
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 2   
+
+   56          
+   57          #define DMA_AMT_LEN  2047  //n+1, 不要超过芯片 xdata 空间上限
+   58          
+   59          //========================================================================
+   60          //                               本地变量声明
+   61          //========================================================================
+   62          
+   63          //定义LCD的尺寸
+   64          #define LCD_W 240     //LCD 宽度
+   65          #define LCD_H 320     //LCD 高度
+   66          
+   67          u16 POINT_COLOR=0x0000; //画笔颜色
+   68          
+   69          u16 xdata Buffer[8]={0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88};
+   70          u16 xdata Color[DMA_AMT_LEN+1];
+   71          
+   72          typedef struct  
+   73          {                       
+   74            u16 width;      //LCD 宽度
+   75            u16 height;     //LCD 高度
+   76            u16 id;       //LCD ID
+   77            u8  dir;      //横屏还是竖屏控制：0，竖屏；1，横屏。 
+   78            u8 wramcmd;   //开始写gram指令
+   79            u8 rramcmd;   //开始读gram指令
+   80            u8 setxcmd;   //设置x坐标指令
+   81            u8 setycmd;   //设置y坐标指令  
+   82          }_lcd_dev;  
+   83          
+   84          _lcd_dev lcddev;
+   85          
+   86          //========================================================================
+   87          //                               本地函数声明
+   88          //========================================================================
+   89          
+   90          void Test_Color(void);
+   91          void LCD_WR_DATA_16Bit(u16 Data);
+   92          void LCD_SetWindows(u16 xStar, u16 yStar,u16 xEnd,u16 yEnd);
+   93          void Show_Str(u16 x, u16 y, u16 fc, u16 bc, u8 *str,u8 size,u8 mode);
+   94          void LCD_Init(void);
+   95          
+   96          //========================================================================
+   97          //                            外部函数和变量声明
+   98          //========================================================================
+   99          
+  100          
+  101          //========================================================================
+  102          // 函数: DMA_LCM_init
+  103          // 描述: 用户初始化程序.
+  104          // 参数: None.
+  105          // 返回: None.
+  106          // 版本: V1.0, 2020-09-28
+  107          //========================================================================
+  108          void DMA_LCM_init(void)
+  109          {
+  110   1        LCM_InitTypeDef   LCM_InitStructure;    //结构定义
+  111   1        DMA_LCM_InitTypeDef   DMA_LCM_InitStructure;    //结构定义
+  112   1      
+  113   1        //----------------------------------------------
+  114   1        P6_MODE_OUT_PP(GPIO_Pin_All);   //P6 设置成推挽输出
+  115   1        P3_MODE_OUT_PP(GPIO_Pin_4);     //P3.4口设置成推挽输出
+  116   1        P4_MODE_OUT_PP(GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5);  //P4.2~P4.5 设置成推挽输出
+  117   1        
+  118   1        //----------------------------------------------
+  119   1        LCM_InitStructure.LCM_Enable = ENABLE;      //LCM接口使能   ENABLE,DISABLE
+  120   1        LCM_InitStructure.LCM_Mode = MODE_I8080;    //LCM接口模式   MODE_I8080,MODE_M6800
+  121   1        LCM_InitStructure.LCM_Bit_Wide = BIT_WIDE_8;  //LCM数据宽度   BIT_WIDE_8,BIT_WIDE_16
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 3   
+
+  122   1        LCM_InitStructure.LCM_Setup_Time = 2;     //LCM通信数据建立时间   0~7
+  123   1        LCM_InitStructure.LCM_Hold_Time = 1;      //LCM通信数据保持时间   0~3
+  124   1        LCM_Inilize(&LCM_InitStructure);    //初始化
+  125   1        NVIC_LCM_Init(ENABLE,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低到高) Priority_0,Prior
+             -ity_1,Priority_2,Priority_3
+  126   1      
+  127   1        //----------------------------------------------
+  128   1        DMA_LCM_InitStructure.DMA_Enable = ENABLE;      //DMA使能   ENABLE,DISABLE
+  129   1        DMA_LCM_InitStructure.DMA_Length = DMA_AMT_LEN;     //DMA传输总字节数   (0~65535) + 1, 不要超�
+             -�芯片 xdata 空间上限
+  130   1        DMA_LCM_InitStructure.DMA_Tx_Buffer = (u16)Color; //发送数据存储地址
+  131   1        DMA_LCM_InitStructure.DMA_Rx_Buffer = (u16)Buffer;  //接收数据存储地址
+  132   1        DMA_LCM_Inilize(&DMA_LCM_InitStructure);    //初始化
+  133   1        NVIC_DMA_LCM_Init(ENABLE,Priority_0,Priority_0);  //中断使能, ENABLE/DISABLE; 优先级(低到高) Pr
+             -iority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
+  134   1      
+  135   1        LCD_Init();
+  136   1      }
+  137          
+  138          //========================================================================
+  139          // 函数: Sample_DMA_LCM
+  140          // 描述: 用户应用程序.
+  141          // 参数: None.
+  142          // 返回: None.
+  143          // 版本: V1.0, 2020-09-24
+  144          //========================================================================
+  145          void Sample_DMA_LCM(void)
+  146          {
+  147   1        Test_Color();
+  148   1      }
+  149          
+  150          void LCD_Fill(u16 sx,u16 sy,u16 ex,u16 ey,u16 color)
+  151          {   
+  152   1        u16 i,j;      
+  153   1        u16 width=ex-sx+1;    //得到填充的宽度
+  154   1        u16 height=ey-sy+1;   //高度
+  155   1        LCD_SetWindows(sx,sy,ex,ey);//设置显示窗口
+  156   1      
+  157   1        for(j=0,i=0;i<=DMA_AMT_LEN;i++)
+  158   1        {
+  159   2          Color[i] = color;
+  160   2        }
+  161   1        LCM_Cnt = 75;     //(320 * 240 * 2) / 2048 = 75
+  162   1        LCD_CS=0;
+  163   1        DMA_LCM_TRIG_WD();  //Write dat
+  164   1        while(!LCD_CS);
+  165   1      }
+  166          
+  167          void Test_Color(void)
+  168          {
+  169   1        LCD_Fill(0,0,lcddev.width,lcddev.height,WHITE);
+  170   1        Show_Str(20,30,BLUE,YELLOW,"LCM Test",16,1);delay_ms(800);
+  171   1        LCD_Fill(0,0,lcddev.width,lcddev.height,RED);
+  172   1        Show_Str(20,30,BLUE,YELLOW,"RED ",16,1);delay_ms(800);
+  173   1        LCD_Fill(0,0,lcddev.width,lcddev.height,GREEN);
+  174   1        Show_Str(20,30,BLUE,YELLOW,"GREEN ",16,1);delay_ms(800);
+  175   1        LCD_Fill(0,0,lcddev.width,lcddev.height,BLUE);
+  176   1        Show_Str(20,30,RED,YELLOW,"BLUE ",16,1);delay_ms(800);
+  177   1      }
+  178          
+  179          /*****************************************************************************
+  180           * @name       :void LCD_WR_REG(u8 Reg) 
+  181           * @date       :2018-08-09 
+  182           * @function   :Write an 16-bit command to the LCD screen
+  183           * @parameters :data:Command value to be written
+  184           * @retvalue   :None
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 4   
+
+  185          ******************************************************************************/
+  186          void LCD_WR_REG(u8 Reg)  
+  187          {
+  188   1        LCMIFDATL = Reg;
+  189   1        LCD_CS=0;
+  190   1        LCMIFCR = 0x84;   //Enable interface, write command out
+  191   1        while(LcmFlag);
+  192   1        LCD_CS = 1 ;
+  193   1      } 
+  194          
+  195          /*****************************************************************************
+  196           * @name       :void LCD_WR_DATA(u8 Data)
+  197           * @date       :2018-08-09 
+  198           * @function   :Write an 16-bit data to the LCD screen
+  199           * @parameters :data:data value to be written
+  200           * @retvalue   :None
+  201          ******************************************************************************/
+  202          void LCD_WR_DATA(u8 Data)
+  203          {
+  204   1        LCMIFDATL = Data;
+  205   1        LCD_CS=0;
+  206   1        LCMIFCR = 0x85;   //Enable interface, write data out
+  207   1        while(LcmFlag);
+  208   1        LCD_CS = 1 ;
+  209   1      }
+  210          
+  211          /*****************************************************************************
+  212           * @name       :void LCD_WR_DATA_16Bit(u16 Data)
+  213           * @date       :2018-08-09 
+  214           * @function   :Write an 16-bit command to the LCD screen
+  215           * @parameters :Data:Data to be written
+  216           * @retvalue   :None
+  217          ******************************************************************************/  
+  218          void LCD_WR_DATA_16Bit(u16 Data)
+  219          {
+  220   1        LCD_WR_DATA((u8)(Data>>8));
+  221   1        LCD_WR_DATA((u8)Data);
+  222   1      }
+  223          
+  224          /*****************************************************************************
+  225           * @name       :void LCD_WriteReg(u8 LCD_Reg, u8 LCD_RegValue)
+  226           * @date       :2018-08-09 
+  227           * @function   :Write data into registers
+  228           * @parameters :LCD_Reg:Register address
+  229                          LCD_RegValue:Data to be written
+  230           * @retvalue   :None
+  231          ******************************************************************************/
+  232          void LCD_WriteReg(u8 LCD_Reg, u8 LCD_RegValue)
+  233          {
+  234   1          LCD_WR_REG(LCD_Reg);
+  235   1          LCD_WR_DATA(LCD_RegValue);
+  236   1      }
+  237          
+  238          /*****************************************************************************
+  239           * @name       :void LCD_WriteRAM_Prepare(void)
+  240           * @date       :2018-08-09 
+  241           * @function   :Write GRAM
+  242           * @parameters :None
+  243           * @retvalue   :None
+  244          ******************************************************************************/ 
+  245          void LCD_WriteRAM_Prepare(void)
+  246          {
+  247   1        LCD_WR_REG(lcddev.wramcmd);   
+  248   1      }
+  249          
+  250          /*****************************************************************************
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 5   
+
+  251           * @name       :void LCD_DrawPoint(u16 x,u16 y)
+  252           * @date       :2018-08-09 
+  253           * @function   :Write a pixel data at a specified location
+  254           * @parameters :x:the x coordinate of the pixel
+  255                          y:the y coordinate of the pixel
+  256           * @retvalue   :None
+  257          ******************************************************************************/ 
+  258          void LCD_DrawPoint(u16 x,u16 y)
+  259          {
+  260   1        LCD_SetWindows(x,y,x,y);//设置光标位置 
+  261   1        LCD_WR_DATA_16Bit(POINT_COLOR);       
+  262   1      }    
+  263          
+  264          /*****************************************************************************
+  265           * @name       :void LCDReset(void)
+  266           * @date       :2018-08-09 
+  267           * @function   :Reset LCD screen
+  268           * @parameters :None
+  269           * @retvalue   :None
+  270          ******************************************************************************/ 
+  271          void LCDReset(void)
+  272          {
+  273   1        LCD_CS=1;
+  274   1        delay_ms(50); 
+  275   1        LCD_RESET=0;
+  276   1        delay_ms(150);
+  277   1        LCD_RESET=1;
+  278   1        delay_ms(50);
+  279   1      }
+  280          
+  281          /*****************************************************************************
+  282           * @name       :void LCD_direction(u8 direction)
+  283           * @date       :2018-08-09 
+  284           * @function   :Setting the display direction of LCD screen
+  285           * @parameters :direction:0-0 degree
+  286                                    1-90 degree
+  287                                    2-180 degree
+  288                                    3-270 degree
+  289           * @retvalue   :None
+  290          ******************************************************************************/ 
+  291          void LCD_direction(u8 direction)
+  292          { 
+  293   1          lcddev.setxcmd=0x2A;
+  294   1          lcddev.setycmd=0x2B;
+  295   1          lcddev.wramcmd=0x2C;
+  296   1          lcddev.rramcmd=0x2E;
+  297   1        switch(direction){
+  298   2          case 0:
+  299   2            lcddev.width=LCD_W;
+  300   2            lcddev.height=LCD_H;
+  301   2            LCD_WriteReg(0x36,(1<<3));
+  302   2          break;
+  303   2          case 1:
+  304   2            lcddev.width=LCD_H;
+  305   2            lcddev.height=LCD_W;
+  306   2            LCD_WriteReg(0x36,(1<<3)|(1<<7)|(1<<5)|(1<<4));
+  307   2          break;
+  308   2          case 2:
+  309   2            lcddev.width=LCD_W;
+  310   2            lcddev.height=LCD_H;  
+  311   2            LCD_WriteReg(0x36,(1<<3)|(1<<4)|(1<<6)|(1<<7));
+  312   2          break;
+  313   2          case 3:
+  314   2            lcddev.width=LCD_H;
+  315   2            lcddev.height=LCD_W;
+  316   2            LCD_WriteReg(0x36,(1<<3)|(1<<5)|(1<<6));
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 6   
+
+  317   2          break;  
+  318   2          default:break;
+  319   2        }
+  320   1      }
+  321          
+  322          /*****************************************************************************
+  323           * @name       :void LCD_Init(void)
+  324           * @date       :2018-08-09 
+  325           * @function   :Initialization LCD screen
+  326           * @parameters :None
+  327           * @retvalue   :None
+  328          ******************************************************************************/    
+  329          void LCD_Init(void)
+  330          {
+  331   1        LCDReset(); //初始化之前复位
+  332   1      //  delay_ms(150);                     //根据不同晶振速度可以调整延时，保障稳定显示
+  333   1      //*************2.4inch ILI9341初始化**********// 
+  334   1        LCD_WR_REG(0xCF);  
+  335   1        LCD_WR_DATA(0x00); 
+  336   1        LCD_WR_DATA(0xD9); //0xC1 
+  337   1        LCD_WR_DATA(0X30); 
+  338   1        LCD_WR_REG(0xED);  
+  339   1        LCD_WR_DATA(0x64); 
+  340   1        LCD_WR_DATA(0x03); 
+  341   1        LCD_WR_DATA(0X12); 
+  342   1        LCD_WR_DATA(0X81); 
+  343   1        LCD_WR_REG(0xE8);  
+  344   1        LCD_WR_DATA(0x85); 
+  345   1        LCD_WR_DATA(0x10); 
+  346   1        LCD_WR_DATA(0x7A); 
+  347   1        LCD_WR_REG(0xCB);  
+  348   1        LCD_WR_DATA(0x39); 
+  349   1        LCD_WR_DATA(0x2C); 
+  350   1        LCD_WR_DATA(0x00); 
+  351   1        LCD_WR_DATA(0x34); 
+  352   1        LCD_WR_DATA(0x02); 
+  353   1        LCD_WR_REG(0xF7);  
+  354   1        LCD_WR_DATA(0x20); 
+  355   1        LCD_WR_REG(0xEA);  
+  356   1        LCD_WR_DATA(0x00); 
+  357   1        LCD_WR_DATA(0x00); 
+  358   1        LCD_WR_REG(0xC0);    //Power control 
+  359   1        LCD_WR_DATA(0x1B);   //VRH[5:0] 
+  360   1        LCD_WR_REG(0xC1);    //Power control 
+  361   1        LCD_WR_DATA(0x12);   //SAP[2:0];BT[3:0] 0x01
+  362   1        LCD_WR_REG(0xC5);    //VCM control 
+  363   1        LCD_WR_DATA(0x08);   //30
+  364   1        LCD_WR_DATA(0x26);   //30
+  365   1        LCD_WR_REG(0xC7);    //VCM control2 
+  366   1        LCD_WR_DATA(0XB7); 
+  367   1        LCD_WR_REG(0x36);    // Memory Access Control 
+  368   1        LCD_WR_DATA(0x08);
+  369   1        LCD_WR_REG(0x3A);   
+  370   1        LCD_WR_DATA(0x55); 
+  371   1        LCD_WR_REG(0xB1);   
+  372   1        LCD_WR_DATA(0x00);   
+  373   1        LCD_WR_DATA(0x1A); 
+  374   1        LCD_WR_REG(0xB6);    // Display Function Control 
+  375   1        LCD_WR_DATA(0x0A); 
+  376   1        LCD_WR_DATA(0xA2); 
+  377   1        LCD_WR_REG(0xF2);    // 3Gamma Function Disable 
+  378   1        LCD_WR_DATA(0x00); 
+  379   1        LCD_WR_REG(0x26);    //Gamma curve selected 
+  380   1        LCD_WR_DATA(0x01); 
+  381   1        LCD_WR_REG(0xE0);    //Set Gamma 
+  382   1        LCD_WR_DATA(0x0F); 
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 7   
+
+  383   1        LCD_WR_DATA(0x1D); 
+  384   1        LCD_WR_DATA(0x1A); 
+  385   1        LCD_WR_DATA(0x0A); 
+  386   1        LCD_WR_DATA(0x0D); 
+  387   1        LCD_WR_DATA(0x07); 
+  388   1        LCD_WR_DATA(0x49); 
+  389   1        LCD_WR_DATA(0X66); 
+  390   1        LCD_WR_DATA(0x3B); 
+  391   1        LCD_WR_DATA(0x07); 
+  392   1        LCD_WR_DATA(0x11); 
+  393   1        LCD_WR_DATA(0x01); 
+  394   1        LCD_WR_DATA(0x09); 
+  395   1        LCD_WR_DATA(0x05); 
+  396   1        LCD_WR_DATA(0x04);     
+  397   1        LCD_WR_REG(0XE1);    //Set Gamma 
+  398   1        LCD_WR_DATA(0x00); 
+  399   1        LCD_WR_DATA(0x18); 
+  400   1        LCD_WR_DATA(0x1D); 
+  401   1        LCD_WR_DATA(0x02); 
+  402   1        LCD_WR_DATA(0x0F); 
+  403   1        LCD_WR_DATA(0x04); 
+  404   1        LCD_WR_DATA(0x36); 
+  405   1        LCD_WR_DATA(0x13); 
+  406   1        LCD_WR_DATA(0x4C); 
+  407   1        LCD_WR_DATA(0x07); 
+  408   1        LCD_WR_DATA(0x13); 
+  409   1        LCD_WR_DATA(0x0F); 
+  410   1        LCD_WR_DATA(0x2E); 
+  411   1        LCD_WR_DATA(0x2F); 
+  412   1        LCD_WR_DATA(0x05); 
+  413   1        LCD_WR_REG(0x2B); 
+  414   1        LCD_WR_DATA(0x00);
+  415   1        LCD_WR_DATA(0x00);
+  416   1        LCD_WR_DATA(0x01);
+  417   1        LCD_WR_DATA(0x3f);
+  418   1        LCD_WR_REG(0x2A); 
+  419   1        LCD_WR_DATA(0x00);
+  420   1        LCD_WR_DATA(0x00);
+  421   1        LCD_WR_DATA(0x00);
+  422   1        LCD_WR_DATA(0xef);   
+  423   1        LCD_WR_REG(0x11); //Exit Sleep
+  424   1        delay_ms(120);
+  425   1        LCD_WR_REG(0x29); //display on  
+  426   1      
+  427   1        //设置LCD属性参数
+  428   1        LCD_direction(USE_HORIZONTAL);//设置LCD显示方向 
+  429   1      }
+  430          
+  431          void LCD_SetWindows(u16 xStar, u16 yStar,u16 xEnd,u16 yEnd)
+  432          { 
+  433   1        LCD_WR_REG(lcddev.setxcmd); 
+  434   1        LCD_WR_DATA((u8)(xStar>>8));
+  435   1        LCD_WR_DATA(0x00FF&xStar);    
+  436   1        LCD_WR_DATA((u8)(xEnd>>8));
+  437   1        LCD_WR_DATA(0x00FF&xEnd);
+  438   1      
+  439   1        LCD_WR_REG(lcddev.setycmd); 
+  440   1        LCD_WR_DATA((u8)(yStar>>8));
+  441   1        LCD_WR_DATA(0x00FF&yStar);    
+  442   1        LCD_WR_DATA((u8)(yEnd>>8));
+  443   1        LCD_WR_DATA(0x00FF&yEnd); 
+  444   1      
+  445   1        LCD_WriteRAM_Prepare(); //开始写入GRAM        
+  446   1      }
+  447          
+  448          /*****************************************************************************
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 8   
+
+  449           * @name       :void LCD_ShowChar(u16 x,u16 y,u16 fc, u16 bc, u8 num,u8 size,u8 mode)
+  450           * @date       :2018-08-09 
+  451           * @function   :Display a single English character
+  452           * @parameters :x:the beginning x coordinate of the Character display position
+  453                          y:the beginning y coordinate of the Character display position
+  454                          fc:the color value of display character
+  455                          bc:the background color of display character
+  456                          num:the ascii code of display character(0~94)
+  457                          size:the size of display character
+  458                          mode:0-no overlying,1-overlying
+  459           * @retvalue   :None
+  460          ******************************************************************************/ 
+  461          void LCD_ShowChar(u16 x,u16 y,u16 fc, u16 bc, u8 num,u8 size,u8 mode)
+  462          {
+  463   1        u8 temp;
+  464   1        u8 pos,t;
+  465   1        u16 colortemp=POINT_COLOR;
+  466   1      
+  467   1        num=num-' ';//得到偏移后的值
+  468   1        LCD_SetWindows(x,y,x+size/2-1,y+size-1);//设置单个文字显示窗口
+  469   1        if(!mode) //非叠加方式
+  470   1        {
+  471   2          for(pos=0;pos<size;pos++)
+  472   2          {
+  473   3            if(size==12)temp=asc2_1206[num][pos];//调用1206字体
+  474   3            else temp=asc2_1608[num][pos];     //调用1608字体
+  475   3            for(t=0;t<size/2;t++)
+  476   3            {
+  477   4              if(temp&0x01)LCD_WR_DATA_16Bit(fc); 
+  478   4              else LCD_WR_DATA_16Bit(bc); 
+  479   4              temp>>=1; 
+  480   4            }
+  481   3          }
+  482   2        }
+  483   1        else//叠加方式
+  484   1        {
+  485   2          for(pos=0;pos<size;pos++)
+  486   2          {
+  487   3            if(size==12)temp=asc2_1206[num][pos];//调用1206字体
+  488   3            else temp=asc2_1608[num][pos];     //调用1608字体
+  489   3            for(t=0;t<size/2;t++)
+  490   3            {
+  491   4              POINT_COLOR=fc;
+  492   4              if(temp&0x01) LCD_DrawPoint(x+t,y+pos);//画一个点
+  493   4              temp>>=1;
+  494   4            }
+  495   3          }
+  496   2        }
+  497   1        POINT_COLOR=colortemp;  
+  498   1        LCD_SetWindows(0,0,LCD_W-1,LCD_H-1);//恢复窗口为全屏             
+  499   1      }
+  500          
+  501          /*****************************************************************************
+  502           * @name       :void Show_Str(u16 x, u16 y, u16 fc, u16 bc, u8 *str,u8 size,u8 mode)
+  503           * @date       :2018-08-09 
+  504           * @function   :Display Chinese and English strings
+  505           * @parameters :x:the beginning x coordinate of the Chinese and English strings
+  506                          y:the beginning y coordinate of the Chinese and English strings
+  507                          fc:the color value of Chinese and English strings
+  508                          bc:the background color of Chinese and English strings
+  509                          str:the start address of the Chinese and English strings
+  510                          size:the size of Chinese and English strings
+  511                          mode:0-no overlying,1-overlying
+  512           * @retvalue   :None
+  513          ******************************************************************************/          
+  514          void Show_Str(u16 x, u16 y, u16 fc, u16 bc, u8 *str,u8 size,u8 mode)
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 9   
+
+  515          {         
+  516   1        u16 x0=x;                   
+  517   1        u8 bHz=0;     //字符或者中文 
+  518   1        while(*str!=0)//数据未结束
+  519   1        { 
+  520   2          if(!bHz)
+  521   2          {
+  522   3            if(x>(LCD_W-size/2)||y>(LCD_H-size)) 
+  523   3            return;
+  524   3            if(*str>0x80) bHz=1;//中文 
+  525   3            else              //字符
+  526   3            {
+  527   4              if(*str==0x0D)//换行符号
+  528   4              {
+  529   5                y+=size;
+  530   5                x=x0;
+  531   5                str++;
+  532   5              }
+  533   4              else
+  534   4              {
+  535   5                if(size>16)//字库中没有集成12X24 16X32的英文字体,用8X16代替
+  536   5                {  
+  537   6                  LCD_ShowChar(x,y,fc,bc,*str,16,mode);
+  538   6                  x+=8; //字符,为全字的一半 
+  539   6                }
+  540   5                else
+  541   5                {
+  542   6                  LCD_ShowChar(x,y,fc,bc,*str,size,mode);
+  543   6                  x+=size/2; //字符,为全字的一半 
+  544   6                }
+  545   5              }
+  546   4              str++;
+  547   4            }
+  548   3          }
+  549   2          else//中文
+  550   2          {
+  551   3      //      if(x>(lcddev.width-size)||y>(lcddev.height-size))
+  552   3      //      return;
+  553   3      //      bHz=0;//有汉字库
+  554   3      //      if(size==32)
+  555   3      //      GUI_DrawFont32(x,y,fc,bc,str,mode);
+  556   3      //      else if(size==24)
+  557   3      //      GUI_DrawFont24(x,y,fc,bc,str,mode);
+  558   3      //      else
+  559   3      //      GUI_DrawFont16(x,y,fc,bc,str,mode);
+  560   3      
+  561   3            str+=2;
+  562   3            x+=size;//下一个汉字偏移
+  563   3          }
+  564   2        }
+  565   1      }
+  566          
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      4591     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =      4112     ------
+  xdata-const size     =    ------     ------
+  edata size           =        13         43
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 10  
+
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        54     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

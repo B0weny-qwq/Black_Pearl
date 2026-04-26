@@ -1,0 +1,242 @@
+C251 COMPILER V5.60.0,  Motor                                                              27/04/26  00:55:24  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE Motor
+OBJECT MODULE PLACED IN .\list\Motor.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\MOTOR\Motor.c XSMALL INTR2 BROWSE INCDIR(..\Driv
+                    -er\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Co
+                    -de_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRI
+                    -NT(.\list\Motor.lst) TABS(2) OBJECT(.\list\Motor.obj) 
+
+stmt  level    source
+
+    1          /**
+    2           * @file    Motor.c
+    3           * @brief   Dual DC motor PWM driver for PWMA3/PWMA4 complementary outputs.
+    4           * @author  boweny
+    5           * @date    2026-04-27
+    6           * @version v1.0
+    7           */
+    8          
+    9          #include "Motor.h"
+   10          #include "..\..\..\Driver\inc\STC32G_PWM.h"
+   11          #include "..\..\..\Driver\inc\STC32G_GPIO.h"
+   12          #include "..\..\..\Driver\inc\STC32G_NVIC.h"
+   13          
+   14          static PWMx_Duty g_motor_pwm_duty;
+   15          static int16 g_left_speed = 0;
+   16          static int16 g_right_speed = 0;
+   17          
+   18          static u16 Motor_AbsSpeedToDuty(int16 speed)
+   19          {
+   20   1          u16 abs_speed;
+   21   1      
+   22   1          if (speed < 0) {
+   23   2              if (speed < -MOTOR_SPEED_MAX) {
+   24   3                  speed = -MOTOR_SPEED_MAX;
+   25   3              }
+   26   2              abs_speed = (u16)(-speed);
+   27   2          } else {
+   28   2              if (speed > MOTOR_SPEED_MAX) {
+   29   3                  speed = MOTOR_SPEED_MAX;
+   30   3              }
+   31   2              abs_speed = (u16)speed;
+   32   2          }
+   33   1      
+   34   1          return (u16)(((u32)abs_speed * MOTOR_PWM_PERIOD) / MOTOR_SPEED_MAX);
+   35   1      }
+   36          
+   37          static int16 Motor_LimitSpeed(int16 speed)
+   38          {
+   39   1          if (speed > MOTOR_SPEED_MAX) {
+   40   2              return MOTOR_SPEED_MAX;
+   41   2          }
+   42   1          if (speed < -MOTOR_SPEED_MAX) {
+   43   2              return -MOTOR_SPEED_MAX;
+   44   2          }
+   45   1          return speed;
+   46   1      }
+   47          
+   48          static void Motor_LeftOutputEnable(u8 enable)
+   49          {
+   50   1          if (enable) {
+   51   2              PWMA_CC3E_Enable();
+   52   2              PWMA_CC3NE_Enable();
+   53   2              PWMA_ENO |= (ENO3P | ENO3N);
+   54   2          } else {
+   55   2              PWMA_ENO &= (u8)~(ENO3P | ENO3N);
+   56   2              PWMA_CC3E_Disable();
+C251 COMPILER V5.60.0,  Motor                                                              27/04/26  00:55:24  PAGE 2   
+
+   57   2              PWMA_CC3NE_Disable();
+   58   2          }
+   59   1      }
+   60          
+   61          static void Motor_RightOutputEnable(u8 enable)
+   62          {
+   63   1          if (enable) {
+   64   2              PWMA_CC4E_Enable();
+   65   2              PWMA_CC4NE_Enable();
+   66   2              PWMA_ENO |= (ENO4P | ENO4N);
+   67   2          } else {
+   68   2              PWMA_ENO &= (u8)~(ENO4P | ENO4N);
+   69   2              PWMA_CC4E_Disable();
+   70   2              PWMA_CC4NE_Disable();
+   71   2          }
+   72   1      }
+   73          
+   74          static void Motor_LeftSetForwardPolarity(u8 forward)
+   75          {
+   76   1          if (forward) {
+   77   2              PWMA_CC3P_HighValid();
+   78   2              PWMA_CC3NP_LowValid();
+   79   2          } else {
+   80   2              PWMA_CC3P_LowValid();
+   81   2              PWMA_CC3NP_HighValid();
+   82   2          }
+   83   1      }
+   84          
+   85          static void Motor_RightSetForwardPolarity(u8 forward)
+   86          {
+   87   1          if (forward) {
+   88   2              PWMA_CC4P_HighValid();
+   89   2              PWMA_CC4NP_LowValid();
+   90   2          } else {
+   91   2              PWMA_CC4P_LowValid();
+   92   2              PWMA_CC4NP_HighValid();
+   93   2          }
+   94   1      }
+   95          
+   96          void Motor_Init(void)
+   97          {
+   98   1          PWMx_InitDefine pwm_init;
+   99   1      
+  100   1          P2_MODE_IO_PU(GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7);
+  101   1          PWM3_USE_P24P25();
+  102   1          PWM4_USE_P26P27();
+  103   1      
+  104   1          g_motor_pwm_duty.PWM1_Duty = 0;
+  105   1          g_motor_pwm_duty.PWM2_Duty = 0;
+  106   1          g_motor_pwm_duty.PWM3_Duty = 0;
+  107   1          g_motor_pwm_duty.PWM4_Duty = 0;
+  108   1      
+  109   1          pwm_init.PWM_Mode = CCMRn_PWM_MODE1;
+  110   1          pwm_init.PWM_Duty = 0;
+  111   1          pwm_init.PWM_EnoSelect = 0;
+  112   1          PWM_Configuration(PWM3, &pwm_init);
+  113   1          PWM_Configuration(PWM4, &pwm_init);
+  114   1      
+  115   1          pwm_init.PWM_Period = MOTOR_PWM_PERIOD;
+  116   1          pwm_init.PWM_DeadTime = MOTOR_DEFAULT_DEADTIME;
+  117   1          pwm_init.PWM_MainOutEnable = ENABLE;
+  118   1          pwm_init.PWM_CEN_Enable = ENABLE;
+  119   1          PWM_Configuration(PWMA, &pwm_init);
+  120   1      
+  121   1          PWMA_OC3_OUT_0();
+  122   1          PWMA_OC3N_OUT_0();
+C251 COMPILER V5.60.0,  Motor                                                              27/04/26  00:55:24  PAGE 3   
+
+  123   1          PWMA_OC4_OUT_0();
+  124   1          PWMA_OC4N_OUT_0();
+  125   1      
+  126   1          Motor_LeftSetForwardPolarity(1);
+  127   1          Motor_RightSetForwardPolarity(1);
+  128   1          Motor_StopAll();
+  129   1      
+  130   1          NVIC_PWM_Init(PWMA, DISABLE, Priority_0);
+  131   1      }
+  132          
+  133          void Motor_SetSpeed(Motor_Id_t motor, int16 speed)
+  134          {
+  135   1          u16 duty;
+  136   1      
+  137   1          speed = Motor_LimitSpeed(speed);
+  138   1          duty = Motor_AbsSpeedToDuty(speed);
+  139   1      
+  140   1          if (motor == MOTOR_LEFT) {
+  141   2              if (speed == 0) {
+  142   3                  Motor_Stop(MOTOR_LEFT);
+  143   3                  return;
+  144   3              }
+  145   2      
+  146   2              Motor_LeftOutputEnable(0);
+  147   2              Motor_LeftSetForwardPolarity((u8)(speed > 0));
+  148   2              g_motor_pwm_duty.PWM3_Duty = duty;
+  149   2              UpdatePwm(PWM3, &g_motor_pwm_duty);
+  150   2              Motor_LeftOutputEnable(1);
+  151   2              g_left_speed = speed;
+  152   2          } else {
+  153   2              if (speed == 0) {
+  154   3                  Motor_Stop(MOTOR_RIGHT);
+  155   3                  return;
+  156   3              }
+  157   2      
+  158   2              Motor_RightOutputEnable(0);
+  159   2              Motor_RightSetForwardPolarity((u8)(speed > 0));
+  160   2              g_motor_pwm_duty.PWM4_Duty = duty;
+  161   2              UpdatePwm(PWM4, &g_motor_pwm_duty);
+  162   2              Motor_RightOutputEnable(1);
+  163   2              g_right_speed = speed;
+  164   2          }
+  165   1      }
+  166          
+  167          void Motor_SetBothSpeed(int16 left_speed, int16 right_speed)
+  168          {
+  169   1          Motor_SetSpeed(MOTOR_LEFT, left_speed);
+  170   1          Motor_SetSpeed(MOTOR_RIGHT, right_speed);
+  171   1      }
+  172          
+  173          void Motor_Stop(Motor_Id_t motor)
+  174          {
+  175   1          if (motor == MOTOR_LEFT) {
+  176   2              Motor_LeftOutputEnable(0);
+  177   2              g_motor_pwm_duty.PWM3_Duty = 0;
+  178   2              UpdatePwm(PWM3, &g_motor_pwm_duty);
+  179   2              g_left_speed = 0;
+  180   2          } else {
+  181   2              Motor_RightOutputEnable(0);
+  182   2              g_motor_pwm_duty.PWM4_Duty = 0;
+  183   2              UpdatePwm(PWM4, &g_motor_pwm_duty);
+  184   2              g_right_speed = 0;
+  185   2          }
+  186   1      }
+  187          
+  188          void Motor_StopAll(void)
+C251 COMPILER V5.60.0,  Motor                                                              27/04/26  00:55:24  PAGE 4   
+
+  189          {
+  190   1          Motor_Stop(MOTOR_LEFT);
+  191   1          Motor_Stop(MOTOR_RIGHT);
+  192   1      }
+  193          
+  194          int16 Motor_GetSpeed(Motor_Id_t motor)
+  195          {
+  196   1          if (motor == MOTOR_LEFT) {
+  197   2              return g_left_speed;
+  198   2          }
+  199   1          return g_right_speed;
+  200   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       756     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =        20         11
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        12     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

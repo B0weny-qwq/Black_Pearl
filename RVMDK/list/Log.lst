@@ -1,0 +1,267 @@
+C251 COMPILER V5.60.0,  Log                                                                27/04/26  00:55:24  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE Log
+OBJECT MODULE PLACED IN .\list\Log.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Function\Log\Log.c XSMALL INTR2 BROWSE INCDIR(..\Driver
+                    -\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code
+                    -_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT
+                    -(.\list\Log.lst) TABS(2) OBJECT(.\list\Log.obj) 
+
+stmt  level    source
+
+    1          /**
+    2           * @file    Log.c
+    3           * @brief   轻量级 UART1 日志输出模块实现
+    4           * @author  boweny
+    5           * @date    2026-04-22
+    6           * @version v1.0
+    7           *
+    8           * @details
+    9           * - 基于 UART1 的轻量级日志输出，提供带标签、分级别的日志功能
+   10           * - 内部使用 vsprintf() 格式化，最大支持 127 字符
+   11           * - 输出格式: [tag] X: message\r\n  或  message\r\n
+   12           * - log_init() 上电时自动打印启动横幅 (MCU / 作者 / 编译时间)
+   13           *
+   14           * @note    禁止使用浮点数 (%f) 格式化
+   15           * @note    调用前必须先初始化 UART1，再调用 log_init()
+   16           *
+   17           * @see     Code_boweny/Function/Log/Log.h
+   18           */
+   19          
+   20          #include "Log.h"
+   21          
+   22          #define LOG_BUF_SIZE  128
+   23          
+   24          /*---------------------------------- 本地变量 ----------------------------------*/
+   25          
+   26          static u8  log_ready = 0;          /* 日志就绪标志: 0=禁用, 1=启用 */
+   27          static u8  log_buf[LOG_BUF_SIZE];  /* 格式化缓冲区 */
+   28          
+   29          /*---------------------------------- 内部函数 ----------------------------------*/
+   30          
+   31          /**
+   32           * @brief      原始日志输出 (内部函数)
+   33           * @param[in]  fmt   格式化字符串
+   34           * @param[in]  args  可变参数列表
+   35           * @return     none
+   36           */
+   37          static void log_vprint(u8 *fmt, va_list args)
+   38          {
+   39   1          u8  len;
+   40   1      
+   41   1          len = (u8)vsprintf((char *)log_buf, (const char *)fmt, args);
+   42   1      
+   43   1          /* 追加 \r\n */
+   44   1          if (len < (LOG_BUF_SIZE - 2))
+   45   1          {
+   46   2              log_buf[len]     = '\r';
+   47   2              log_buf[len + 1] = '\n';
+   48   2              log_buf[len + 2] = '\0';
+   49   2          }
+   50   1          else
+   51   1          {
+   52   2              log_buf[LOG_BUF_SIZE - 3] = '\r';
+   53   2              log_buf[LOG_BUF_SIZE - 2] = '\n';
+   54   2              log_buf[LOG_BUF_SIZE - 1] = '\0';
+   55   2          }
+   56   1      
+C251 COMPILER V5.60.0,  Log                                                                27/04/26  00:55:24  PAGE 2   
+
+   57   1          PrintString1(log_buf);
+   58   1      }
+   59          
+   60          /**
+   61           * @brief      带标签日志输出 (内部函数)
+   62           * @param[in]  level 日志级别字符 (I/W/E/D)
+   63           * @param[in]  tag   日志标签
+   64           * @param[in]  fmt   格式化字符串
+   65           * @param[in]  args  可变参数列表
+   66           * @return     none
+   67           */
+   68          static void log_vtagged(u8 level, u8 *tag, u8 *fmt, va_list args)
+   69          {
+   70   1          u8  i;
+   71   1          u8  prefix_len;
+   72   1      
+   73   1          /* 构建 [tag] X: 前缀 */
+   74   1          log_buf[0] = '[';
+   75   1          for (i = 0; tag[i] != '\0'; i++)
+   76   1          {
+   77   2              log_buf[i + 1] = tag[i];
+   78   2          }
+   79   1          log_buf[i + 1] = ']';
+   80   1          log_buf[i + 2] = ' ';
+   81   1          log_buf[i + 3] = level;
+   82   1          log_buf[i + 4] = ':';
+   83   1          log_buf[i + 5] = ' ';
+   84   1          prefix_len = i + 6;
+   85   1      
+   86   1          /* 格式化消息到前缀之后 */
+   87   1          vsprintf((char *)(log_buf + prefix_len), (const char *)fmt, args);
+   88   1      
+   89   1          /* 追加 \r\n 并确保不越界 */
+   90   1          for (i = prefix_len; i < LOG_BUF_SIZE; i++)
+   91   1          {
+   92   2              if (log_buf[i] == '\0')
+   93   2              {
+   94   3                  if (i < (LOG_BUF_SIZE - 2))
+   95   3                  {
+   96   4                      log_buf[i]     = '\r';
+   97   4                      log_buf[i + 1] = '\n';
+   98   4                      log_buf[i + 2] = '\0';
+   99   4                  }
+  100   3                  else
+  101   3                  {
+  102   4                      log_buf[LOG_BUF_SIZE - 3] = '\r';
+  103   4                      log_buf[LOG_BUF_SIZE - 2] = '\n';
+  104   4                      log_buf[LOG_BUF_SIZE - 1] = '\0';
+  105   4                  }
+  106   3                  break;
+  107   3              }
+  108   2          }
+  109   1      
+  110   1          PrintString1(log_buf);
+  111   1      }
+  112          
+  113          /*---------------------------------- 初始化 ----------------------------------*/
+  114          
+  115          /**
+  116           * @brief   初始化日志系统
+  117           * @return  none
+  118           *
+  119           * @details 将 log_ready 标志置 1，并打印启动横幅 (MCU版本/作者/编译时间)
+  120           *          用于上电时验证日志系统是否正常工作
+  121           *
+  122           * @note    必须在 UART_config() 之后调用
+C251 COMPILER V5.60.0,  Log                                                                27/04/26  00:55:24  PAGE 3   
+
+  123           */
+  124          void log_init(void)
+  125          {
+  126   1          log_ready = 1;
+  127   1      
+  128   1          PrintString1("\r\n");
+  129   1          log_printf("[SYS] I: ============== Black Pearl v1.1 ==============");
+  130   1          log_printf("[SYS] I:   MCU : STC32G  Fosc=%luHz", (u32)MAIN_Fosc);
+  131   1          log_printf("[SYS] I:   Author : boweny  Build : %s %s", __DATE__, __TIME__);
+  132   1          log_printf("[SYS] I: LOG Ready. Use LOGI/LOGW/LOGE/LOGD/log_printf");
+  133   1          PrintString1("\r\n");
+  134   1      }
+  135          
+  136          /*---------------------------------- 公共函数 ----------------------------------*/
+  137          
+  138          /**
+  139           * @brief      带标签的 INFO 级别日志
+  140           * @param[in]  tag   日志标签
+  141           * @param[in]  fmt   格式化字符串
+  142           * @param[in]  ...   可变参数
+  143           * @return     none
+  144           */
+  145          void log_info(u8 *tag, u8 *fmt, ...)
+  146          {
+  147   1          va_list args;
+  148   1      
+  149   1          if (!log_ready) return;
+  150   1      
+  151   1          va_start(args, fmt);
+  152   1          log_vtagged('I', tag, fmt, args);
+  153   1          va_end(args);
+  154   1      }
+  155          
+  156          /**
+  157           * @brief      带标签的 WARN 级别日志
+  158           * @param[in]  tag   日志标签
+  159           * @param[in]  fmt   格式化字符串
+  160           * @param[in]  ...   可变参数
+  161           * @return     none
+  162           */
+  163          void log_warn(u8 *tag, u8 *fmt, ...)
+  164          {
+  165   1          va_list args;
+  166   1      
+  167   1          if (!log_ready) return;
+  168   1      
+  169   1          va_start(args, fmt);
+  170   1          log_vtagged('W', tag, fmt, args);
+  171   1          va_end(args);
+  172   1      }
+  173          
+  174          /**
+  175           * @brief      带标签的 ERROR 级别日志
+  176           * @param[in]  tag   日志标签
+  177           * @param[in]  fmt   格式化字符串
+  178           * @param[in]  ...   可变参数
+  179           * @return     none
+  180           */
+  181          void log_error(u8 *tag, u8 *fmt, ...)
+  182          {
+  183   1          va_list args;
+  184   1      
+  185   1          if (!log_ready) return;
+  186   1      
+  187   1          va_start(args, fmt);
+  188   1          log_vtagged('E', tag, fmt, args);
+C251 COMPILER V5.60.0,  Log                                                                27/04/26  00:55:24  PAGE 4   
+
+  189   1          va_end(args);
+  190   1      }
+  191          
+  192          /**
+  193           * @brief      带标签的 DEBUG 级别日志
+  194           * @param[in]  tag   日志标签
+  195           * @param[in]  fmt   格式化字符串
+  196           * @param[in]  ...   可变参数
+  197           * @return     none
+  198           */
+  199          void log_debug(u8 *tag, u8 *fmt, ...)
+  200          {
+  201   1          va_list args;
+  202   1      
+  203   1          if (!log_ready) return;
+  204   1      
+  205   1          va_start(args, fmt);
+  206   1          log_vtagged('D', tag, fmt, args);
+  207   1          va_end(args);
+  208   1      }
+  209          
+  210          /**
+  211           * @brief      原始日志输出 (无标签、无级别)
+  212           * @param[in]  fmt   格式化字符串
+  213           * @param[in]  ...   可变参数
+  214           * @return     none
+  215           */
+  216          void log_printf(u8 *fmt, ...)
+  217          {
+  218   1          va_list args;
+  219   1      
+  220   1          if (!log_ready) return;
+  221   1      
+  222   1          va_start(args, fmt);
+  223   1          log_vprint(fmt, args);
+  224   1          va_end(args);
+  225   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       524     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =       129        240
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =       218     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

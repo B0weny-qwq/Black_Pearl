@@ -1,0 +1,713 @@
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE QMI8658
+OBJECT MODULE PLACED IN .\list\QMI8658.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\QMI8658\QMI8658.c XSMALL INTR2 BROWSE INCDIR(..\
+                    -Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;.
+                    -.\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG
+                    - PRINT(.\list\QMI8658.lst) TABS(2) OBJECT(.\list\QMI8658.obj) 
+
+stmt  level    source
+
+    1          /**
+    2           * @file    QMI8658.c
+    3           * @brief   QMI8658 6轴IMU驱动实现
+    4           * @author  boweny
+    5           * @date    2026-04-22
+    6           * @version v1.1
+    7           *
+    8           * @details
+    9           * - 实现 QMI8658 6轴惯性测量单元（加速度计+陀螺仪）的初始化和数据读取
+   10           * - 支持 I2C 主/备地址自动探测、软复位、就绪检测、数据有效性检查
+   11           * - 保留原始陀螺仪读取接口，并新增软件低通后的滤波读取接口
+   12           * - 关键步骤嵌入 LOG 日志，便于调试和问题排查
+   13           * - 导出函数: QMI8658_Init / QMI8658_ReadID / QMI8658_ReadAcc /
+   14           *             QMI8658_ReadGyro / QMI8658_ReadGyroFiltered /
+   15           *             QMI8658_ReadTemp / QMI8658_ReadAll /
+   16           *             QMI8658_Enable / QMI8658_Disable /
+   17           *             QMI8658_Wait_AccReady / QMI8658_Wait_GyroReady / QMI8658_BusRecover
+   18           *
+   19           * @hardware
+   20           *   - I2C接口: P1.4(SDA) / P1.5(SCL)，硬件I2C
+   21           *   - 系统时钟: Fosc = 24MHz
+   22           *   - I2C地址: 0x6B (SA0=浮空/高) / 0x6A (SA0=地)
+   23           *
+   24           * @note    必须在 I2C_config() 初始化完成后调用 QMI8658_Init()
+   25           * @note    禁止使用浮点运算，数据以 int16 定点整数传递
+   26           *
+   27           * @see     Code_boweny/Device/QMI8658/QMI8658.h
+   28           */
+   29          
+   30          #include "QMI8658.h"
+   31          #include "Filter.h"
+   32          #undef LOGD
+   33          #define LOGD(tag, ...)
+   34          
+   35          /*==============================================================
+   36           *                       外部 Driver 层 API
+   37           *==============================================================*/
+   38          
+   39          /*==============================================================
+   40           *                       本地变量
+   41           *==============================================================*/
+   42          
+   43          u8 QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;  /**< 当前使用的7位I2C地址 */
+   44          
+   45          /*==============================================================
+   46           *                       内部辅助函数
+   47           *==============================================================*/
+   48          
+   49          /**
+   50           * @brief      I2C 单字节写入
+   51           * @param[in]  reg_addr  寄存器地址
+   52           * @param[in]  data      要写入的数据
+   53           * @return     0=成功，1=失败
+   54           *
+   55           * @details
+   56           * 调用 Driver 层 I2C_WriteNbyte() 写入 1 字节。
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 2   
+
+   57           * 驱动内部使用，不对外暴露。
+   58           */
+   59          static u8 QMI8658_WriteReg(u8 reg_addr, u8 reg_val)
+   60          {
+   61   1          u8 i2c_addr = QMI8658_I2C_WRITE(QMI8658_I2C_Addr);
+   62   1      
+   63   1          I2C_WriteNbyte(i2c_addr, reg_addr, &reg_val, 1);
+   64   1      
+   65   1          if (Get_MSBusy_Status()) {
+   66   2              LOGW("IMU", "WR NACK reg=0x%02X val=0x%02X", reg_addr, reg_val);
+   67   2              return 1;
+   68   2          }
+   69   1          return 0;
+   70   1      }
+   71          
+   72          /**
+   73           * @brief      I2C 单字节读取
+   74           * @param[in]  reg_addr  寄存器地址
+   75           * @return     读取到的数据，0xFF 表示读取失败
+   76           *
+   77           * @details
+   78           * 调用 Driver 层 I2C_ReadNbyte() 读取 1 字节。
+   79           * 驱动内部使用，不对外暴露。
+   80           */
+   81          static u8 QMI8658_ReadReg(u8 reg_addr)
+   82          {
+   83   1          u8 i2c_addr_w = QMI8658_I2C_WRITE(QMI8658_I2C_Addr);
+   84   1          u8 reg_val = 0xFF;
+   85   1      
+   86   1          I2C_ReadNbyte(i2c_addr_w, reg_addr, &reg_val, 1);
+   87   1      
+   88   1          if (Get_MSBusy_Status()) {
+   89   2              LOGE("IMU", "RD NACK reg=0x%02X", reg_addr);
+   90   2              return 0xFF;
+   91   2          }
+   92   1          return reg_val;
+   93   1      }
+   94          
+   95          /**
+   96           * @brief      连续读取多字节数据 (地址自动递增)
+   97           * @param[in]  start_reg  起始寄存器地址
+   98           * @param[out] buf        数据缓冲区
+   99           * @param[in]  len        要读取的字节数
+  100           * @return     0=成功，1=失败
+  101           *
+  102           * @details
+  103           * 调用 Driver 层 I2C_ReadNbyte() 连续读取 len 字节。
+  104           * 驱动内部使用，不对外暴露。
+  105           */
+  106          static u8 QMI8658_ReadNByte(u8 start_reg, u8 *buf, u8 len)
+  107          {
+  108   1          u8 i2c_addr_w = QMI8658_I2C_WRITE(QMI8658_I2C_Addr);
+  109   1      
+  110   1          I2C_ReadNbyte(i2c_addr_w, start_reg, buf, len);
+  111   1      
+  112   1          if (Get_MSBusy_Status()) {
+  113   2              LOGE("IMU", "RNB NACK reg=0x%02X len=%u", start_reg, len);
+  114   2              return 1;
+  115   2          }
+  116   1          return 0;
+  117   1      }
+  118          
+  119          /**
+  120           * @brief   毫秒级延时
+  121           * @param[in]  ms  延时毫秒数
+  122           *
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 3   
+
+  123           * @details 调用 Driver 层 delay_ms()，依赖 Timer 已初始化
+  124           */
+  125          static void QMI8658_Delay_ms(u16 ms)
+  126          {
+  127   1          delay_ms(ms);
+  128   1      }
+  129          
+  130          /**
+  131           * @brief      探测有效 I2C 地址
+  132           * @param[in]  addr  要探测的 7 位 I2C 地址
+  133           * @return     0=该地址有设备响应，1=无响应
+  134           *
+  135           * @details
+  136           * 发送 START + 设备写地址，检测是否有 ACK。
+  137           */
+  138          static u8 QMI8658_ProbeAddr(u8 addr)
+  139          {
+  140   1          u8 i2c_addr = QMI8658_I2C_WRITE(addr);
+  141   1          u8 dummy = QMI8658_REG_WHO_AM_I;
+  142   1      
+  143   1          I2C_WriteNbyte(i2c_addr, QMI8658_REG_WHO_AM_I, &dummy, 0);
+  144   1      
+  145   1          if (Get_MSBusy_Status()) {
+  146   2              return 1;  /* NACK: 无设备 */
+  147   2          }
+  148   1          return 0;  /* ACK: 有设备 */
+  149   1      }
+  150          
+  151          /*==============================================================
+  152           *                       公共 API 实现
+  153           *==============================================================*/
+  154          
+  155          /**
+  156           * @brief   执行 I2C 总线恢复
+  157           * @return  none
+  158           *
+  159           * @details
+  160           * 当 SDA 或 SCL 被从机意外拉低时，尝试恢复总线。
+  161           * 禁用 I2C 模块，将 P1.4/P1.5 切为 GPIO 开漏，
+  162           * 手动发送 9 个时钟脉冲迫使从机释放 SDA，最后发送 STOP。
+  163           *
+  164           * @note    此函数直接操作引脚，适用于 I2C 总线死锁场景
+  165           */
+  166          void QMI8658_BusRecover(void)
+  167          {
+  168   1          LOGD("IMU", "bus recover start");
+  169   1      
+  170   1          I2C_Function(DISABLE);
+  171   1          I2C_Master();
+  172   1      
+  173   1          P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
+  174   1          P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
+  175   1      
+  176   1          {
+  177   2              u8 i;
+  178   2              for (i = 0; i < 9; i++) {
+  179   3                  P15 = 0;
+  180   3                  QMI8658_Delay_ms(1);
+  181   3                  P15 = 1;
+  182   3                  QMI8658_Delay_ms(1);
+  183   3                  if (P14 == 1) break;
+  184   3              }
+  185   2              P14 = 1;
+  186   2              QMI8658_Delay_ms(1);
+  187   2          }
+  188   1      
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 4   
+
+  189   1          P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
+  190   1          I2C_Function(ENABLE);
+  191   1          I2C_Master();
+  192   1      
+  193   1          LOGI("IMU", "bus recover done");
+  194   1      }
+  195          
+  196          /**
+  197           * @brief      读取 QMI8658 芯片ID
+  198           * @return     WHO_AM_I 值 (0x05=正确)，0xFF=读取失败
+  199           */
+  200          u8 QMI8658_ReadID(void)
+  201          {
+  202   1          u8 id = QMI8658_ReadReg(QMI8658_REG_WHO_AM_I);
+  203   1          LOGD("IMU", "ReadID=0x%02X expected=0x%02X", id, QMI8658_CHIP_ID_VALUE);
+  204   1          if (id != QMI8658_CHIP_ID_VALUE) {
+  205   2              LOGE("IMU", "ID mismatch got=0x%02X exp=0x%02X", id, QMI8658_CHIP_ID_VALUE);
+  206   2          }
+  207   1          return id;
+  208   1      }
+  209          
+  210          /**
+  211           * @brief      读取加速度数据
+  212           * @param[out] x  指向X轴加速度的指针 (int16)
+  213           * @param[out] y  指向Y轴加速度的指针 (int16)
+  214           * @param[out] z  指向Z轴加速度的指针 (int16)
+  215           * @return      0=成功，-1=数据无效或读取失败
+  216           */
+  217          s8 QMI8658_ReadAcc(int16 *x, int16 *y, int16 *z)
+  218          {
+  219   1          static u8 invalid_latched = 0;
+  220   1          u8 raw[6];
+  221   1          u8 status0;
+  222   1          int16 ax, ay, az;
+  223   1      
+  224   1          if (QMI8658_ReadNByte(QMI8658_REG_AX_L, raw, 6) != 0) {
+  225   2              LOGE("IMU", "ReadAcc I2C fail");
+  226   2              return -1;
+  227   2          }
+  228   1      
+  229   1          ax = (int16)((u16)raw[1] << 8 | raw[0]);
+  230   1          ay = (int16)((u16)raw[3] << 8 | raw[2]);
+  231   1          az = (int16)((u16)raw[5] << 8 | raw[4]);
+  232   1      
+  233   1          if (QMI8658_ACC_IS_ZERO(ax, ay, az) || QMI8658_DATA_IS_INVALID(ax, ay, az)) {
+  234   2              if (!invalid_latched) {
+  235   3                  status0 = QMI8658_ReadReg(QMI8658_REG_STATUS0);
+  236   3                  LOGW("IMU", "acc invalid ax=%d ay=%d az=%d status0=0x%02X data_reg=0x%02X",
+  237   3                       ax, ay, az, status0, QMI8658_REG_AX_L);
+  238   3              }
+  239   2              invalid_latched = 1;
+  240   2              return -1;
+  241   2          }
+  242   1      
+  243   1          invalid_latched = 0;
+  244   1          *x = ax;
+  245   1          *y = ay;
+  246   1          *z = az;
+  247   1      
+  248   1          LOGD("IMU", "acc=%d %d %d", ax, ay, az);
+  249   1          return 0;
+  250   1      }
+  251          
+  252          /**
+  253           * @brief      读取陀螺仪数据
+  254           * @param[out] x  指向X轴角速度的指针 (int16)
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 5   
+
+  255           * @param[out] y  指向Y轴角速度的指针 (int16)
+  256           * @param[out] z  指向Z轴角速度的指针 (int16)
+  257           * @return      0=成功，-1=数据无效或读取失败
+  258           */
+  259          s8 QMI8658_ReadGyro(int16 *x, int16 *y, int16 *z)
+  260          {
+  261   1          u8 raw[6];
+  262   1          int16 gx, gy, gz;
+  263   1      
+  264   1          if (QMI8658_ReadNByte(QMI8658_REG_GX_L, raw, 6) != 0) {
+  265   2              LOGE("IMU", "ReadGyro I2C fail");
+  266   2              return -1;
+  267   2          }
+  268   1      
+  269   1          gx = (int16)((u16)raw[1] << 8 | raw[0]);
+  270   1          gy = (int16)((u16)raw[3] << 8 | raw[2]);
+  271   1          gz = (int16)((u16)raw[5] << 8 | raw[4]);
+  272   1      
+  273   1          if (QMI8658_GYRO_IS_ZERO(gx, gy, gz) || QMI8658_DATA_IS_INVALID(gx, gy, gz)) {
+  274   2              LOGD("IMU", "gyro invalid gx=%d gy=%d gz=%d", gx, gy, gz);
+  275   2              return -1;
+  276   2          }
+  277   1      
+  278   1          *x = gx;
+  279   1          *y = gy;
+  280   1          *z = gz;
+  281   1      
+  282   1          LOGD("IMU", "gyro=%d %d %d", gx, gy, gz);
+  283   1          return 0;
+  284   1      }
+  285          
+  286          /**
+  287           * @brief      读取低通滤波后的陀螺仪数据
+  288           * @param[out] x  指向X轴角速度的指针 (int16)
+  289           * @param[out] y  指向Y轴角速度的指针 (int16)
+  290           * @param[out] z  指向Z轴角速度的指针 (int16)
+  291           * @return      0=成功，-1=原始数据无效、滤波失败或读取失败
+  292           *
+  293           * @details
+  294           * 先读取原始陀螺仪数据，再通过 Function/Filter 模块进行软件低通滤波。
+  295           * 首帧有效数据直接作为滤波输出，避免初始化瞬态抖动。
+  296           */
+  297          s8 QMI8658_ReadGyroFiltered(int16 *x, int16 *y, int16 *z)
+  298          {
+  299   1          int16 gx;
+  300   1          int16 gy;
+  301   1          int16 gz;
+  302   1      
+  303   1          if ((x == 0) || (y == 0) || (z == 0)) {
+  304   2              return -1;
+  305   2          }
+  306   1      
+  307   1          if (QMI8658_ReadGyro(&gx, &gy, &gz) != 0) {
+  308   2              return -1;
+  309   2          }
+  310   1      
+  311   1          return Filter_GyroLowPass(gx, gy, gz, x, y, z);
+  312   1      }
+  313          
+  314          /**
+  315           * @brief      读取温度数据
+  316           * @param[out] temp  指向温度值的指针 (int16)
+  317           * @return      0=成功，-1=读取失败
+  318           *
+  319           * @details
+  320           * 读取 2 字节 (0x33~0x34)，int12 有符号数，LSB在前。
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 6   
+
+  321           * 换算: 实际温度 = reg_value / 256 + 25 (°C)
+  322           */
+  323          s8 QMI8658_ReadTemp(int16 *temp)
+  324          {
+  325   1          u8 raw[2];
+  326   1          int16 t;
+  327   1      
+  328   1          if (QMI8658_ReadNByte(QMI8658_REG_TEMP_L, raw, 2) != 0) {
+  329   2              LOGE("IMU", "ReadTemp I2C fail");
+  330   2              return -1;
+  331   2          }
+  332   1      
+  333   1          t = (int16)((u16)raw[1] << 8 | raw[0]);
+  334   1          *temp = t;
+  335   1      
+  336   1          LOGD("IMU", "temp raw=%d", t);
+  337   1          return 0;
+  338   1      }
+  339          
+  340          /**
+  341           * @brief      读取完整9轴数据 (加速度+陀螺仪)
+  342           * @param[out] ax  指向X轴加速度的指针
+  343           * @param[out] ay  指向Y轴加速度的指针
+  344           * @param[out] az  指向Z轴加速度的指针
+  345           * @param[out] gx  指向X轴角速度的指针
+  346           * @param[out] gy  指向Y轴角速度的指针
+  347           * @param[out] gz  指向Z轴角速度的指针
+  348           * @return      0=成功，-1=数据无效或读取失败
+  349           *
+  350           * @details
+  351           * 使用 I2C 地址自动递增，一次读取 12 字节 (0x35~0x40)。
+  352           */
+  353          s8 QMI8658_ReadAll(int16 *ax, int16 *ay, int16 *az,
+  354                              int16 *gx, int16 *gy, int16 *gz)
+  355          {
+  356   1          u8 raw[12];
+  357   1          int16 aax, aay, aaz;
+  358   1          int16 ggx, ggy, ggz;
+  359   1      
+  360   1          if (QMI8658_ReadNByte(QMI8658_REG_AX_L, raw, 12) != 0) {
+  361   2              LOGE("IMU", "ReadAll I2C fail");
+  362   2              return -1;
+  363   2          }
+  364   1      
+  365   1          aax = (int16)((u16)raw[1] << 8 | raw[0]);
+  366   1          aay = (int16)((u16)raw[3] << 8 | raw[2]);
+  367   1          aaz = (int16)((u16)raw[5] << 8 | raw[4]);
+  368   1      
+  369   1          ggx = (int16)((u16)raw[7] << 8 | raw[6]);
+  370   1          ggy = (int16)((u16)raw[9] << 8 | raw[8]);
+  371   1          ggz = (int16)((u16)raw[11] << 8 | raw[10]);
+  372   1      
+  373   1          if ((QMI8658_ACC_IS_ZERO(aax, aay, aaz) || QMI8658_DATA_IS_INVALID(aax, aay, aaz)) &&
+  374   1              (QMI8658_GYRO_IS_ZERO(ggx, ggy, ggz) || QMI8658_DATA_IS_INVALID(ggx, ggy, ggz))) {
+  375   2              LOGD("IMU", "all data invalid");
+  376   2              return -1;
+  377   2          }
+  378   1      
+  379   1          *ax = aax;
+  380   1          *ay = aay;
+  381   1          *az = aaz;
+  382   1          *gx = ggx;
+  383   1          *gy = ggy;
+  384   1          *gz = ggz;
+  385   1      
+  386   1          LOGD("IMU", "a=%d %d %d g=%d %d %d", aax, aay, aaz, ggx, ggy, ggz);
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 7   
+
+  387   1          return 0;
+  388   1      }
+  389          
+  390          /**
+  391           * @brief      轮询等待加速度数据就绪
+  392           * @param[in]  timeout_ms  超时时间 (ms)
+  393           * @return     0=数据就绪，-1=超时
+  394           */
+  395          s8 QMI8658_Wait_AccReady(u16 timeout_ms)
+  396          {
+  397   1          u16 i;
+  398   1          u8 status0;
+  399   1      
+  400   1          LOGD("IMU", "wait acc ready timeout=%ums", timeout_ms);
+  401   1          status0 = 0;
+  402   1      
+  403   1          for (i = 0; i < timeout_ms; i += 5) {
+  404   2              status0 = QMI8658_ReadReg(QMI8658_REG_STATUS0);
+  405   2              if ((status0 & QMI8658_STATUS0_A_DA) != 0) {
+  406   3                  LOGD("IMU", "acc ready in %ums status0=0x%02X", i, status0);
+  407   3                  return 0;
+  408   3              }
+  409   2              QMI8658_Delay_ms(5);
+  410   2          }
+  411   1      
+  412   1          LOGE("IMU", "wait acc ready TIMEOUT status0=0x%02X", status0);
+  413   1          return -1;
+  414   1      }
+  415          
+  416          /**
+  417           * @brief      轮询等待陀螺仪数据就绪
+  418           * @param[in]  timeout_ms  超时时间 (ms)
+  419           * @return     0=数据就绪，-1=超时
+  420           */
+  421          s8 QMI8658_Wait_GyroReady(u16 timeout_ms)
+  422          {
+  423   1          u16 i;
+  424   1      
+  425   1          LOGD("IMU", "wait gyro ready timeout=%ums", timeout_ms);
+  426   1      
+  427   1          for (i = 0; i < timeout_ms; i += 5) {
+  428   2              u8 status = QMI8658_ReadReg(QMI8658_REG_STATUS0);
+  429   2              if ((status & QMI8658_STATUS0_G_DA) != 0) {
+  430   3                  LOGD("IMU", "gyro ready in %ums status=0x%02X", i, status);
+  431   3                  return 0;
+  432   3              }
+  433   2              QMI8658_Delay_ms(5);
+  434   2          }
+  435   1      
+  436   1          LOGE("IMU", "wait gyro ready TIMEOUT");
+  437   1          return -1;
+  438   1      }
+  439          
+  440          /**
+  441           * @brief   使能 QMI8658 IMU 传感器
+  442           * @return  0=成功，-1=失败
+  443           *
+  444           * @details 写入 CTRL7=0x03，使能加速度计和陀螺仪
+  445           */
+  446          s8 QMI8658_Enable(void)
+  447          {
+  448   1          if (QMI8658_WriteReg(QMI8658_REG_CTRL7, QMI8658_CTRL7_INIT) != 0) {
+  449   2              LOGE("IMU", "Enable WR fail");
+  450   2              return -1;
+  451   2          }
+  452   1          LOGI("IMU", "enabled CTRL7=0x%02X", QMI8658_CTRL7_INIT);
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 8   
+
+  453   1          return 0;
+  454   1      }
+  455          
+  456          /**
+  457           * @brief   禁用 QMI8658 IMU 传感器
+  458           * @return  0=成功，-1=失败
+  459           *
+  460           * @details 写入 CTRL7=0x00，禁用加速度计和陀螺仪，进入低功耗模式
+  461           */
+  462          s8 QMI8658_Disable(void)
+  463          {
+  464   1          if (QMI8658_WriteReg(QMI8658_REG_CTRL7, 0x00) != 0) {
+  465   2              LOGE("IMU", "Disable WR fail");
+  466   2              return -1;
+  467   2          }
+  468   1          LOGI("IMU", "disabled");
+  469   1          return 0;
+  470   1      }
+  471          
+  472          /**
+  473           * @brief   初始化 QMI8658 IMU
+  474           * @return  0=成功，-1=失败
+  475           *
+  476           * @details
+  477           * 完整初始化流程:
+  478           *   1. LOG 初始化开始
+  479           *   2. 尝试主地址 (0x6B)，失败则尝试备地址 (0x6A)
+  480           *   3. 读取 WHO_AM_I 确认芯片 (0x05)
+  481           *   4. 检查 RESET_STATE: 0x80=已就绪, 0x00=需软复位
+  482           *   5. 软复位 (写入 RESET=0xB0 到地址0x60) → 等待 500ms
+  483           *   6. 分阶段写入控制寄存器
+  484           *   7. 等待数据就绪 (STATUS0.aDA=1)
+  485           *   8. LOG 初始化完成
+  486           *
+  487           * @note    必须在 I2C_config() 初始化完成后调用
+  488           */
+  489          s8 QMI8658_Init(void)
+  490          {
+  491   1          u8 id;
+  492   1          u8 retry;
+  493   1          u8 reset_state;
+  494   1          u8 ctrl1_rb, ctrl2_rb, ctrl3_rb, ctrl5_rb, ctrl7_rb;
+  495   1      
+  496   1          LOGI("IMU", "========== QMI8658 Init Start ==========");
+  497   1          LOGD("IMU", "primary addr=0x%02X alt=0x%02X",
+  499   1               QMI8658_I2C_WRITE(QMI8658_I2C_ADDR_PRIMARY),
+  499   1               QMI8658_I2C_WRITE(QMI8658_I2C_ADDR_ALT));
+  500   1      
+  501   1          /*---------------------------- 地址探测 ----------------------------*/
+  502   1          for (retry = 0; retry < 3; retry++) {
+  503   2              QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;
+  504   2              LOGD("IMU", "probe primary 0x%02X try=%u",
+  505   2                   QMI8658_I2C_WRITE(QMI8658_I2C_Addr), retry + 1);
+  506   2              if (QMI8658_ProbeAddr(QMI8658_I2C_ADDR_PRIMARY) == 0) {
+  507   3                  LOGD("IMU", "found device at primary addr=0x%02X",
+  508   3                       QMI8658_I2C_WRITE(QMI8658_I2C_Addr));
+  509   3                  break;
+  510   3              }
+  511   2      
+  512   2              LOGW("IMU", "primary addr no ACK, try alt");
+  513   2              QMI8658_I2C_Addr = QMI8658_I2C_ADDR_ALT;
+  514   2              LOGD("IMU", "probe alt 0x%02X",
+  515   2                   QMI8658_I2C_WRITE(QMI8658_I2C_Addr));
+  516   2              if (QMI8658_ProbeAddr(QMI8658_I2C_ADDR_ALT) == 0) {
+  517   3                  LOGD("IMU", "found device at alt addr=0x%02X",
+  518   3                       QMI8658_I2C_WRITE(QMI8658_I2C_Addr));
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 9   
+
+  519   3                  break;
+  520   3              }
+  521   2      
+  522   2              QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;
+  523   2              LOGW("IMU", "addr probe fail try=%u, wait 200ms retry", retry + 1);
+  524   2              QMI8658_Delay_ms(200);
+  525   2          }
+  526   1      
+  527   1          if (retry >= 3) {
+  528   2              LOGE("IMU", "no device found after 3 tries");
+  529   2              return -1;
+  530   2          }
+  531   1      
+  532   1          /*---------------------------- 上电等待 ----------------------------*/
+  533   1          LOGD("IMU", "power-up wait %ums", QMI8658_PWR_UP_DELAY_MS);
+  534   1          QMI8658_Delay_ms(QMI8658_PWR_UP_DELAY_MS);
+  535   1      
+  536   1          /*---------------------------- WHO_AM_I 检测 ------------------------*/
+  537   1          id = QMI8658_ReadID();
+  538   1          if (id != QMI8658_CHIP_ID_VALUE) {
+  539   2              LOGE("IMU", "WHO_AM_I error got=0x%02X exp=0x%02X", id, QMI8658_CHIP_ID_VALUE);
+  540   2              return -1;
+  541   2          }
+  542   1          LOGD("IMU", "WHO_AM_I=0x%02X OK", id);
+  543   1      
+  544   1          /*---------------------------- RESET_STATE 检测 ------------------------*/
+  545   1          reset_state = QMI8658_ReadReg(QMI8658_REG_RESET_STATE);
+  546   1          LOGD("IMU", "reset_state=0x%02X (0x80=ready)", reset_state);
+  547   1      
+  548   1          if (reset_state != QMI8658_RESET_STATE_READY) {
+  549   2              LOGD("IMU", "need soft reset, current state=0x%02X", reset_state);
+  550   2      
+  551   2              /*---------------------------- 软复位 ----------------------------*/
+  552   2              LOGD("IMU", "soft reset write RESET=0xB0 to reg 0x60");
+  553   2              if (QMI8658_WriteReg(QMI8658_REG_RESET, 0xB0) != 0) {
+  554   3                  LOGE("IMU", "soft reset WR fail");
+  555   3                  return -1;
+  556   3              }
+  557   2      
+  558   2              LOGD("IMU", "wait %ums for reset complete", QMI8658_RESET_DELAY_MS);
+  559   2              QMI8658_Delay_ms(QMI8658_RESET_DELAY_MS);
+  560   2      
+  561   2              reset_state = QMI8658_ReadReg(QMI8658_REG_RESET_STATE);
+  562   2              LOGD("IMU", "after reset reset_state=0x%02X", reset_state);
+  563   2      
+  564   2              if (reset_state == 0xFF) {
+  565   3                  LOGE("IMU", "reset_state read fail after reset");
+  566   3                  return -1;
+  567   3              }
+  568   2              LOGD("IMU", "soft reset done reset_state=0x%02X", reset_state);
+  569   2          } else {
+  570   2              LOGD("IMU", "chip already ready, skip reset");
+  571   2          }
+  572   1      
+  573   1          /*---------------------------- 配置写入 --------------------------*/
+  574   1      
+  575   1          /* Step 1: 禁用传感器 (安全写入) */
+  576   1          LOGD("IMU", "step1 CTRL7=0x00 (disable sensors)");
+  577   1          if (QMI8658_WriteReg(QMI8658_REG_CTRL7, 0x00) != 0) {
+  578   2              LOGE("IMU", "step1 WR fail");
+  579   2              return -1;
+  580   2          }
+  581   1      
+  582   1          /* Step 2: 写入 CTRL1 */
+  583   1          LOGD("IMU", "step2 CTRL1=0x%02X", QMI8658_CTRL1_INIT);
+  584   1          if (QMI8658_WriteReg(QMI8658_REG_CTRL1, QMI8658_CTRL1_INIT) != 0) {
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 10  
+
+  585   2              LOGE("IMU", "step2 WR fail");
+  586   2              return -1;
+  587   2          }
+  588   1      
+  589   1          /* Step 3: 写入 CTRL2 (加速度量程+ODR) */
+  590   1          LOGD("IMU", "step3 CTRL2=0x%02X (ACC range+ODR)", QMI8658_CTRL2_INIT);
+  591   1          if (QMI8658_WriteReg(QMI8658_REG_CTRL2, QMI8658_CTRL2_INIT) != 0) {
+  592   2              LOGE("IMU", "step3 WR fail");
+  593   2              return -1;
+  594   2          }
+  595   1      
+  596   1          /* Step 4: 写入 CTRL3 (陀螺音量程+ODR) */
+  597   1          LOGD("IMU", "step4 CTRL3=0x%02X (GYRO range+ODR)", QMI8658_CTRL3_INIT);
+  598   1          if (QMI8658_WriteReg(QMI8658_REG_CTRL3, QMI8658_CTRL3_INIT) != 0) {
+  599   2              LOGE("IMU", "step4 WR fail");
+  600   2              return -1;
+  601   2          }
+  602   1      
+  603   1          /* Step 5: 写入 CTRL5 */
+  604   1          LOGD("IMU", "step5 CTRL5=0x%02X", QMI8658_CTRL5_INIT);
+  605   1          if (QMI8658_WriteReg(QMI8658_REG_CTRL5, QMI8658_CTRL5_INIT) != 0) {
+  606   2              LOGE("IMU", "step5 WR fail");
+  607   2              return -1;
+  608   2          }
+  609   1      
+  610   1          /* Step 6: 使能加速度计+陀螺仪 */
+  611   1          LOGD("IMU", "step6 CTRL7=0x%02X (enable sensors)", QMI8658_CTRL7_INIT);
+  612   1          if (QMI8658_WriteReg(QMI8658_REG_CTRL7, QMI8658_CTRL7_INIT) != 0) {
+  613   2              LOGE("IMU", "step6 WR fail");
+  614   2              return -1;
+  615   2          }
+  616   1          QMI8658_Delay_ms(QMI8658_ENABLE_DELAY_MS);
+  617   1      
+  618   1          /*---------------------------- 读回验证 --------------------------*/
+  619   1          ctrl1_rb = QMI8658_ReadReg(QMI8658_REG_CTRL1);
+  620   1          ctrl2_rb = QMI8658_ReadReg(QMI8658_REG_CTRL2);
+  621   1          ctrl3_rb = QMI8658_ReadReg(QMI8658_REG_CTRL3);
+  622   1          ctrl5_rb = QMI8658_ReadReg(QMI8658_REG_CTRL5);
+  623   1          ctrl7_rb = QMI8658_ReadReg(QMI8658_REG_CTRL7);
+  624   1      
+  625   1          LOGD("IMU", "readback CTRL1=0x%02X CTRL2=0x%02X CTRL3=0x%02X CTRL5=0x%02X CTRL7=0x%02X",
+  626   1               ctrl1_rb, ctrl2_rb, ctrl3_rb, ctrl5_rb, ctrl7_rb);
+  627   1      
+  628   1          if (ctrl1_rb != QMI8658_CTRL1_INIT) {
+  629   2              LOGW("IMU", "CTRL1 mismatch read=0x%02X exp=0x%02X", ctrl1_rb, QMI8658_CTRL1_INIT);
+  630   2          }
+  631   1          if (ctrl2_rb != QMI8658_CTRL2_INIT) {
+  632   2              LOGW("IMU", "CTRL2 mismatch read=0x%02X exp=0x%02X", ctrl2_rb, QMI8658_CTRL2_INIT);
+  633   2          }
+  634   1          if (ctrl3_rb != QMI8658_CTRL3_INIT) {
+  635   2              LOGW("IMU", "CTRL3 mismatch read=0x%02X exp=0x%02X", ctrl3_rb, QMI8658_CTRL3_INIT);
+  636   2          }
+  637   1          if (ctrl5_rb != QMI8658_CTRL5_INIT) {
+  638   2              LOGW("IMU", "CTRL5 mismatch read=0x%02X exp=0x%02X", ctrl5_rb, QMI8658_CTRL5_INIT);
+  639   2          }
+  640   1          if (ctrl7_rb != QMI8658_CTRL7_INIT) {
+  641   2              LOGW("IMU", "CTRL7 mismatch read=0x%02X exp=0x%02X", ctrl7_rb, QMI8658_CTRL7_INIT);
+  642   2          }
+  643   1      
+  644   1          /*---------------------------- 等待数据就绪 --------------------------*/
+  645   1          LOGD("IMU", "wait sensor data ready...");
+  646   1          if (QMI8658_Wait_AccReady(QMI8658_READY_TIMEOUT_MS) != 0) {
+  647   2              LOGW("IMU", "acc not ready in %ums, continue anyway", QMI8658_READY_TIMEOUT_MS);
+  648   2          }
+  649   1      
+  650   1          Filter_ResetGyroLowPass();
+C251 COMPILER V5.60.0,  QMI8658                                                            27/04/26  00:55:24  PAGE 11  
+
+  651   1      
+  652   1          /*---------------------------- 完成 --------------------------*/
+  653   1          LOGI("IMU", "========== QMI8658 Init Done ==========");
+  654   1          LOGI("IMU", "config: bring-up CTRL2=0x%02X CTRL3=0x%02X CTRL5=0x%02X CTRL7=0x%02X",
+  655   1               QMI8658_CTRL2_INIT, QMI8658_CTRL3_INIT, QMI8658_CTRL5_INIT, QMI8658_CTRL7_INIT);
+  656   1          return 0;
+  657   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      2259     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =         2         88
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =      1048     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

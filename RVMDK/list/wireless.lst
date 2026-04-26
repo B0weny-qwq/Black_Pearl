@@ -1,0 +1,637 @@
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE wireless
+OBJECT MODULE PLACED IN .\list\wireless.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\WIRELESS\wireless.c XSMALL INTR2 BROWSE INCDIR(.
+                    -.\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309
+                    -;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEB
+                    -UG PRINT(.\list\wireless.lst) TABS(2) OBJECT(.\list\wireless.obj) 
+
+stmt  level    source
+
+    1          #include "wireless.h"
+    2          
+    3          #include "lt8920.h"
+    4          #include "wireless_port.h"
+    5          #include "..\..\Function\Log\Log.h"
+    6          
+    7          static Wireless_State_t g_wireless_state;
+    8          static u8 g_wireless_rx_len[WIRELESS_RX_QUEUE_DEPTH];
+    9          static u8 g_wireless_rx_data[WIRELESS_RX_QUEUE_DEPTH][LT8920_MAX_PAYLOAD_LEN];
+   10          static u8 g_wireless_rx_head = 0U;
+   11          static u8 g_wireless_rx_tail = 0U;
+   12          static u8 g_wireless_rx_count = 0U;
+   13          
+   14          static void Wireless_ResetState(void)
+   15          {
+   16   1          u16 i;
+   17   1          u8 *raw;
+   18   1      
+   19   1          raw = (u8 *)&g_wireless_state;
+   20   1          for (i = 0U; i < (u16)sizeof(Wireless_State_t); i++) {
+   21   2              raw[i] = 0U;
+   22   2          }
+   23   1      
+   24   1          g_wireless_state.antenna = WIRELESS_ANT1;
+   25   1          g_wireless_state.mode = WIRELESS_MODE_IDLE;
+   26   1      }
+   27          
+   28          static void Wireless_ResetQueue(void)
+   29          {
+   30   1          u8 i;
+   31   1          u8 j;
+   32   1      
+   33   1          g_wireless_rx_head = 0U;
+   34   1          g_wireless_rx_tail = 0U;
+   35   1          g_wireless_rx_count = 0U;
+   36   1      
+   37   1          for (i = 0U; i < WIRELESS_RX_QUEUE_DEPTH; i++) {
+   38   2              g_wireless_rx_len[i] = 0U;
+   39   2              for (j = 0U; j < LT8920_MAX_PAYLOAD_LEN; j++) {
+   40   3                  g_wireless_rx_data[i][j] = 0U;
+   41   3              }
+   42   2          }
+   43   1      }
+   44          
+   45          static s8 Wireless_QueuePush(const u8 *buf, u8 len)
+   46          {
+   47   1          u8 i;
+   48   1      
+   49   1          if ((buf == 0) || (len == 0U) || (len > LT8920_MAX_PAYLOAD_LEN)) {
+   50   2              return WIRELESS_ERR_PARAM;
+   51   2          }
+   52   1          if (g_wireless_rx_count >= WIRELESS_RX_QUEUE_DEPTH) {
+   53   2              g_wireless_state.queue_overflow_count++;
+   54   2              return WIRELESS_ERR_OVERFLOW;
+   55   2          }
+   56   1      
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 2   
+
+   57   1          g_wireless_rx_len[g_wireless_rx_head] = len;
+   58   1          for (i = 0U; i < len; i++) {
+   59   2              g_wireless_rx_data[g_wireless_rx_head][i] = buf[i];
+   60   2          }
+   61   1          g_wireless_rx_head++;
+   62   1          if (g_wireless_rx_head >= WIRELESS_RX_QUEUE_DEPTH) {
+   63   2              g_wireless_rx_head = 0U;
+   64   2          }
+   65   1          g_wireless_rx_count++;
+   66   1          return SUCCESS;
+   67   1      }
+   68          
+   69          static s8 Wireless_QueuePop(u8 *buf, u8 buf_len, u8 *out_len)
+   70          {
+   71   1          u8 i;
+   72   1          u8 len;
+   73   1      
+   74   1          if ((buf == 0) || (out_len == 0)) {
+   75   2              return WIRELESS_ERR_PARAM;
+   76   2          }
+   77   1          if (g_wireless_rx_count == 0U) {
+   78   2              return WIRELESS_ERR_EMPTY;
+   79   2          }
+   80   1      
+   81   1          len = g_wireless_rx_len[g_wireless_rx_tail];
+   82   1          if (len > buf_len) {
+   83   2              return WIRELESS_ERR_OVERFLOW;
+   84   2          }
+   85   1      
+   86   1          for (i = 0U; i < len; i++) {
+   87   2              buf[i] = g_wireless_rx_data[g_wireless_rx_tail][i];
+   88   2          }
+   89   1          *out_len = len;
+   90   1      
+   91   1          g_wireless_rx_tail++;
+   92   1          if (g_wireless_rx_tail >= WIRELESS_RX_QUEUE_DEPTH) {
+   93   2              g_wireless_rx_tail = 0U;
+   94   2          }
+   95   1          g_wireless_rx_count--;
+   96   1          return SUCCESS;
+   97   1      }
+   98          
+   99          static s8 Wireless_SetIdleMode(void)
+  100          {
+  101   1          s8 rc;
+  102   1      
+  103   1          WirelessPort_SetTxEn(0U);
+  104   1          WirelessPort_SetRxEn(0U);
+  105   1          rc = LT8920_EnterIdle();
+  106   1          if (rc == SUCCESS) {
+  107   2              g_wireless_state.mode = WIRELESS_MODE_IDLE;
+  108   2          }
+  109   1          return rc;
+  110   1      }
+  111          
+  112          static s8 Wireless_SetRxMode(void)
+  113          {
+  114   1          s8 rc;
+  115   1      
+  116   1          WirelessPort_SetTxEn(0U);
+  117   1          WirelessPort_SetRxEn(1U);
+  118   1          WirelessPort_DelayUs(5U);
+  119   1      
+  120   1          rc = LT8920_ClearRxFifo();
+  121   1          if (rc != SUCCESS) {
+  122   2              return rc;
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 3   
+
+  123   2          }
+  124   1          rc = LT8920_EnterRx();
+  125   1          if (rc == SUCCESS) {
+  126   2              g_wireless_state.mode = WIRELESS_MODE_RX;
+  127   2          }
+  128   1          return rc;
+  129   1      }
+  130          
+  131          static s8 Wireless_SetTxMode(void)
+  132          {
+  133   1          s8 rc;
+  134   1      
+  135   1          WirelessPort_SetRxEn(0U);
+  136   1          WirelessPort_SetTxEn(1U);
+  137   1          WirelessPort_DelayUs(5U);
+  138   1      
+  139   1          rc = LT8920_EnterTx();
+  140   1          if (rc == SUCCESS) {
+  141   2              g_wireless_state.mode = WIRELESS_MODE_TX;
+  142   2          }
+  143   1          return rc;
+  144   1      }
+  145          
+  146          static s8 Wireless_ProbeAntenna(u8 antenna, u16 *avg_rssi, u16 *pkt_ok, u16 *crc_err)
+  147          {
+  148   1          u8 sample_idx;
+  149   1          u8 rssi;
+  150   1          u8 packet_len;
+  151   1          u8 packet_buf[LT8920_MAX_PAYLOAD_LEN];
+  152   1          u16 status;
+  153   1          u32 sum;
+  154   1          u16 ok_cnt;
+  155   1          u16 crc_cnt;
+  156   1          s8 rc;
+  157   1      
+  158   1          if ((avg_rssi == 0) || (pkt_ok == 0) || (crc_err == 0)) {
+  159   2              return WIRELESS_ERR_PARAM;
+  160   2          }
+  161   1      
+  162   1          rc = Wireless_SetAntenna(antenna);
+  163   1          if (rc != SUCCESS) {
+  164   2              return rc;
+  165   2          }
+  166   1      
+  167   1          rc = Wireless_SetRxMode();
+  168   1          if (rc != SUCCESS) {
+  169   2              return rc;
+  170   2          }
+  171   1      
+  172   1          WirelessPort_DelayMs(2U);
+  173   1      
+  174   1          sum = 0UL;
+  175   1          ok_cnt = 0U;
+  176   1          crc_cnt = 0U;
+  177   1      
+  178   1          for (sample_idx = 0U; sample_idx < WIRELESS_SCAN_SAMPLE_COUNT; sample_idx++) {
+  179   2              rc = LT8920_ReadRawRssi(&rssi);
+  180   2              if (rc == SUCCESS) {
+  181   3                  sum += rssi;
+  182   3              }
+  183   2      
+  184   2              rc = LT8920_ReadStatus(&status);
+  185   2              if ((rc == SUCCESS) && ((status & LT8920_STATUS_PKT_FLAG) != 0U)) {
+  186   3                  if ((status & LT8920_STATUS_CRC_ERROR) != 0U) {
+  187   4                      crc_cnt++;
+  188   4                  } else {
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 4   
+
+  189   4                      if (LT8920_ReadPacket(packet_buf, LT8920_MAX_PAYLOAD_LEN, &packet_len) == SUCCESS) {
+  190   5                          ok_cnt++;
+  191   5                      }
+  192   4                  }
+  193   3                  (void)Wireless_SetRxMode();
+  194   3              }
+  195   2      
+  196   2              WirelessPort_DelayMs(WIRELESS_SCAN_SAMPLE_MS);
+  197   2          }
+  198   1      
+  199   1          *avg_rssi = (u16)(sum / WIRELESS_SCAN_SAMPLE_COUNT);
+  200   1          *pkt_ok = ok_cnt;
+  201   1          *crc_err = crc_cnt;
+  202   1          return SUCCESS;
+  203   1      }
+  204          
+  205          s8 Wireless_Init(void)
+  206          {
+  207   1          s8 rc;
+  208   1          u16 reg11;
+  209   1          u16 reg41;
+  210   1          u16 reg52;
+  211   1      
+  212   1          LOGI(WIRELESS_TAG, "init start");
+  213   1          Wireless_ResetState();
+  214   1          Wireless_ResetQueue();
+  215   1      
+  216   1          rc = WirelessPort_Init();
+  217   1          if (rc != SUCCESS) {
+  218   2              g_wireless_state.last_error = rc;
+  219   2              LOGE(WIRELESS_TAG, "port init fail rc=%d", rc);
+  220   2              return rc;
+  221   2          }
+  222   1      
+  223   1          WirelessPort_SetRst(0U);
+  224   1          WirelessPort_DelayMs(1U);
+  225   1          WirelessPort_SetRst(1U);
+  226   1          WirelessPort_DelayMs(5U);
+  227   1      
+  228   1          rc = LT8920_Init(LT8920_DEFAULT_CHANNEL, LT8920_DEFAULT_SYNC_WORD);
+  229   1          if (rc != SUCCESS) {
+  230   2              g_wireless_state.last_error = rc;
+  231   2              LOGE(WIRELESS_TAG, "lt8920 init fail rc=%d", rc);
+  232   2              if (LT8920_ReadReg(11U, &reg11) == SUCCESS) {
+  233   3                  LOGE(WIRELESS_TAG, "verify reg11=0x%04X expect=0x0008", reg11);
+  234   3              }
+  235   2              if (LT8920_ReadReg(41U, &reg41) == SUCCESS) {
+  236   3                  LOGE(WIRELESS_TAG, "verify reg41=0x%04X expect=0xB000", reg41);
+  237   3              }
+  238   2              if (LT8920_ReadReg(52U, &reg52) == SUCCESS) {
+  239   3                  LOGE(WIRELESS_TAG, "debug reg52=0x%04X", reg52);
+  240   3              }
+  241   2              return rc;
+  242   2          }
+  243   1      
+  244   1          g_wireless_state.initialized = 1U;
+  245   1          rc = Wireless_RescanAntenna();
+  246   1          if (rc != SUCCESS) {
+  247   2              g_wireless_state.last_error = rc;
+  248   2              g_wireless_state.initialized = 0U;
+  249   2              g_wireless_state.ready = 0U;
+  250   2              (void)Wireless_SetIdleMode();
+  251   2              LOGE(WIRELESS_TAG, "antenna scan fail rc=%d", rc);
+  252   2              return rc;
+  253   2          }
+  254   1      
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 5   
+
+  255   1          rc = Wireless_SetRxMode();
+  256   1          if (rc != SUCCESS) {
+  257   2              g_wireless_state.last_error = rc;
+  258   2              g_wireless_state.initialized = 0U;
+  259   2              g_wireless_state.ready = 0U;
+  260   2              (void)Wireless_SetIdleMode();
+  261   2              LOGE(WIRELESS_TAG, "enter rx fail rc=%d", rc);
+  262   2              return rc;
+  263   2          }
+  264   1      
+  265   1          g_wireless_state.ready = 1U;
+  266   1          g_wireless_state.last_error = SUCCESS;
+  267   1          LOGI(WIRELESS_TAG, "init ok ch=%u ant=%u rssi=%u/%u",
+  271   1               (u16)LT8920_DEFAULT_CHANNEL,
+  271   1               (u16)g_wireless_state.antenna,
+  271   1               g_wireless_state.antenna_rssi_ant1,
+  271   1               g_wireless_state.antenna_rssi_ant2);
+  272   1          return SUCCESS;
+  273   1      }
+  274          
+  275          s8 Wireless_Deinit(void)
+  276          {
+  277   1          if (!g_wireless_state.initialized) {
+  278   2              return SUCCESS;
+  279   2          }
+  280   1      
+  281   1          (void)Wireless_SetIdleMode();
+  282   1          (void)WirelessPort_Deinit();
+  283   1          Wireless_ResetQueue();
+  284   1          Wireless_ResetState();
+  285   1          LOGI(WIRELESS_TAG, "deinit ok");
+  286   1          return SUCCESS;
+  287   1      }
+  288          
+  289          s8 Wireless_Poll(void)
+  290          {
+  291   1          u16 status;
+  292   1          u8 packet_len;
+  293   1          u8 packet_buf[LT8920_MAX_PAYLOAD_LEN];
+  294   1          s8 rc;
+  295   1      
+  296   1          if (!g_wireless_state.initialized) {
+  297   2              return WIRELESS_ERR_STATE;
+  298   2          }
+  299   1          if (!g_wireless_state.ready) {
+  300   2              return SUCCESS;
+  301   2          }
+  302   1      
+  303   1          rc = LT8920_ReadStatus(&status);
+  304   1          if (rc != SUCCESS) {
+  305   2              g_wireless_state.last_error = rc;
+  306   2              return rc;
+  307   2          }
+  308   1          if ((status & LT8920_STATUS_PKT_FLAG) == 0U) {
+  309   2              return SUCCESS;
+  310   2          }
+  311   1      
+  312   1          if (g_wireless_state.mode == WIRELESS_MODE_TX) {
+  313   2              g_wireless_state.tx_ok_count++;
+  314   2              rc = Wireless_SetRxMode();
+  315   2              if (rc != SUCCESS) {
+  316   3                  g_wireless_state.last_error = rc;
+  317   3                  LOGE(WIRELESS_TAG, "tx->rx fail rc=%d", rc);
+  318   3                  return rc;
+  319   3              }
+  320   2              return SUCCESS;
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 6   
+
+  321   2          }
+  322   1      
+  323   1          if (g_wireless_state.mode != WIRELESS_MODE_RX) {
+  324   2              return SUCCESS;
+  325   2          }
+  326   1      
+  327   1          if ((status & LT8920_STATUS_CRC_ERROR) != 0U) {
+  328   2              g_wireless_state.crc_error_count++;
+  329   2              (void)Wireless_SetRxMode();
+  330   2              return SUCCESS;
+  331   2          }
+  332   1      
+  333   1          rc = LT8920_ReadPacket(packet_buf, LT8920_MAX_PAYLOAD_LEN, &packet_len);
+  334   1          if (rc == SUCCESS) {
+  335   2              g_wireless_state.rx_ok_count++;
+  336   2              rc = Wireless_QueuePush(packet_buf, packet_len);
+  337   2              if (rc != SUCCESS) {
+  338   3                  g_wireless_state.rx_drop_count++;
+  339   3              }
+  340   2          } else {
+  341   2              g_wireless_state.rx_drop_count++;
+  342   2              g_wireless_state.last_error = rc;
+  343   2          }
+  344   1      
+  345   1          (void)Wireless_SetRxMode();
+  346   1          return SUCCESS;
+  347   1      }
+  348          
+  349          s8 Wireless_Send(const u8 *buf, u8 len)
+  350          {
+  351   1          u16 status;
+  352   1          u16 timeout_cnt;
+  353   1          s8 rc;
+  354   1      
+  355   1          if ((buf == 0) || (len == 0U) || (len > LT8920_MAX_PAYLOAD_LEN)) {
+  356   2              return WIRELESS_ERR_PARAM;
+  357   2          }
+  358   1          if ((!g_wireless_state.initialized) || (!g_wireless_state.ready)) {
+  359   2              return WIRELESS_ERR_STATE;
+  360   2          }
+  361   1      
+  362   1          rc = LT8920_WritePacket(buf, len);
+  363   1          if (rc != SUCCESS) {
+  364   2              g_wireless_state.last_error = rc;
+  365   2              LOGE(WIRELESS_TAG, "load tx fifo fail rc=%d", rc);
+  366   2              return rc;
+  367   2          }
+  368   1      
+  369   1          rc = Wireless_SetTxMode();
+  370   1          if (rc != SUCCESS) {
+  371   2              g_wireless_state.last_error = rc;
+  372   2              LOGE(WIRELESS_TAG, "enter tx fail rc=%d", rc);
+  373   2              return rc;
+  374   2          }
+  375   1      
+  376   1          for (timeout_cnt = 0U; timeout_cnt < WIRELESS_TX_TIMEOUT_LOOPS; timeout_cnt++) {
+  377   2              rc = LT8920_ReadStatus(&status);
+  378   2              if (rc != SUCCESS) {
+  379   3                  break;
+  380   3              }
+  381   2              if ((status & LT8920_STATUS_PKT_FLAG) != 0U) {
+  382   3                  g_wireless_state.tx_ok_count++;
+  383   3                  (void)Wireless_SetRxMode();
+  384   3                  return SUCCESS;
+  385   3              }
+  386   2              WirelessPort_DelayUs(10U);
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 7   
+
+  387   2          }
+  388   1      
+  389   1          (void)Wireless_SetRxMode();
+  390   1          g_wireless_state.last_error = WIRELESS_ERR_TIMEOUT;
+  391   1          LOGE(WIRELESS_TAG, "tx timeout len=%u", (u16)len);
+  392   1          return WIRELESS_ERR_TIMEOUT;
+  393   1      }
+  394          
+  395          s8 Wireless_Receive(u8 *buf, u8 buf_len, u8 *out_len)
+  396          {
+  397   1          return Wireless_QueuePop(buf, buf_len, out_len);
+  398   1      }
+  399          
+  400          s8 Wireless_SetAntenna(u8 ant_sel)
+  401          {
+  402   1          if ((ant_sel != WIRELESS_ANT1) && (ant_sel != WIRELESS_ANT2)) {
+  403   2              return WIRELESS_ERR_PARAM;
+  404   2          }
+  405   1          if (!g_wireless_state.initialized) {
+  406   2              return WIRELESS_ERR_STATE;
+  407   2          }
+  408   1      
+  409   1          WirelessPort_SetAntSel((ant_sel == WIRELESS_ANT2) ? WIRELESS_PORT_ANT2 : WIRELESS_PORT_ANT1);
+  410   1          g_wireless_state.antenna = ant_sel;
+  411   1          return SUCCESS;
+  412   1      }
+  413          
+  414          s8 Wireless_GetState(Wireless_State_t *state)
+  415          {
+  416   1          u16 i;
+  417   1          u8 *dst;
+  418   1          const u8 *src;
+  419   1      
+  420   1          if (state == 0) {
+  421   2              return WIRELESS_ERR_PARAM;
+  422   2          }
+  423   1      
+  424   1          dst = (u8 *)state;
+  425   1          src = (const u8 *)&g_wireless_state;
+  426   1          for (i = 0U; i < (u16)sizeof(Wireless_State_t); i++) {
+  427   2              dst[i] = src[i];
+  428   2          }
+  429   1          return SUCCESS;
+  430   1      }
+  431          
+  432          s8 Wireless_RescanAntenna(void)
+  433          {
+  434   1          u16 ant1_rssi;
+  435   1          u16 ant2_rssi;
+  436   1          u16 ant1_ok;
+  437   1          u16 ant2_ok;
+  438   1          u16 ant1_crc;
+  439   1          u16 ant2_crc;
+  440   1          s8 rc;
+  441   1          u8 final_ant;
+  442   1      
+  443   1          if (!g_wireless_state.initialized) {
+  444   2              return WIRELESS_ERR_STATE;
+  445   2          }
+  446   1      
+  447   1          g_wireless_state.ready = 0U;
+  448   1          rc = Wireless_SetIdleMode();
+  449   1          if (rc != SUCCESS) {
+  450   2              return rc;
+  451   2          }
+  452   1      
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 8   
+
+  453   1          rc = Wireless_ProbeAntenna(WIRELESS_ANT1, &ant1_rssi, &ant1_ok, &ant1_crc);
+  454   1          if (rc != SUCCESS) {
+  455   2              return rc;
+  456   2          }
+  457   1          rc = Wireless_ProbeAntenna(WIRELESS_ANT2, &ant2_rssi, &ant2_ok, &ant2_crc);
+  458   1          if (rc != SUCCESS) {
+  459   2              return rc;
+  460   2          }
+  461   1      
+  462   1          g_wireless_state.antenna_rssi_ant1 = ant1_rssi;
+  463   1          g_wireless_state.antenna_rssi_ant2 = ant2_rssi;
+  464   1      
+  465   1          final_ant = WIRELESS_ANT1;
+  466   1          if (ant2_rssi > ant1_rssi) {
+  467   2              final_ant = WIRELESS_ANT2;
+  468   2          } else if ((ant2_rssi == ant1_rssi) && (ant2_ok > ant1_ok)) {
+  469   2              final_ant = WIRELESS_ANT2;
+  470   2          } else if ((ant2_rssi == ant1_rssi) && (ant2_ok == ant1_ok) && (ant2_crc < ant1_crc)) {
+  471   2              final_ant = WIRELESS_ANT2;
+  472   2          }
+  473   1      
+  474   1          if ((ant1_ok == 0U) && (ant2_ok == 0U) &&
+  475   1              (ant1_rssi < WIRELESS_SIGNAL_RSSI_MIN) &&
+  476   1              (ant2_rssi < WIRELESS_SIGNAL_RSSI_MIN)) {
+  477   2              g_wireless_state.scan_has_signal = 0U;
+  478   2              final_ant = WIRELESS_ANT1;
+  479   2              LOGW(WIRELESS_TAG, "scan no signal, fallback ANT1");
+  480   2          } else {
+  481   2              g_wireless_state.scan_has_signal = 1U;
+  482   2          }
+  483   1      
+  484   1          rc = Wireless_SetAntenna(final_ant);
+  485   1          if (rc != SUCCESS) {
+  486   2              return rc;
+  487   2          }
+  488   1          rc = Wireless_SetRxMode();
+  489   1          if (rc != SUCCESS) {
+  490   2              return rc;
+  491   2          }
+  492   1      
+  493   1          g_wireless_state.ready = 1U;
+  494   1          LOGI(WIRELESS_TAG, "scan ant1 rssi=%u ok=%u crc=%u ant2 rssi=%u ok=%u crc=%u final=%u",
+  497   1               ant1_rssi, ant1_ok, ant1_crc,
+  497   1               ant2_rssi, ant2_ok, ant2_crc,
+  497   1               (u16)final_ant);
+  498   1          return SUCCESS;
+  499   1      }
+  500          
+  501          s8 Wireless_SearchSignalPoll(void)
+  502          {
+  503   1          static u16 poll_div = 0U;
+  504   1          s8 rc;
+  505   1      
+  506   1          if (!g_wireless_state.initialized) {
+  507   2              return WIRELESS_ERR_STATE;
+  508   2          }
+  509   1          if (g_wireless_state.scan_has_signal) {
+  510   2              return SUCCESS;
+  511   2          }
+  512   1      
+  513   1          poll_div++;
+  514   1          if (poll_div < WIRELESS_SEARCH_POLL_DIV) {
+  515   2              return SUCCESS;
+  516   2          }
+  517   1          poll_div = 0U;
+  518   1      
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 9   
+
+  519   1          rc = Wireless_RescanAntenna();
+  520   1          if (rc != SUCCESS) {
+  521   2              g_wireless_state.last_error = rc;
+  522   2              LOGE(WIRELESS_TAG, "search rescan fail rc=%d", rc);
+  523   2              return rc;
+  524   2          }
+  525   1          if (g_wireless_state.scan_has_signal) {
+  526   2              LOGI(WIRELESS_TAG, "signal detected ant=%u rssi=%u/%u",
+  529   2                   (u16)g_wireless_state.antenna,
+  529   2                   g_wireless_state.antenna_rssi_ant1,
+  529   2                   g_wireless_state.antenna_rssi_ant2);
+  530   2          }
+  531   1          return SUCCESS;
+  532   1      }
+  533          
+  534          s8 Wireless_RunMinimalTest(void)
+  535          {
+  536   1          u16 reg3;
+  537   1          u16 reg6;
+  538   1          u16 reg11;
+  539   1          u16 reg41;
+  540   1          s8 rc;
+  541   1      
+  542   1          if ((!g_wireless_state.initialized) || (!g_wireless_state.ready)) {
+  543   2              return WIRELESS_ERR_STATE;
+  544   2          }
+  545   1      
+  546   1          rc = LT8920_ReadReg(3U, &reg3);
+  547   1          if (rc != SUCCESS) {
+  548   2              LOGE(WIRELESS_TAG, "test read reg3 fail rc=%d", rc);
+  549   2              return rc;
+  550   2          }
+  551   1      
+  552   1          rc = LT8920_ReadReg(6U, &reg6);
+  553   1          if (rc != SUCCESS) {
+  554   2              LOGE(WIRELESS_TAG, "test read reg6 fail rc=%d", rc);
+  555   2              return rc;
+  556   2          }
+  557   1      
+  558   1          rc = LT8920_ReadReg(11U, &reg11);
+  559   1          if (rc != SUCCESS) {
+  560   2              LOGE(WIRELESS_TAG, "test read reg11 fail rc=%d", rc);
+  561   2              return rc;
+  562   2          }
+  563   1      
+  564   1          rc = LT8920_ReadReg(41U, &reg41);
+  565   1          if (rc != SUCCESS) {
+  566   2              LOGE(WIRELESS_TAG, "test read reg41 fail rc=%d", rc);
+  567   2              return rc;
+  568   2          }
+  569   1      
+  570   1          if (reg11 != 0x0008U) {
+  571   2              LOGE(WIRELESS_TAG, "test verify reg11 fail val=0x%04X", reg11);
+  572   2              return WIRELESS_ERR_VERIFY;
+  573   2          }
+  574   1          if (reg41 != 0xB000U) {
+  575   2              LOGE(WIRELESS_TAG, "test verify reg41 fail val=0x%04X", reg41);
+  576   2              return WIRELESS_ERR_VERIFY;
+  577   2          }
+  578   1      
+  579   1          LOGI(WIRELESS_TAG,
+  581   1               "test ok no-whoami reg3=0x%04X reg6=0x%04X reg11=0x%04X reg41=0x%04X",
+  581   1               reg3, reg6, reg11, reg41);
+  582   1          return SUCCESS;
+  583   1      }
+
+C251 COMPILER V5.60.0,  wireless                                                           27/04/26  00:55:24  PAGE 10  
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      2474     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =       269        173
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =       729     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

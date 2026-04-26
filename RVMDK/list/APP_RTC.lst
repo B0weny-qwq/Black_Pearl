@@ -1,0 +1,375 @@
+C251 COMPILER V5.60.0,  APP_RTC                                                            27/04/26  00:55:18  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_RTC
+OBJECT MODULE PLACED IN .\list\APP_RTC.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_RTC.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\User;
+                    -..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\Devic
+                    -e\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP_R
+                    -TC.lst) TABS(2) OBJECT(.\list\APP_RTC.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include  "APP.h"
+    6          #include  "STC32G_RTC.h"
+    7          #include  "STC32G_GPIO.h"
+    8          #include  "STC32G_UART.h"
+    9          #include  "STC32G_NVIC.h"
+   10          #include  "STC32G_Switch.h"
+   11          
+   12          /*************  功能说明  **************
+   13          
+   14          读写芯片内部集成的RTC模块.
+   15          
+   16          用STC的MCU的IO方式驱动8位数码管。
+   17          
+   18          使用Timer0的16位自动重装来产生1ms节拍,程序运行于这个节拍下, 用户修改MCU主时�
+             -��频率时,自动定时于1ms.
+   19          
+   20          8位数码管显示时间(小时-分钟-秒).
+   21          
+   22          行列扫描按键键码为25~32.
+   23          
+   24          按键只支持单键按下, 不支持多键同时按下, 那样将会有不可预知的结果.
+   25          
+   26          键按下超过1秒后,将以10键/秒的速度提供重键输出. 用户只需要检测KeyCode是否非0
+             -来判断键是否按下.
+   27          
+   28          调整时间键:
+   29          键码25: 小时+.
+   30          键码26: 小时-.
+   31          键码27: 分钟+.
+   32          键码28: 分钟-.
+   33          
+   34          下载时, 选择时钟 24MHz (可以在配置文件"config.h"中修改).
+   35          
+   36          ******************************************/
+   37          
+   38          //========================================================================
+   39          //                               本地常量声明 
+   40          //========================================================================
+   41          
+   42          #define SleepModeSet  0        //0:不进休眠模式，使用数码管显示时不能进休眠; 1:使能
+             -休眠模式
+   43          
+   44          //========================================================================
+   45          //                               本地变量声明
+   46          //========================================================================
+   47          
+   48          
+   49          //========================================================================
+   50          //                               本地函数声明
+   51          //========================================================================
+   52          
+   53          void IO_KeyScan(void);   //50ms call
+C251 COMPILER V5.60.0,  APP_RTC                                                            27/04/26  00:55:18  PAGE 2   
+
+   54          void DisplayRTC(void);
+   55          void WriteRTC(void);
+   56          
+   57          //========================================================================
+   58          //                            外部函数和变量声明
+   59          //========================================================================
+   60          
+   61          extern bit B_1S;
+   62          extern bit B_Alarm;
+   63          
+   64          //========================================================================
+   65          // 函数: RTC_init
+   66          // 描述: 用户初始化程序.
+   67          // 参数: None.
+   68          // 返回: None.
+   69          // 版本: V1.0, 2020-09-25
+   70          //========================================================================
+   71          void RTC_init(void)
+   72          {
+   73   1        u8  i;
+   74   1        RTC_InitTypeDef   RTC_InitStructure;
+   75   1        COMx_InitDefine   COMx_InitStructure;         //结构定义
+   76   1      
+   77   1        RTC_InitStructure.RTC_Clock  = RTC_IRC32KCR;  //RTC 时钟, RTC_IRC32KCR, RTC_X32KCR
+   78   1        RTC_InitStructure.RTC_Enable = ENABLE;      //I2C功能使能,   ENABLE, DISABLE
+   79   1        RTC_InitStructure.RTC_Year   = 21;          //RTC 年, 00~99, 对应2000~2099年
+   80   1        RTC_InitStructure.RTC_Month  = 12;          //RTC 月, 01~12
+   81   1        RTC_InitStructure.RTC_Day    = 31;          //RTC 日, 01~31
+   82   1        RTC_InitStructure.RTC_Hour   = 23;          //RTC 时, 00~23
+   83   1        RTC_InitStructure.RTC_Min    = 59;          //RTC 分, 00~59
+   84   1        RTC_InitStructure.RTC_Sec    = 55;          //RTC 秒, 00~59
+   85   1        RTC_InitStructure.RTC_Ssec   = 00;          //RTC 1/128秒, 00~127
+   86   1      
+   87   1        RTC_InitStructure.RTC_ALAHour= 00;          //RTC 闹钟时, 00~23
+   88   1        RTC_InitStructure.RTC_ALAMin = 00;          //RTC 闹钟分, 00~59
+   89   1        RTC_InitStructure.RTC_ALASec = 00;          //RTC 闹钟秒, 00~59
+   90   1        RTC_InitStructure.RTC_ALASsec= 00;          //RTC 闹钟1/128秒, 00~127
+   91   1        RTC_Inilize(&RTC_InitStructure);
+   92   1        NVIC_RTC_Init(RTC_ALARM_INT|RTC_SEC_INT,Priority_0);    //中断使能, RTC_ALARM_INT/RTC_DAY_INT/RTC_HOUR
+             -_INT/RTC_MIN_INT/RTC_SEC_INT/RTC_SEC2_INT/RTC_SEC8_INT/RTC_SEC32_INT/DISABLE; 优先级(低到高) Priority_0,Priority_1
+             -,Priority_2,Priority_3
+   93   1      
+   94   1        COMx_InitStructure.UART_Mode      = UART_8bit_BRTx;   //模式,   UART_ShiftRight,UART_8bit_BRTx,UART_9bi
+             -t,UART_9bit_BRTx
+   95   1        COMx_InitStructure.UART_BRT_Use   = BRT_Timer2;     //选择波特率发生器, BRT_Timer2 (注意: 串口
+             -2固定使用BRT_Timer2, 所以不用选择)
+   96   1        COMx_InitStructure.UART_BaudRate  = 115200ul;     //波特率,     110 ~ 115200
+   97   1        COMx_InitStructure.UART_RxEnable  = DISABLE;      //接收禁止,   ENABLE 或 DISABLE
+   98   1        UART_Configuration(UART1, &COMx_InitStructure);   //初始化串口2 UART1,UART2,UART3,UART4
+   99   1        NVIC_UART1_Init(ENABLE,Priority_1);   //中断使能, ENABLE/DISABLE; 优先级(低到高) Priority_0,Pri
+             -ority_1,Priority_2,Priority_3
+  100   1        
+  101   1        P0_MODE_IO_PU(GPIO_Pin_All);    //P0 设置为准双向口
+  102   1        P6_MODE_IO_PU(GPIO_Pin_All);    //P6 设置为准双向口
+  103   1        P7_MODE_IO_PU(GPIO_Pin_All);    //P7 设置为准双向口
+  104   1        display_index = 0;
+  105   1        
+  106   1        for(i=0; i<8; i++)  LED8[i] = 0x10; //上电消隐
+  107   1          
+  108   1        KeyHoldCnt = 0; //键按下计时
+  109   1        KeyCode = 0;    //给用户使用的键码
+  110   1      
+  111   1        IO_KeyState = 0;
+  112   1        IO_KeyState1 = 0;
+  113   1        IO_KeyHoldCnt = 0;
+  114   1        cnt50ms = 0;
+C251 COMPILER V5.60.0,  APP_RTC                                                            27/04/26  00:55:18  PAGE 3   
+
+  115   1      
+  116   1        printf("STC32G RTC Test!\r\n");
+  117   1      }
+  118          
+  119          //========================================================================
+  120          // 函数: Sample_RTC
+  121          // 描述: 用户应用程序.
+  122          // 参数: None.
+  123          // 返回: None.
+  124          // 版本: V1.0, 2020-09-25
+  125          //========================================================================
+  126          void Sample_RTC(void)
+  127          {
+  128   1        if(B_1S)
+  129   1        {
+  130   2          B_1S = 0;
+  131   2          DisplayRTC();
+  132   2          printf("Year=20%d,Month=%d,Day=%d,Hour=%d,Minute=%d,Second=%d\r\n",YEAR,MONTH,DAY,HOUR,MIN,SEC);
+  133   2        }
+  134   1      
+  135   1        if(B_Alarm)
+  136   1        {
+  137   2          B_Alarm = 0;
+  138   2          printf("RTC Alarm!\r\n");
+  139   2        }
+  140   1      
+  141   1      #if(SleepModeSet == 1)
+                   _nop_();
+                   _nop_();
+                   PD = 1;  //STC32G 芯片使用内部32K时钟，休眠无法唤醒
+                   _nop_();
+                   _nop_();
+                   _nop_();
+                   _nop_();
+                   _nop_();
+                   _nop_();
+               #else
+  152   1        DisplayScan();
+  153   1        
+  154   1        if(++cnt50ms >= 50)     //50ms扫描一次行列键盘
+  155   1        {
+  156   2          cnt50ms = 0;
+  157   2          IO_KeyScan();
+  158   2        }
+  159   1        
+  160   1        if(KeyCode != 0)        //有键按下
+  161   1        {
+  162   2          if(KeyCode == 25)   //hour +1
+  163   2          {
+  164   3            if(++hour >= 24)    hour = 0;
+  165   3            WriteRTC();
+  166   3            DisplayRTC();
+  167   3          }
+  168   2          if(KeyCode == 26)   //hour -1
+  169   2          {
+  170   3            if(--hour >= 24)    hour = 23;
+  171   3            WriteRTC();
+  172   3            DisplayRTC();
+  173   3          }
+  174   2          if(KeyCode == 27)   //minute +1
+  175   2          {
+  176   3            second = 0;
+  177   3            if(++minute >= 60)  minute = 0;
+  178   3            WriteRTC();
+  179   3            DisplayRTC();
+  180   3          }
+C251 COMPILER V5.60.0,  APP_RTC                                                            27/04/26  00:55:18  PAGE 4   
+
+  181   2          if(KeyCode == 28)   //minute -1
+  182   2          {
+  183   3            second = 0;
+  184   3            if(--minute >= 60)  minute = 59;
+  185   3            WriteRTC();
+  186   3            DisplayRTC();
+  187   3          }
+  188   2      
+  189   2          KeyCode = 0;
+  190   2        }
+  191   1      #endif
+  192   1      }
+  193          
+  194          //========================================================================
+  195          // 函数: DisplayRTC
+  196          // 描述: 显示时钟函数.
+  197          // 参数: None.
+  198          // 返回: None.
+  199          // 版本: V1.0, 2020-09-25
+  200          //========================================================================
+  201          void DisplayRTC(void)
+  202          {
+  203   1          hour = HOUR;
+  204   1          minute = MIN;
+  205   1      
+  206   1          if(HOUR >= 10)  LED8[0] = HOUR / 10;
+  207   1          else            LED8[0] = DIS_BLACK;
+  208   1          LED8[1] = HOUR % 10;
+  209   1          LED8[2] = DIS_;
+  210   1          LED8[3] = MIN / 10;
+  211   1          LED8[4] = MIN % 10;
+  212   1          LED8[5] = DIS_;
+  213   1          LED8[6] = SEC / 10;
+  214   1          LED8[7] = SEC % 10;
+  215   1      }
+  216          
+  217          
+  218          //========================================================================
+  219          // 函数: WriteRTC
+  220          // 描述: 写RTC函数.
+  221          // 参数: None.
+  222          // 返回: None.
+  223          // 版本: V1.0, 2020-09-25
+  224          //========================================================================
+  225          void WriteRTC(void)
+  226          {
+  227   1          INIYEAR = YEAR;   //继承当前年月日
+  228   1          INIMONTH = MONTH;
+  229   1          INIDAY = DAY;
+  230   1      
+  231   1          INIHOUR = hour;   //修改时分秒
+  232   1          INIMIN = minute;
+  233   1          INISEC = 0;
+  234   1          INISSEC = 0;
+  235   1          RTCCFG |= 0x01;   //触发RTC寄存器初始化
+  236   1      }
+  237          
+  238          
+  239          /*****************************************************
+  240              行列键扫描程序
+  241              使用XY查找4x4键的方法，只能单键，速度快
+  242          
+  243             Y     P04      P05      P06      P07
+  244                    |        |        |        |
+  245          X         |        |        |        |
+  246          P00 ---- K00 ---- K01 ---- K02 ---- K03 ----
+C251 COMPILER V5.60.0,  APP_RTC                                                            27/04/26  00:55:18  PAGE 5   
+
+  247                    |        |        |        |
+  248          P01 ---- K04 ---- K05 ---- K06 ---- K07 ----
+  249                    |        |        |        |
+  250          P02 ---- K08 ---- K09 ---- K10 ---- K11 ----
+  251                    |        |        |        |
+  252          P03 ---- K12 ---- K13 ---- K14 ---- K15 ----
+  253                    |        |        |        |
+  254          ******************************************************/
+  255          
+  256          
+  257          //========================================================================
+  258          // 函数: IO_KeyDelay
+  259          // 描述: 按键扫描延迟程序.
+  260          // 参数: None.
+  261          // 返回: None.
+  262          // 版本: V1.0, 2020-09-25
+  263          //========================================================================
+  264          void IO_KeyDelay(void)
+  265          {
+  266   1          u8 i;
+  267   1          i = 60;
+  268   1          while(--i)  ;
+  269   1      }
+  270          
+  271          //========================================================================
+  272          // 函数: IO_KeyScan
+  273          // 描述: 按键扫描程序.
+  274          // 参数: None.
+  275          // 返回: None.
+  276          // 版本: V1.0, 2020-09-25
+  277          //========================================================================
+  278          void IO_KeyScan(void)    //50ms call
+  279          {
+  280   1          u8  j;
+  281   1      
+  282   1          j = IO_KeyState1;   //保存上一次状态
+  283   1      
+  284   1          P0 = 0xf0;  //X低，读Y
+  285   1          IO_KeyDelay();
+  286   1          IO_KeyState1 = P0 & 0xf0;
+  287   1      
+  288   1          P0 = 0x0f;  //Y低，读X
+  289   1          IO_KeyDelay();
+  290   1          IO_KeyState1 |= (P0 & 0x0f);
+  291   1          IO_KeyState1 ^= 0xff;   //取反
+  292   1          
+  293   1          if(j == IO_KeyState1)   //连续两次读相等
+  294   1          {
+  295   2              j = IO_KeyState;
+  296   2              IO_KeyState = IO_KeyState1;
+  297   2              if(IO_KeyState != 0)    //有键按下
+  298   2              {
+  299   3                  F0 = 0;
+  300   3                  if(j == 0)  F0 = 1; //第一次按下
+  301   3                  else if(j == IO_KeyState)
+  302   3                  {
+  303   4                      if(++IO_KeyHoldCnt >= 20)   //1秒后重键
+  304   4                      {
+  305   5                          IO_KeyHoldCnt = 18;
+  306   5                          F0 = 1;
+  307   5                      }
+  308   4                  }
+  309   3                  if(F0)
+  310   3                  {
+  311   4                      j = T_KeyTable[IO_KeyState >> 4];
+  312   4                      if((j != 0) && (T_KeyTable[IO_KeyState& 0x0f] != 0)) 
+C251 COMPILER V5.60.0,  APP_RTC                                                            27/04/26  00:55:18  PAGE 6   
+
+  313   4                          KeyCode = (j - 1) * 4 + T_KeyTable[IO_KeyState & 0x0f] + 16;    //计算键码，17~3
+             -2
+  314   4                  }
+  315   3              }
+  316   2              else    IO_KeyHoldCnt = 0;
+  317   2          }
+  318   1          P0 = 0xff;
+  319   1      }
+  320          
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       950     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------         22
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        88     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

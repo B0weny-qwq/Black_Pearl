@@ -1,0 +1,212 @@
+C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    27/04/26  00:55:20  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_PWMA_Output
+OBJECT MODULE PLACED IN .\list\APP_PWMA_Output.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_PWMA_Output.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;
+                    -..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_bowe
+                    -ny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\li
+                    -st\APP_PWMA_Output.lst) TABS(2) OBJECT(.\list\APP_PWMA_Output.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include  "APP.h"
+    6          #include  "STC32G_PWM.h"
+    7          #include  "STC32G_GPIO.h"
+    8          #include  "STC32G_NVIC.h"
+    9          
+   10          /*************  功能说明  **************
+   11          
+   12          高级PWM定时器 PWM1P/PWM1N,PWM2P/PWM2N,PWM3P/PWM3N,PWM4P/PWM4N 每个通道都可独立实现PWM输�
+             -�，或者两两互补对称输出.
+   13          
+   14          8个通道PWM设置对应P6的8个端口.
+   15          
+   16          通过P6口上连接的8个LED灯，利用PWM实现呼吸灯效果.
+   17          
+   18          PWM周期和占空比可以根据需要自行设置，最高可达65535.
+   19          
+   20          下载时, 选择时钟 24MHZ (用户可在"config.h"修改频率).
+   21          
+   22          ******************************************/
+   23          
+   24          
+   25          //========================================================================
+   26          //                               本地常量声明 
+   27          //========================================================================
+   28          
+   29          
+   30          //========================================================================
+   31          //                               本地变量声明
+   32          //========================================================================
+   33          
+   34          PWMx_Duty PWMA_Duty;
+   35          bit PWM1_Flag;
+   36          bit PWM2_Flag;
+   37          bit PWM3_Flag;
+   38          bit PWM4_Flag;
+   39          
+   40          //========================================================================
+   41          //                               本地函数声明
+   42          //========================================================================
+   43          
+   44          
+   45          //========================================================================
+   46          //                            外部函数和变量声明
+   47          //========================================================================
+   48          
+   49          
+   50          //========================================================================
+   51          // 函数: PWMA_Output_init
+   52          // 描述: 用户初始化程序.
+   53          // 参数: None.
+   54          // 返回: None.
+   55          // 版本: V1.0, 2020-09-28
+C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    27/04/26  00:55:20  PAGE 2   
+
+   56          //========================================================================
+   57          void PWMA_Output_init(void)
+   58          {
+   59   1        PWMx_InitDefine   PWMx_InitStructure;
+   60   1        
+   61   1        PWMA_Duty.PWM1_Duty = 128;
+   62   1        PWMA_Duty.PWM2_Duty = 256;
+   63   1        PWMA_Duty.PWM3_Duty = 512;
+   64   1        PWMA_Duty.PWM4_Duty = 1024;
+   65   1      
+   66   1        PWMx_InitStructure.PWM_Mode    =  CCMRn_PWM_MODE1;  //模式,   CCMRn_FREEZE,CCMRn_MATCH_VALID,CCMRn_MATCH_
+             -INVALID,CCMRn_ROLLOVER,CCMRn_FORCE_INVALID,CCMRn_FORCE_VALID,CCMRn_PWM_MODE1,CCMRn_PWM_MODE2
+   67   1        PWMx_InitStructure.PWM_Duty    = PWMA_Duty.PWM1_Duty; //PWM占空比时间, 0~Period
+   68   1        PWMx_InitStructure.PWM_EnoSelect   = ENO1P | ENO1N; //输出通道选择, ENO1P,ENO1N,ENO2P,ENO2N,ENO3P,
+             -ENO3N,ENO4P,ENO4N / ENO5P,ENO6P,ENO7P,ENO8P
+   69   1        PWM_Configuration(PWM1, &PWMx_InitStructure);       //初始化PWM,  PWMA,PWMB
+   70   1      
+   71   1        PWMx_InitStructure.PWM_Mode    =  CCMRn_PWM_MODE1;  //模式,   CCMRn_FREEZE,CCMRn_MATCH_VALID,CCMRn_MATCH_
+             -INVALID,CCMRn_ROLLOVER,CCMRn_FORCE_INVALID,CCMRn_FORCE_VALID,CCMRn_PWM_MODE1,CCMRn_PWM_MODE2
+   72   1        PWMx_InitStructure.PWM_Duty    = PWMA_Duty.PWM2_Duty; //PWM占空比时间, 0~Period
+   73   1        PWMx_InitStructure.PWM_EnoSelect   = ENO2P | ENO2N; //输出通道选择, ENO1P,ENO1N,ENO2P,ENO2N,ENO3P,
+             -ENO3N,ENO4P,ENO4N / ENO5P,ENO6P,ENO7P,ENO8P
+   74   1        PWM_Configuration(PWM2, &PWMx_InitStructure);       //初始化PWM,  PWMA,PWMB
+   75   1      
+   76   1        PWMx_InitStructure.PWM_Mode    =  CCMRn_PWM_MODE1;  //模式,   CCMRn_FREEZE,CCMRn_MATCH_VALID,CCMRn_MATCH_
+             -INVALID,CCMRn_ROLLOVER,CCMRn_FORCE_INVALID,CCMRn_FORCE_VALID,CCMRn_PWM_MODE1,CCMRn_PWM_MODE2
+   77   1        PWMx_InitStructure.PWM_Duty    = PWMA_Duty.PWM3_Duty; //PWM占空比时间, 0~Period
+   78   1        PWMx_InitStructure.PWM_EnoSelect   = ENO3P | ENO3N; //输出通道选择, ENO1P,ENO1N,ENO2P,ENO2N,ENO3P,
+             -ENO3N,ENO4P,ENO4N / ENO5P,ENO6P,ENO7P,ENO8P
+   79   1        PWM_Configuration(PWM3, &PWMx_InitStructure);       //初始化PWM,  PWMA,PWMB
+   80   1      
+   81   1        PWMx_InitStructure.PWM_Mode    =  CCMRn_PWM_MODE1;  //模式,   CCMRn_FREEZE,CCMRn_MATCH_VALID,CCMRn_MATCH_
+             -INVALID,CCMRn_ROLLOVER,CCMRn_FORCE_INVALID,CCMRn_FORCE_VALID,CCMRn_PWM_MODE1,CCMRn_PWM_MODE2
+   82   1        PWMx_InitStructure.PWM_Duty    = PWMA_Duty.PWM4_Duty; //PWM占空比时间, 0~Period
+   83   1        PWMx_InitStructure.PWM_EnoSelect   = ENO4P | ENO4N; //输出通道选择, ENO1P,ENO1N,ENO2P,ENO2N,ENO3P,
+             -ENO3N,ENO4P,ENO4N / ENO5P,ENO6P,ENO7P,ENO8P
+   84   1        PWM_Configuration(PWM4, &PWMx_InitStructure);       //初始化PWM,  PWMA,PWMB
+   85   1      
+   86   1        PWMx_InitStructure.PWM_Period   = 2047;             //周期时间,   0~65535
+   87   1        PWMx_InitStructure.PWM_DeadTime = 0;                //死区发生器设置, 0~255
+   88   1        PWMx_InitStructure.PWM_MainOutEnable= ENABLE;       //主输出使能, ENABLE,DISABLE
+   89   1        PWMx_InitStructure.PWM_CEN_Enable   = ENABLE;       //使能计数器, ENABLE,DISABLE
+   90   1        PWM_Configuration(PWMA, &PWMx_InitStructure);       //初始化PWM通用寄存器,  PWMA,PWMB
+   91   1      
+   92   1        PWM1_USE_P60P61();
+   93   1        PWM2_USE_P62P63();
+   94   1        PWM3_USE_P64P65();
+   95   1        PWM4_USE_P66P67();
+   96   1      
+   97   1        P4_MODE_IO_PU(GPIO_Pin_0);      //P4.0 设置为准双向口
+   98   1      //  P6_MODE_IO_PU(GPIO_Pin_All);    //P6 设置为准双向口（启动PWM功能后输出脚自动设置为�
+             -��挽输出模式）
+   99   1        NVIC_PWM_Init(PWMA,DISABLE,Priority_0);
+  100   1        P40 = 0;    //打开LED电源
+  101   1      }
+  102          
+  103          //========================================================================
+  104          // 函数: Sample_PWMA_Output
+  105          // 描述: 用户应用程序.
+  106          // 参数: None.
+  107          // 返回: None.
+  108          // 版本: V1.0, 2020-09-28
+  109          //========================================================================
+  110          void Sample_PWMA_Output(void)
+  111          {
+  112   1        if(!PWM1_Flag)
+C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    27/04/26  00:55:20  PAGE 3   
+
+  113   1        {
+  114   2          PWMA_Duty.PWM1_Duty++;
+  115   2          if(PWMA_Duty.PWM1_Duty >= 2047) PWM1_Flag = 1;
+  116   2        }
+  117   1        else
+  118   1        {
+  119   2          PWMA_Duty.PWM1_Duty--;
+  120   2          if(PWMA_Duty.PWM1_Duty <= 0) PWM1_Flag = 0;
+  121   2        }
+  122   1      
+  123   1        if(!PWM2_Flag)
+  124   1        {
+  125   2          PWMA_Duty.PWM2_Duty++;
+  126   2          if(PWMA_Duty.PWM2_Duty >= 2047) PWM2_Flag = 1;
+  127   2        }
+  128   1        else
+  129   1        {
+  130   2          PWMA_Duty.PWM2_Duty--;
+  131   2          if(PWMA_Duty.PWM2_Duty <= 0) PWM2_Flag = 0;
+  132   2        }
+  133   1      
+  134   1        if(!PWM3_Flag)
+  135   1        {
+  136   2          PWMA_Duty.PWM3_Duty++;
+  137   2          if(PWMA_Duty.PWM3_Duty >= 2047) PWM3_Flag = 1;
+  138   2        }
+  139   1        else
+  140   1        {
+  141   2          PWMA_Duty.PWM3_Duty--;
+  142   2          if(PWMA_Duty.PWM3_Duty <= 0) PWM3_Flag = 0;
+  143   2        }
+  144   1      
+  145   1        if(!PWM4_Flag)
+  146   1        {
+  147   2          PWMA_Duty.PWM4_Duty++;
+  148   2          if(PWMA_Duty.PWM4_Duty >= 2047) PWM4_Flag = 1;
+  149   2        }
+  150   1        else
+  151   1        {
+  152   2          PWMA_Duty.PWM4_Duty--;
+  153   2          if(PWMA_Duty.PWM4_Duty <= 0) PWM4_Flag = 0;
+  154   2        }
+  155   1        
+  156   1        UpdatePwm(PWMA, &PWMA_Duty);
+  157   1      }
+  158          
+  159          
+  160          
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       419     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =        16          9
+  bit size             =         4     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    27/04/26  00:55:20  PAGE 4   
+
+  hconst size          =    ------     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

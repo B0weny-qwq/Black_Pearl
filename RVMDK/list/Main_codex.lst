@@ -1,0 +1,90 @@
+C251 COMPILER V5.60.0,  Main                                                               23/04/26  09:49:08  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE Main
+OBJECT MODULE PLACED IN .\list\Main_codex.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\User\Main.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\User;..\App
+                    -\inc;..\Code_boweny\Function\Log;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658) DEBUG PRINT(.\list\Main_co
+                    -dex.lst) TABS(2) OBJECT(.\list\Main_codex.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include "config.h"
+    6          #include "system_init.h"
+    7          #include "..\Code_boweny\Device\QMI8658\QMI8658.h"
+    8          #include "..\Code_boweny\Function\Log\Log.h"
+    9          
+   10          #define IMU_ACC_LOG_DECIMATION  128
+   11          
+   12          static void IMU_HighRatePoll(void)
+   13          {
+   14   1          static u16 sample_div = 0;
+   15   1          static u8  error_latched = 0;
+   16   1          int16 ax, ay, az;
+   17   1      
+   18   1          if (!g_qmi8658_ready) {
+   19   2              return;
+   20   2          }
+   21   1      
+   22   1          if (QMI8658_ReadAcc(&ax, &ay, &az) != 0) {
+   23   2              if (!error_latched) {
+   24   3                  LOGE("IMU", "high-rate acc read fail");
+   25   3                  error_latched = 1;
+   26   3              }
+   27   2              return;
+   28   2          }
+   29   1      
+   30   1          error_latched = 0;
+   31   1          sample_div++;
+   32   1          if (sample_div >= IMU_ACC_LOG_DECIMATION) {
+   33   2              sample_div = 0;
+   34   2              LOGI("IMU", "acc=%d %d %d", ax, ay, az);
+   35   2          }
+   36   1      }
+   37          
+   38          /*---------------------------------------------------------------------*/
+   39          /* 鍑芥暟: main                                                          */
+   40          /* 鎻忚堪: 绋嬪簭鍏ュ彛                                                      */
+   41          /* 鍙傛暟: 鏃?                                                            */
+   42          /* 杩斿洖: 鏃?                                                            */
+   43          /* 鐗堟湰: v1.0, 2026-04-22                                             */
+   44          /*---------------------------------------------------------------------*/
+   45          void main(void)
+   46          {
+   47   1          SYS_Init();
+   48   1      
+   49   1          while(1)
+   50   1          {
+   51   2              IMU_HighRatePoll();
+   52   2          }
+   53   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       138     ------
+C251 COMPILER V5.60.0,  Main                                                               23/04/26  09:49:08  PAGE 2   
+
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =         3          6
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        52     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

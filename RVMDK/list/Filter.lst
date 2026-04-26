@@ -1,0 +1,223 @@
+C251 COMPILER V5.60.0,  Filter                                                             27/04/26  00:55:24  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE Filter
+OBJECT MODULE PLACED IN .\list\Filter.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Function\Filter\Filter.c XSMALL INTR2 BROWSE INCDIR(..\
+                    -Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;.
+                    -.\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG
+                    - PRINT(.\list\Filter.lst) TABS(2) OBJECT(.\list\Filter.obj) 
+
+stmt  level    source
+
+    1          /**
+    2           * @file    Filter.c
+    3           * @brief   三轴传感器低通滤波模块实现
+    4           * @author  boweny
+    5           * @date    2026-04-23
+    6           * @version v1.0
+    7           *
+    8           * @details
+    9           * - 实现陀螺仪与地磁三轴数据的软件低通滤波
+   10           * - 采用一阶 IIR + Q8 定点整数状态，避免使用浮点运算
+   11           * - 分别维护 gyro / mag 两套独立滤波状态，互不干扰
+   12           * - 导出函数：Filter_ResetGyroLowPass() / Filter_ResetMagLowPass() /
+   13           *             Filter_GyroLowPass() / Filter_MagLowPass()
+   14           *
+   15           * @note    首帧有效数据直接灌入状态，保证首次输出等于输入
+   16           * @note    无效帧与空指针直接返回 -1，不会污染内部状态
+   17           *
+   18           * @see     Code_boweny/Function/Filter/Filter.h
+   19           */
+   20          
+   21          #include "Filter.h"
+   22          
+   23          #define FILTER_LPF_SCALE            ((int32)1L << FILTER_LPF_STATE_Q)
+   24          #define FILTER_DATA_IS_ZERO(x,y,z)  (((x) == 0) && ((y) == 0) && ((z) == 0))
+   25          #define FILTER_DATA_IS_INVALID(x,y,z)  (((x) == -1) && ((y) == -1) && ((z) == -1))
+   26          
+   27          typedef struct
+   28          {
+   29              int32 state_x;
+   30              int32 state_y;
+   31              int32 state_z;
+   32              u8 initialized;
+   33          } Filter_LowPass3Axis;
+   34          
+   35          static Filter_LowPass3Axis filter_gyro_ctx;
+   36          static Filter_LowPass3Axis filter_mag_ctx;
+   37          
+   38          /**
+   39           * @brief      复位单个三轴低通状态
+   40           * @param[out] ctx  指向三轴滤波状态的指针
+   41           * @return     none
+   42           *
+   43           * @details 驱动内部使用，不对外暴露。
+   44           */
+   45          static void Filter_ResetState(Filter_LowPass3Axis *ctx)
+   46          {
+   47   1          if (ctx == 0) {
+   48   2              return;
+   49   2          }
+   50   1      
+   51   1          ctx->state_x = 0;
+   52   1          ctx->state_y = 0;
+   53   1          ctx->state_z = 0;
+   54   1          ctx->initialized = 0;
+   55   1      }
+   56          
+C251 COMPILER V5.60.0,  Filter                                                             27/04/26  00:55:24  PAGE 2   
+
+   57          /**
+   58           * @brief      更新单轴低通状态
+   59           * @param[out] state  指向单轴 Q 格式状态的指针
+   60           * @param[in]  input  原始输入值
+   61           * @param[in]  shift  平滑系数移位值
+   62           * @return     滤波后的 int16 输出
+   63           *
+   64           * @details 采用一阶 IIR 低通，不对外暴露。
+   65           */
+   66          static int16 Filter_UpdateAxis(int32 *state, int16 input, u8 shift)
+   67          {
+   68   1          int32 target;
+   69   1      
+   70   1          target = (int32)input * FILTER_LPF_SCALE;
+   71   1          *state += ((target - *state) >> shift);
+   72   1          return (int16)(*state >> FILTER_LPF_STATE_Q);
+   73   1      }
+   74          
+   75          /**
+   76           * @brief      对三轴数据执行通用低通处理
+   77           * @param[out] ctx    指向目标滤波状态的指针
+   78           * @param[in]  shift  平滑系数移位值
+   79           * @param[in]  in_x   原始 X 轴输入
+   80           * @param[in]  in_y   原始 Y 轴输入
+   81           * @param[in]  in_z   原始 Z 轴输入
+   82           * @param[out] out_x  指向滤波后 X 轴输出的指针
+   83           * @param[out] out_y  指向滤波后 Y 轴输出的指针
+   84           * @param[out] out_z  指向滤波后 Z 轴输出的指针
+   85           * @return     0=成功，-1=空指针或输入帧无效
+   86           *
+   87           * @details
+   88           * 首帧有效数据直接作为输出并灌入状态。
+   89           * 后续帧按固定点一阶 IIR 低通更新。
+   90           */
+   91          static s8 Filter_LowPassApply(Filter_LowPass3Axis *ctx, u8 shift,
+   92                                        int16 in_x, int16 in_y, int16 in_z,
+   93                                        int16 *out_x, int16 *out_y, int16 *out_z)
+   94          {
+   95   1          if ((ctx == 0) || (out_x == 0) || (out_y == 0) || (out_z == 0)) {
+   96   2              return -1;
+   97   2          }
+   98   1      
+   99   1          if (FILTER_DATA_IS_ZERO(in_x, in_y, in_z) ||
+  100   1              FILTER_DATA_IS_INVALID(in_x, in_y, in_z)) {
+  101   2              return -1;
+  102   2          }
+  103   1      
+  104   1          if (!ctx->initialized) {
+  105   2              ctx->state_x = (int32)in_x * FILTER_LPF_SCALE;
+  106   2              ctx->state_y = (int32)in_y * FILTER_LPF_SCALE;
+  107   2              ctx->state_z = (int32)in_z * FILTER_LPF_SCALE;
+  108   2              ctx->initialized = 1;
+  109   2      
+  110   2              *out_x = in_x;
+  111   2              *out_y = in_y;
+  112   2              *out_z = in_z;
+  113   2              return 0;
+  114   2          }
+  115   1      
+  116   1          *out_x = Filter_UpdateAxis(&ctx->state_x, in_x, shift);
+  117   1          *out_y = Filter_UpdateAxis(&ctx->state_y, in_y, shift);
+  118   1          *out_z = Filter_UpdateAxis(&ctx->state_z, in_z, shift);
+  119   1      
+  120   1          return 0;
+  121   1      }
+  122          
+C251 COMPILER V5.60.0,  Filter                                                             27/04/26  00:55:24  PAGE 3   
+
+  123          /**
+  124           * @brief   复位陀螺仪低通滤波器状态
+  125           * @return  none
+  126           *
+  127           * @details 清空陀螺仪三轴低通状态。
+  128           */
+  129          void Filter_ResetGyroLowPass(void)
+  130          {
+  131   1          Filter_ResetState(&filter_gyro_ctx);
+  132   1      }
+  133          
+  134          /**
+  135           * @brief   复位地磁低通滤波器状态
+  136           * @return  none
+  137           *
+  138           * @details 清空地磁三轴低通状态。
+  139           */
+  140          void Filter_ResetMagLowPass(void)
+  141          {
+  142   1          Filter_ResetState(&filter_mag_ctx);
+  143   1      }
+  144          
+  145          /**
+  146           * @brief      对陀螺仪三轴数据执行低通滤波
+  147           * @param[in]  in_x   原始 X 轴角速度
+  148           * @param[in]  in_y   原始 Y 轴角速度
+  149           * @param[in]  in_z   原始 Z 轴角速度
+  150           * @param[out] out_x  指向滤波后 X 轴角速度的指针
+  151           * @param[out] out_y  指向滤波后 Y 轴角速度的指针
+  152           * @param[out] out_z  指向滤波后 Z 轴角速度的指针
+  153           * @return     0=成功，-1=空指针或输入帧无效
+  154           *
+  155           * @details 使用独立的陀螺仪三轴滤波状态，不影响地磁滤波链路。
+  156           */
+  157          s8 Filter_GyroLowPass(int16 in_x, int16 in_y, int16 in_z,
+  158                                int16 *out_x, int16 *out_y, int16 *out_z)
+  159          {
+  160   1          return Filter_LowPassApply(&filter_gyro_ctx, FILTER_GYRO_LPF_SHIFT,
+  161   1                                     in_x, in_y, in_z, out_x, out_y, out_z);
+  162   1      }
+  163          
+  164          /**
+  165           * @brief      对地磁三轴数据执行低通滤波
+  166           * @param[in]  in_x   原始 X 轴磁场数据
+  167           * @param[in]  in_y   原始 Y 轴磁场数据
+  168           * @param[in]  in_z   原始 Z 轴磁场数据
+  169           * @param[out] out_x  指向滤波后 X 轴磁场数据的指针
+  170           * @param[out] out_y  指向滤波后 Y 轴磁场数据的指针
+  171           * @param[out] out_z  指向滤波后 Z 轴磁场数据的指针
+  172           * @return     0=成功，-1=空指针或输入帧无效
+  173           *
+  174           * @details 使用独立的地磁三轴滤波状态，不影响陀螺仪滤波链路。
+  175           */
+  176          s8 Filter_MagLowPass(int16 in_x, int16 in_y, int16 in_z,
+  177                               int16 *out_x, int16 *out_y, int16 *out_z)
+  178          {
+  179   1          return Filter_LowPassApply(&filter_mag_ctx, FILTER_MAG_LPF_SHIFT,
+  180   1                                     in_x, in_y, in_z, out_x, out_y, out_z);
+  181   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       478     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+C251 COMPILER V5.60.0,  Filter                                                             27/04/26  00:55:24  PAGE 4   
+
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =        26         41
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =    ------     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

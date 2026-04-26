@@ -1,0 +1,235 @@
+C251 COMPILER V5.60.0,  APP_DMA_UART                                                       27/04/26  00:55:20  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_DMA_UART
+OBJECT MODULE PLACED IN .\list\APP_DMA_UART.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_DMA_UART.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\
+                    -User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\
+                    -Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\
+                    -APP_DMA_UART.lst) TABS(2) OBJECT(.\list\APP_DMA_UART.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include  "APP_DMA_UART.h"
+    6          #include  "STC32G_GPIO.h"
+    7          #include  "STC32G_UART.h"
+    8          #include  "STC32G_NVIC.h"
+    9          #include  "STC32G_DMA.h"
+   10          
+   11          
+   12          /*************  功能说明  **************
+   13          
+   14          通过PC向MCU发送数据, MCU将收到的数据自动存入DMA空间.
+   15          
+   16          当DMA空间存满设置大小的内容后，通过串口的DMA自动发送功能把存储空间的数据
+             -原样返回.
+   17          
+   18          用定时器做波特率发生器，建议使用1T模式(除非低波特率用12T)，并选择可被波�
+             -�率整除的时钟频率，以提高精度。
+   19          
+   20          下载时, 选择时钟 24MHz (可以在配置文件"config.h"中修改).
+   21          
+   22          ******************************************/
+   23          
+   24          
+   25          //========================================================================
+   26          //                               本地常量声明 
+   27          //========================================================================
+   28          
+   29          
+   30          //========================================================================
+   31          //                               本地变量声明
+   32          //========================================================================
+   33          
+   34          u8 xdata DmaBuffer[256];  //收发共用缓存，同时使用多路串口时每个串口需分别定义缓
+             -存，以免相互干扰
+   35          
+   36          //========================================================================
+   37          //                               本地函数声明
+   38          //========================================================================
+   39          
+   40          
+   41          //========================================================================
+   42          //                            外部函数和变量声明
+   43          //========================================================================
+   44          
+   45          
+   46          //========================================================================
+   47          // 函数: DMA_UART_init
+   48          // 描述: 用户初始化程序.
+   49          // 参数: None.
+   50          // 返回: None.
+   51          // 版本: V1.0, 2021-05-27
+   52          //========================================================================
+   53          void DMA_UART_init(void)
+C251 COMPILER V5.60.0,  APP_DMA_UART                                                       27/04/26  00:55:20  PAGE 2   
+
+   54          {
+   55   1        u16 i;
+   56   1        COMx_InitDefine   COMx_InitStructure;         //结构定义
+   57   1        DMA_UART_InitTypeDef    DMA_UART_InitStructure;   //结构定义
+   58   1        
+   59   1        //----------------------------------------------
+   60   1      //  P3_MODE_IO_PU(GPIO_Pin_0 | GPIO_Pin_1); //P3.0,P3.1 设置为准双向口 - UART1
+   61   1        P4_MODE_IO_PU(GPIO_Pin_6 | GPIO_Pin_7);   //P4.6,P4.7 设置为准双向口 - UART2
+   62   1      //  P0_MODE_IO_PU(GPIO_Pin_0 | GPIO_Pin_1); //P0.0,P0.1 设置为准双向口 - UART3
+   63   1      //  P0_MODE_IO_PU(GPIO_Pin_2 | GPIO_Pin_3); //P0.2,P0.3 设置为准双向口 - UART4
+   64   1        
+   65   1        //----------------------------------------------
+   66   1        COMx_InitStructure.UART_Mode      = UART_8bit_BRTx; //模式,   UART_ShiftRight,UART_8bit_BRTx,UART_9bit
+             -,UART_9bit_BRTx
+   67   1        COMx_InitStructure.UART_BRT_Use   = BRT_Timer2;     //选择波特率发生器, BRT_Timer1, BRT_Timer2 (�
+             -�意: 串口2固定使用BRT_Timer2)
+   68   1        COMx_InitStructure.UART_BaudRate  = 115200ul;     //波特率,     110 ~ 115200
+   69   1        COMx_InitStructure.UART_RxEnable  = ENABLE;       //接收允许,   ENABLE或DISABLE
+   70   1      //  UART_Configuration(UART1, &COMx_InitStructure);   //初始化串口 UART1,UART2,UART3,UART4
+   71   1      //  NVIC_UART1_Init(ENABLE,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低到高) Priority_0,P
+             -riority_1,Priority_2,Priority_3
+   72   1        UART_Configuration(UART2, &COMx_InitStructure);   //初始化串口 UART1,UART2,UART3,UART4
+   73   1        NVIC_UART2_Init(ENABLE,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低到高) Priority_0,Pri
+             -ority_1,Priority_2,Priority_3
+   74   1      //  UART_Configuration(UART3, &COMx_InitStructure);   //初始化串口 UART1,UART2,UART3,UART4
+   75   1      //  NVIC_UART3_Init(ENABLE,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低到高) Priority_0,P
+             -riority_1,Priority_2,Priority_3
+   76   1      //  UART_Configuration(UART4, &COMx_InitStructure);   //初始化串口 UART1,UART2,UART3,UART4
+   77   1      //  NVIC_UART4_Init(ENABLE,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低到高) Priority_0,P
+             -riority_1,Priority_2,Priority_3
+   78   1      
+   79   1        printf("STC32G UART DMA Test Programme!\r\n");  //UART发送一个字符串
+   80   1      
+   81   1        //----------------------------------------------
+   82   1        DMA_UART_InitStructure.DMA_TX_Length = 255;       //DMA传输总字节数   (0~65535) + 1
+   83   1        DMA_UART_InitStructure.DMA_TX_Buffer = (u16)DmaBuffer;  //发送数据存储地址
+   84   1        DMA_UART_InitStructure.DMA_RX_Length = 255;       //DMA传输总字节数   (0~65535) + 1
+   85   1        DMA_UART_InitStructure.DMA_RX_Buffer = (u16)DmaBuffer;  //接收数据存储地址
+   86   1        DMA_UART_InitStructure.DMA_TX_Enable = ENABLE;    //DMA使能   ENABLE,DISABLE
+   87   1        DMA_UART_InitStructure.DMA_RX_Enable = ENABLE;    //DMA使能   ENABLE,DISABLE
+   88   1      //  DMA_UART_Inilize(UART1, &DMA_UART_InitStructure); //初始化
+   89   1        DMA_UART_Inilize(UART2, &DMA_UART_InitStructure); //初始化
+   90   1      //  DMA_UART_Inilize(UART3, &DMA_UART_InitStructure); //初始化
+   91   1      //  DMA_UART_Inilize(UART4, &DMA_UART_InitStructure); //初始化
+   92   1      
+   93   1      //  NVIC_DMA_UART1_Tx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低�
+             -�高) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
+   94   1      //  NVIC_DMA_UART1_Rx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低�
+             -�高) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
+   95   1        NVIC_DMA_UART2_Tx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低到�
+             -��) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
+   96   1        NVIC_DMA_UART2_Rx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低到�
+             -��) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
+   97   1      //  NVIC_DMA_UART3_Tx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低�
+             -�高) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
+   98   1      //  NVIC_DMA_UART3_Rx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低�
+             -�高) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
+   99   1      //  NVIC_DMA_UART4_Tx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低�
+             -�高) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
+  100   1      //  NVIC_DMA_UART4_Rx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低�
+             -�高) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
+  101   1      
+  102   1      //  DMA_UR1R_CLRFIFO();   //清空 DMA FIFO
+  103   1        DMA_UR2R_CLRFIFO();   //清空 DMA FIFO
+  104   1      //  DMA_UR3R_CLRFIFO();   //清空 DMA FIFO
+  105   1      //  DMA_UR4R_CLRFIFO();   //清空 DMA FIFO
+C251 COMPILER V5.60.0,  APP_DMA_UART                                                       27/04/26  00:55:20  PAGE 3   
+
+  106   1        //----------------------------------------------
+  107   1        DmaTx1Flag = 0;
+  108   1        DmaRx1Flag = 0;
+  109   1        DmaTx2Flag = 0;
+  110   1        DmaRx2Flag = 0;
+  111   1        DmaTx3Flag = 0;
+  112   1        DmaRx3Flag = 0;
+  113   1        DmaTx4Flag = 0;
+  114   1        DmaRx4Flag = 0;
+  115   1        for(i=0; i<256; i++)
+  116   1        {
+  117   2          DmaBuffer[i] = i;
+  118   2        }
+  119   1      //  DMA_UR1T_TRIG();  //触发UART1发送功能
+  120   1      //  DMA_UR1R_TRIG();  //触发UART1接收功能
+  121   1        DMA_UR2T_TRIG();  //触发UART2发送功能
+  122   1        DMA_UR2R_TRIG();  //触发UART2接收功能
+  123   1      //  DMA_UR3T_TRIG();  //触发UART3发送功能
+  124   1      //  DMA_UR3R_TRIG();  //触发UART3接收功能
+  125   1      //  DMA_UR4T_TRIG();  //触发UART4发送功能
+  126   1      //  DMA_UR4R_TRIG();  //触发UART4接收功能
+  127   1      }
+  128          
+  129          //========================================================================
+  130          // 函数: Sample_DMA_UART
+  131          // 描述: 用户应用程序.
+  132          // 参数: None.
+  133          // 返回: None.
+  134          // 版本: V1.0, 2021-05-27
+  135          //========================================================================
+  136          void Sample_DMA_UART(void)
+  137          {
+  138   1        if((DmaTx1Flag) && (DmaRx1Flag))  //数据需要及时处理，使用延时或者定时器周期性处理
+             -，可能重新触发不及时导致外部连续收发的部分数据丢失
+  139   1        {
+  140   2          DmaTx1Flag = 0;
+  141   2          DmaRx1Flag = 0;
+  142   2          DMA_UR1T_TRIG();  //重新触发UART1发送功能，可在DMA中断里及时处理
+  143   2          DMA_UR1R_TRIG();  //重新触发UART1接收功能，可在DMA中断里及时处理
+  144   2        }
+  145   1      
+  146   1        if((DmaTx2Flag) && (DmaRx2Flag))  //数据需要及时处理，使用延时或者定时器周期性处理
+             -，可能重新触发不及时导致外部连续收发的部分数据丢失
+  147   1        {
+  148   2          DmaTx2Flag = 0;
+  149   2          DmaRx2Flag = 0;
+  150   2          DMA_UR2T_TRIG();  //重新触发UART2发送功能，可在DMA中断里及时处理
+  151   2          DMA_UR2R_TRIG();  //重新触发UART2接收功能，可在DMA中断里及时处理
+  152   2        }
+  153   1      
+  154   1        if((DmaTx3Flag) && (DmaRx3Flag))  //数据需要及时处理，使用延时或者定时器周期性处理
+             -，可能重新触发不及时导致外部连续收发的部分数据丢失
+  155   1        {
+  156   2          DmaTx3Flag = 0;
+  157   2          DmaRx3Flag = 0;
+  158   2          DMA_UR3T_TRIG();  //重新触发UART3发送功能，可在DMA中断里及时处理
+  159   2          DMA_UR3R_TRIG();  //重新触发UART3接收功能，可在DMA中断里及时处理
+  160   2        }
+  161   1      
+  162   1        if((DmaTx4Flag) && (DmaRx4Flag))  //数据需要及时处理，使用延时或者定时器周期性处理
+             -，可能重新触发不及时导致外部连续收发的部分数据丢失
+  163   1        {
+  164   2          DmaTx4Flag = 0;
+  165   2          DmaRx4Flag = 0;
+  166   2          DMA_UR4T_TRIG();  //重新触发UART4发送功能，可在DMA中断里及时处理
+  167   2          DMA_UR4R_TRIG();  //重新触发UART4接收功能，可在DMA中断里及时处理
+C251 COMPILER V5.60.0,  APP_DMA_UART                                                       27/04/26  00:55:20  PAGE 4   
+
+  168   2        }
+  169   1      }
+  170          
+  171          
+  172          
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       371     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =       256     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------         19
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        34     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

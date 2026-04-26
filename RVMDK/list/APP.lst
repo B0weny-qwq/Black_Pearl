@@ -1,0 +1,125 @@
+C251 COMPILER V5.60.0,  APP                                                                27/04/26  00:55:18  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE APP
+OBJECT MODULE PLACED IN .\list\APP.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\User;..\A
+                    -pp\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QM
+                    -I8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP.lst) 
+                    -TABS(2) OBJECT(.\list\APP.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include  "APP.h"
+    6          
+    7          //========================================================================
+    8          //                               本地常量声明 
+    9          //========================================================================
+   10          
+   11          u8 code t_display[]={                       //标准字库
+   12          //   0    1    2    3    4    5    6    7    8    9    A    B    C    D    E    F
+   13              0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F,0x77,0x7C,0x39,0x5E,0x79,0x71,
+   14          //black  -     H    J    K    L    N    o   P    U     t    G    Q    r   M    y
+   15              0x00,0x40,0x76,0x1E,0x70,0x38,0x37,0x5C,0x73,0x3E,0x78,0x3d,0x67,0x50,0x37,0x6e,
+   16              0xBF,0x86,0xDB,0xCF,0xE6,0xED,0xFD,0x87,0xFF,0xEF,0x46};    //0. 1. 2. 3. 4. 5. 6. 7. 8. 9. -1
+   17          
+   18          u8 code T_COM[]={0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80};      //位码
+   19          
+   20          u8 code T_KeyTable[16] = {0,1,2,0,3,0,0,0,4,0,0,0,0,0,0,0};
+   21          
+   22          //========================================================================
+   23          //                               本地变量声明
+   24          //========================================================================
+   25          
+   26          u8  LED8[8];        //显示缓冲
+   27          u8  display_index;  //显示位索引
+   28          
+   29          u8  IO_KeyState, IO_KeyState1, IO_KeyHoldCnt;    //行列键盘变量
+   30          u8  KeyHoldCnt; //键按下计时
+   31          u8  KeyCode;    //给用户使用的键码
+   32          u8  cnt50ms;
+   33          
+   34          u8  hour,minute,second; //RTC变量
+   35          u16 msecond;
+   36          
+   37          u8 Key1_cnt;
+   38          u8 Key2_cnt;
+   39          bit Key1_Flag;
+   40          bit Key2_Flag;
+   41          
+   42          //========================================================================
+   43          // 函数: APP_config
+   44          // 描述: 用户应用程序初始化.
+   45          // 参数: None.
+   46          // 返回: None.
+   47          // 版本: V1.0, 2020-09-24
+   48          //========================================================================
+   49          void APP_config(void)
+   50          {
+   51   1        Lamp_init();
+   52   1      //  ADtoUART_init();   /* Disabled: Timer2 is reserved for GPS UART2. */
+   53   1      //  INTtoUART_init();
+   54   1      //  RTC_init();
+   55   1      //  I2C_PS_init();
+   56   1      //  SPI_PS_init();
+C251 COMPILER V5.60.0,  APP                                                                27/04/26  00:55:18  PAGE 2   
+
+   57   1      //  EEPROM_init();
+   58   1      //  WDT_init();
+   59   1      //  PWMA_Output_init();
+   60   1      //  PWMB_Output_init();
+   61   1      //  DMA_AD_init();
+   62   1      //  DMA_M2M_init();
+   63   1      //  DMA_UART_init();
+   64   1      //  DMA_SPI_PS_init();
+   65   1      //  DMA_LCM_init();
+   66   1      //  DMA_I2C_init();
+   67   1      //  CAN_init();
+   68   1      //  LIN_init();
+   69   1      //  USART_LIN_init();
+   70   1      //  USART2_LIN_init();
+   71   1      //  HSSPI_init();
+   72   1      //  HSPWM_init();
+   73   1      }
+   74          
+   75          //========================================================================
+   76          // 函数: DisplayScan
+   77          // 描述: 显示扫描函数.
+   78          // 参数: None.
+   79          // 返回: None.
+   80          // 版本: V1.0, 2020-09-25
+   81          //========================================================================
+   82          void DisplayScan(void)
+   83          {   
+   84   1          P7 = ~T_COM[7-display_index];
+   85   1          P6 = ~t_display[LED8[display_index]];
+   86   1          if(++display_index >= 8)    display_index = 0;  //8位结束回0
+   87   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       136     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =        22     ------
+  bit size             =         2     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =    ------     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

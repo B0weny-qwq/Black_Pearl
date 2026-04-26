@@ -1,0 +1,626 @@
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE QMC6309
+OBJECT MODULE PLACED IN .\list\QMC6309.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\QMC6309\QMC6309.c XSMALL INTR2 BROWSE INCDIR(..\
+                    -Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;.
+                    -.\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG
+                    - PRINT(.\list\QMC6309.lst) TABS(2) OBJECT(.\list\QMC6309.obj) 
+
+stmt  level    source
+
+    1          /**
+    2           * @file    QMC6309.c
+    3           * @brief   QMC6309 3轴地磁计驱动实现
+    4           * @author  boweny
+    5           * @date    2026-04-22
+    6           * @version v1.1
+    7           *
+    8           * @details
+    9           * - 实现 QMC6309 3轴地磁计的初始化、原始数据读取、ODR 配置与寄存器调试
+   10           * - 支持 I2C 地址探测、软复位、上电就绪检测、总线恢复与数据有效性检查
+   11           * - 保留原始 XYZ 读取接口，并新增软件低通后的滤波读取接口
+   12           * - 导出函数：QMC6309_Init() / QMC6309_ReadXYZ() / QMC6309_ReadXYZFiltered() /
+   13           *             QMC6309_ReadID() / QMC6309_SetODR() / QMC6309_Wait_Ready() /
+   14           *             QMC6309_DumpRegs()
+   15           *
+   16           * @hardware
+   17           *   - I2C接口: P1.4(SDA) / P1.5(SCL)，硬件I2C
+   18           *   - 系统时钟: Fosc = 24MHz
+   19           *
+   20           * @note    必须在 I2C_config() 初始化完成后调用 QMC6309_Init()
+   21           * @note    禁止使用浮点运算，原始数据与滤波数据均以 int16 传递
+   22           *
+   23           * @see     Code_boweny/Device/QMC6309/QMC6309.h
+   24           */
+   25          
+   26          #include "QMC6309.h"
+   27          #include "STC32G_GPIO.h"
+   28          #include "STC32G_I2C.h"
+   29          #include "Filter.h"
+   30          #include "Log.h"
+   31          
+   32          #define  QMC6309_I2C_WRITE(addr)        ((addr) << 1)
+   33          #define  QMC6309_I2C_READ(addr)         (((addr) << 1) | 1)
+   34          
+   35          #define  QMC6309_REG_CHIP_ID            0x00
+   36          #define  QMC6309_REG_DATA_START         0x01
+   37          #define  QMC6309_REG_CONTROL_1          0x0A
+   38          #define  QMC6309_REG_CONTROL_2          0x0B
+   39          
+   40          #define  QMC6309_CTRL1_STANDBY          0x00
+   41          #define  QMC6309_CTRL1_ACTIVE           0x1B
+   42          #define  QMC6309_CTRL2_INIT             0x10
+   43          
+   44          #define  QMC6309_PWR_UP_DELAY_MS        1000
+   45          #define  QMC6309_MSACKI_MASK            0x02
+   46          #define  QMC6309_BUS_RECOVER_PULSES     9
+   47          #define  QMC6309_BUS_RECOVER_DELAY_MS   1
+   48          
+   49          static u8  qmc6309_addr = QMC6309_I2C_ADDR_PRIMARY;
+   50          
+   51          static s8   QMC6309_WriteReg(u8 reg, u8 dat);
+   52          static u8   QMC6309_ReadReg(u8 reg);
+   53          static s8   QMC6309_Reset(void);
+   54          static void QMC6309_Delay_ms(u16 ms);
+   55          static void QMC6309_BusReset(void);
+   56          static void QMC6309_RestoreI2CMaster(void);
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 2   
+
+   57          static u8   QMC6309_ProbeAddr(u8 addr);
+   58          static u8   QMC6309_RecvAck(void);
+   59          static u8   QMC6309_EnsureBusIdle(void);
+   60          static u8   QMC6309_BusNeedsRecover(void);
+   61          
+   62          extern u8   Get_MSBusy_Status(void);
+   63          extern void Start(void);
+   64          extern void SendData(char dat);
+   65          extern void RecvACK(void);
+   66          extern char RecvData(void);
+   67          extern void SendACK(void);
+   68          extern void SendNAK(void);
+   69          extern void Stop(void);
+   70          
+   71          static u8 QMC6309_RecvAck(void)
+   72          {
+   73   1          RecvACK();
+   74   1          return ((I2CMSST & QMC6309_MSACKI_MASK) != 0);
+   75   1      }
+   76          
+   77          static u8 QMC6309_BusNeedsRecover(void)
+   78          {
+   79   1          if (Get_MSBusy_Status()) {
+   80   2              return 1;
+   81   2          }
+   82   1      
+   83   1          if (P14 == 0) {
+   84   2              return 1;
+   85   2          }
+   86   1      
+   87   1          if (P15 == 0) {
+   88   2              return 1;
+   89   2          }
+   90   1      
+   91   1          return 0;
+   92   1      }
+   93          
+   94          static u8 QMC6309_EnsureBusIdle(void)
+   95          {
+   96   1          if (!QMC6309_BusNeedsRecover()) {
+   97   2              return 0;
+   98   2          }
+   99   1      
+  100   1          LOGW("MAG", "bus not idle, try recover busy=%s sda=%s scl=%s",
+  103   1               Get_MSBusy_Status() ? "Y" : "N",
+  103   1               (P14 == 0) ? "L" : "H",
+  103   1               (P15 == 0) ? "L" : "H");
+  104   1          QMC6309_BusReset();
+  105   1          if (QMC6309_BusNeedsRecover()) {
+  106   2              LOGE("MAG", "bus recover failed busy=%s sda=%s scl=%s",
+  109   2                   Get_MSBusy_Status() ? "Y" : "N",
+  109   2                   (P14 == 0) ? "L" : "H",
+  109   2                   (P15 == 0) ? "L" : "H");
+  110   2              return 1;
+  111   2          }
+  112   1      
+  113   1          return 0;
+  114   1      }
+  115          
+  116          static s8 QMC6309_WriteReg(u8 reg, u8 dat)
+  117          {
+  118   1          u8 dev_addr;
+  119   1      
+  120   1          dev_addr = QMC6309_I2C_WRITE(qmc6309_addr);
+  121   1          if (QMC6309_EnsureBusIdle()) {
+  122   2              LOGW("MAG", "WriteReg bus busy reg=0x%02X", reg);
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 3   
+
+  123   2              return -1;
+  124   2          }
+  125   1      
+  126   1          Start();
+  127   1          SendData(dev_addr);
+  128   1          if (QMC6309_RecvAck()) {
+  129   2              Stop();
+  130   2              LOGW("MAG", "WriteReg dev NACK dev=0x%02X reg=0x%02X", dev_addr, reg);
+  131   2              return -1;
+  132   2          }
+  133   1      
+  134   1          SendData(reg);
+  135   1          if (QMC6309_RecvAck()) {
+  136   2              Stop();
+  137   2              LOGW("MAG", "WriteReg reg NACK dev=0x%02X reg=0x%02X", dev_addr, reg);
+  138   2              return -1;
+  139   2          }
+  140   1      
+  141   1          SendData(dat);
+  142   1          if (QMC6309_RecvAck()) {
+  143   2              Stop();
+  144   2              LOGW("MAG", "WriteReg data NACK reg=0x%02X val=0x%02X", reg, dat);
+  145   2              return -1;
+  146   2          }
+  147   1      
+  148   1          Stop();
+  149   1          LOGI("MAG", "WriteReg OK reg=0x%02X val=0x%02X", reg, dat);
+  150   1          return 0;
+  151   1      }
+  152          
+  153          static u8 QMC6309_ReadReg(u8 reg)
+  154          {
+  155   1          u8 dev_addr_w;
+  156   1          u8 dev_addr_r;
+  157   1          u8 reg_value;
+  158   1      
+  159   1          dev_addr_w = QMC6309_I2C_WRITE(qmc6309_addr);
+  160   1          dev_addr_r = QMC6309_I2C_READ(qmc6309_addr);
+  161   1          reg_value = 0xFF;
+  162   1      
+  163   1          if (QMC6309_EnsureBusIdle()) {
+  164   2              LOGW("MAG", "ReadReg bus busy reg=0x%02X", reg);
+  165   2              return 0xFF;
+  166   2          }
+  167   1      
+  168   1          Start();
+  169   1          SendData(dev_addr_w);
+  170   1          if (QMC6309_RecvAck()) {
+  171   2              Stop();
+  172   2              LOGW("MAG", "ReadReg devW NACK dev=0x%02X reg=0x%02X", dev_addr_w, reg);
+  173   2              return 0xFF;
+  174   2          }
+  175   1      
+  176   1          SendData(reg);
+  177   1          if (QMC6309_RecvAck()) {
+  178   2              Stop();
+  179   2              LOGW("MAG", "ReadReg reg NACK dev=0x%02X reg=0x%02X", dev_addr_w, reg);
+  180   2              return 0xFF;
+  181   2          }
+  182   1      
+  183   1          Start();
+  184   1          SendData(dev_addr_r);
+  185   1          if (QMC6309_RecvAck()) {
+  186   2              Stop();
+  187   2              LOGW("MAG", "ReadReg devR NACK dev=0x%02X reg=0x%02X", dev_addr_r, reg);
+  188   2              return 0xFF;
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 4   
+
+  189   2          }
+  190   1      
+  191   1          reg_value = (u8)RecvData();
+  192   1          SendNAK();
+  193   1          Stop();
+  194   1      
+  195   1          return reg_value;
+  196   1      }
+  197          
+  198          static void QMC6309_Delay_ms(u16 ms)
+  199          {
+  200   1          u16 i;
+  201   1      
+  202   1          while (ms--) {
+  203   2              for (i = 0; i < 1000; i++) {
+  204   3                  _nop_();
+  205   3              }
+  206   2          }
+  207   1      }
+  208          
+  209          static void QMC6309_RestoreI2CMaster(void)
+  210          {
+  211   1          I2C_Function(DISABLE);
+  212   1          I2C_Master();
+  213   1          I2CMSST = 0x00;
+  214   1          I2CMSCR = 0x00;
+  215   1          I2C_SetSpeed(QMC6309_I2C_SPEED_CFG);
+  216   1          I2C_WDTA_DIS();
+  217   1          I2C_Function(ENABLE);
+  218   1      }
+  219          
+  220          static void QMC6309_BusReset(void)
+  221          {
+  222   1          u8 i;
+  223   1          u8 sda_gpio_high;
+  224   1          u8 scl_gpio_high;
+  225   1          u16 pulse_count;
+  226   1      
+  227   1          LOGW("MAG", "bus recover start");
+  228   1      
+  229   1          I2C_Function(DISABLE);
+  230   1          I2C_Master();
+  231   1      
+  232   1          P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
+  233   1          P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
+  234   1      
+  235   1          P14 = 1;
+  236   1          P15 = 1;
+  237   1          QMC6309_Delay_ms(QMC6309_BUS_RECOVER_DELAY_MS);
+  238   1      
+  239   1          pulse_count = 0;
+  240   1          for (i = 0; i < QMC6309_BUS_RECOVER_PULSES; i++) {
+  241   2              if ((P14 == 1) && (P15 == 1)) {
+  242   3                  break;
+  243   3              }
+  244   2      
+  245   2              P15 = 0;
+  246   2              QMC6309_Delay_ms(QMC6309_BUS_RECOVER_DELAY_MS);
+  247   2              P15 = 1;
+  248   2              QMC6309_Delay_ms(QMC6309_BUS_RECOVER_DELAY_MS);
+  249   2              pulse_count++;
+  250   2          }
+  251   1      
+  252   1          P14 = 0;
+  253   1          QMC6309_Delay_ms(QMC6309_BUS_RECOVER_DELAY_MS);
+  254   1          P15 = 1;
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 5   
+
+  255   1          QMC6309_Delay_ms(QMC6309_BUS_RECOVER_DELAY_MS);
+  256   1          P14 = 1;
+  257   1          QMC6309_Delay_ms(QMC6309_BUS_RECOVER_DELAY_MS);
+  258   1      
+  259   1          sda_gpio_high = (P14 == 0) ? 0 : 1;
+  260   1          scl_gpio_high = (P15 == 0) ? 0 : 1;
+  261   1          LOGI("MAG", "bus recover gpio sda=%s scl=%s pulses=%u",
+  264   1               sda_gpio_high ? "H" : "L",
+  264   1               scl_gpio_high ? "H" : "L",
+  264   1               pulse_count);
+  265   1      
+  266   1          QMC6309_RestoreI2CMaster();
+  267   1          QMC6309_Delay_ms(QMC6309_BUS_RECOVER_DELAY_MS);
+  268   1      
+  269   1          LOGI("MAG", "bus recover done busy=%s sda=%s scl=%s",
+  272   1               Get_MSBusy_Status() ? "Y" : "N",
+  272   1               (P14 == 0) ? "L" : "H",
+  272   1               (P15 == 0) ? "L" : "H");
+  273   1      }
+  274          
+  275          static u8 QMC6309_ProbeAddr(u8 addr)
+  276          {
+  277   1          u8 dev_addr;
+  278   1      
+  279   1          dev_addr = QMC6309_I2C_WRITE(addr);
+  280   1          if (QMC6309_EnsureBusIdle()) {
+  281   2              LOGW("MAG", "Probe bus busy addr=0x%02X", addr);
+  282   2              return 1;
+  283   2          }
+  284   1      
+  285   1          Start();
+  286   1          SendData(dev_addr);
+  287   1          if (QMC6309_RecvAck()) {
+  288   2              Stop();
+  289   2              LOGI("MAG", "Probe addr=0x%02X write=0x%02X: NACK", addr, dev_addr);
+  290   2              return 1;
+  291   2          }
+  292   1      
+  293   1          Stop();
+  294   1          qmc6309_addr = addr;
+  295   1          LOGI("MAG", "Probe addr=0x%02X write=0x%02X: ACK", addr, dev_addr);
+  296   1          return 0;
+  297   1      }
+  298          
+  299          static s8 QMC6309_Reset(void)
+  300          {
+  301   1          if (QMC6309_WriteReg(QMC6309_REG_CONTROL_2, 0x80) != 0) {
+  302   2              LOGE("MAG", "soft reset enter failed");
+  303   2              return -1;
+  304   2          }
+  305   1          QMC6309_Delay_ms(5);
+  306   1      
+  307   1          if (QMC6309_WriteReg(QMC6309_REG_CONTROL_2, 0x00) != 0) {
+  308   2              LOGE("MAG", "soft reset exit failed");
+  309   2              return -1;
+  310   2          }
+  311   1          QMC6309_Delay_ms(10);
+  312   1          return 0;
+  313   1      }
+  314          
+  315          s8 QMC6309_Wait_Ready(u16 timeout_ms)
+  316          {
+  317   1          u16 i;
+  318   1          u8 id;
+  319   1      
+  320   1          for (i = 0; i < timeout_ms; i += 10) {
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 6   
+
+  321   2              id = QMC6309_ReadReg(QMC6309_REG_CHIP_ID);
+  322   2              if (id == QMC6309_CHIP_ID_VALUE) {
+  323   3                  LOGI("MAG", "ready id=0x%02X in %ums", id, i);
+  324   3                  return 0;
+  325   3              }
+  326   2              QMC6309_Delay_ms(10);
+  327   2          }
+  328   1      
+  329   1          LOGE("MAG", "wait ready TIMEOUT");
+  330   1          return -1;
+  331   1      }
+  332          
+  333          u8 QMC6309_ReadID(void)
+  334          {
+  335   1          u8 id;
+  336   1      
+  337   1          id = QMC6309_ReadReg(QMC6309_REG_CHIP_ID);
+  338   1          if (id != QMC6309_CHIP_ID_VALUE) {
+  339   2              LOGE("MAG", "ID mismatch got=0x%02X exp=0x%02X", id, QMC6309_CHIP_ID_VALUE);
+  340   2          }
+  341   1          return id;
+  342   1      }
+  343          
+  344          void QMC6309_DumpRegs(u8 target_addr)
+  345          {
+  346   1          u8 old_addr;
+  347   1          u8 reg00;
+  348   1          u8 reg0A;
+  349   1          u8 reg0B;
+  350   1      
+  351   1          old_addr = qmc6309_addr;
+  352   1          qmc6309_addr = target_addr;
+  353   1      
+  354   1          reg00 = QMC6309_ReadReg(QMC6309_REG_CHIP_ID);
+  355   1          reg0A = QMC6309_ReadReg(QMC6309_REG_CONTROL_1);
+  356   1          reg0B = QMC6309_ReadReg(QMC6309_REG_CONTROL_2);
+  357   1      
+  358   1          LOGI("MAG", "Dump addr=0x%02X write=0x%02X read=0x%02X reg00=0x%02X reg0A=0x%02X reg0B=0x%02X",
+  364   1               target_addr,
+  364   1               QMC6309_I2C_WRITE(target_addr),
+  364   1               QMC6309_I2C_READ(target_addr),
+  364   1               reg00,
+  364   1               reg0A,
+  364   1               reg0B);
+  365   1      
+  366   1          qmc6309_addr = old_addr;
+  367   1      }
+  368          
+  369          s8 QMC6309_ReadXYZ(int16 *x, int16 *y, int16 *z)
+  370          {
+  371   1          u8 dev_addr_w;
+  372   1          u8 dev_addr_r;
+  373   1          u8 raw[6];
+  374   1      
+  375   1          dev_addr_w = QMC6309_I2C_WRITE(qmc6309_addr);
+  376   1          dev_addr_r = QMC6309_I2C_READ(qmc6309_addr);
+  377   1      
+  378   1          if (QMC6309_EnsureBusIdle()) {
+  379   2              LOGW("MAG", "ReadXYZ bus busy");
+  380   2              return -1;
+  381   2          }
+  382   1      
+  383   1          Start();
+  384   1          SendData(dev_addr_w);
+  385   1          if (QMC6309_RecvAck()) {
+  386   2              Stop();
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 7   
+
+  387   2              LOGW("MAG", "ReadXYZ devW NACK dev=0x%02X", dev_addr_w);
+  388   2              return -1;
+  389   2          }
+  390   1      
+  391   1          SendData(QMC6309_REG_DATA_START);
+  392   1          if (QMC6309_RecvAck()) {
+  393   2              Stop();
+  394   2              LOGW("MAG", "ReadXYZ reg NACK reg=0x%02X", QMC6309_REG_DATA_START);
+  395   2              return -1;
+  396   2          }
+  397   1      
+  398   1          Start();
+  399   1          SendData(dev_addr_r);
+  400   1          if (QMC6309_RecvAck()) {
+  401   2              Stop();
+  402   2              LOGW("MAG", "ReadXYZ devR NACK dev=0x%02X", dev_addr_r);
+  403   2              return -1;
+  404   2          }
+  405   1      
+  406   1          raw[0] = (u8)RecvData(); SendACK();
+  407   1          raw[1] = (u8)RecvData(); SendACK();
+  408   1          raw[2] = (u8)RecvData(); SendACK();
+  409   1          raw[3] = (u8)RecvData(); SendACK();
+  410   1          raw[4] = (u8)RecvData(); SendACK();
+  411   1          raw[5] = (u8)RecvData(); SendNAK();
+  412   1          Stop();
+  413   1      
+  414   1          *x = (int16)((u16)raw[1] << 8 | raw[0]);
+  415   1          *y = (int16)((u16)raw[3] << 8 | raw[2]);
+  416   1          *z = (int16)((u16)raw[5] << 8 | raw[4]);
+  417   1      
+  418   1          LOGD("MAG", "XYZ: X=%d Y=%d Z=%d", *x, *y, *z);
+  419   1      
+  420   1          if ((raw[0] == 0xFF) && (raw[1] == 0xFF) &&
+  421   1              (raw[2] == 0xFF) && (raw[3] == 0xFF) &&
+  422   1              (raw[4] == 0xFF) && (raw[5] == 0xFF)) {
+  423   2              LOGW("MAG", "XYZ all 0xFF, data invalid");
+  424   2              return -1;
+  425   2          }
+  426   1      
+  427   1          if ((*x == 0) && (*y == 0) && (*z == 0)) {
+  428   2              LOGW("MAG", "XYZ all zero, data may be invalid");
+  429   2              return -1;
+  430   2          }
+  431   1      
+  432   1          return 0;
+  433   1      }
+  434          
+  435          /**
+  436           * @brief      读取低通滤波后的地磁 XYZ 数据
+  437           * @param[out] x  指向 X 轴滤波后磁场数据的指针
+  438           * @param[out] y  指向 Y 轴滤波后磁场数据的指针
+  439           * @param[out] z  指向 Z 轴滤波后磁场数据的指针
+  440           * @return      0=成功，-1=原始数据无效、滤波失败或读取失败
+  441           *
+  442           * @details
+  443           * 先读取原始三轴地磁数据，再通过 Function/Filter 模块执行软件低通滤波。
+  444           * 首帧有效数据直接作为滤波输出，避免上电瞬态影响。
+  445           */
+  446          s8 QMC6309_ReadXYZFiltered(int16 *x, int16 *y, int16 *z)
+  447          {
+  448   1          int16 mx;
+  449   1          int16 my;
+  450   1          int16 mz;
+  451   1      
+  452   1          if ((x == 0) || (y == 0) || (z == 0)) {
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 8   
+
+  453   2              return -1;
+  454   2          }
+  455   1      
+  456   1          if (QMC6309_ReadXYZ(&mx, &my, &mz) != 0) {
+  457   2              return -1;
+  458   2          }
+  459   1      
+  460   1          return Filter_MagLowPass(mx, my, mz, x, y, z);
+  461   1      }
+  462          
+  463          s8 QMC6309_SetODR(u8 odr)
+  464          {
+  465   1          if (QMC6309_WriteReg(QMC6309_REG_CONTROL_2, odr) != 0) {
+  466   2              LOGE("MAG", "SetODR WR fail odr=0x%02X", odr);
+  467   2              return -1;
+  468   2          }
+  469   1      
+  470   1          LOGI("MAG", "SetODR=0x%02X", odr);
+  471   1          return 0;
+  472   1      }
+  473          
+  474          s8 QMC6309_Init(void)
+  475          {
+  476   1          u8 id;
+  477   1          u8 retry;
+  478   1          u8 ctrl1_readback;
+  479   1          u8 ctrl2_readback;
+  480   1          u16 speed_cfg;
+  481   1          u32 bus_hz;
+  482   1          u16 retry_num;
+  483   1      
+  484   1          speed_cfg = (u16)QMC6309_I2C_SPEED_CFG;
+  485   1          bus_hz = ((u32)MAIN_Fosc / 2UL) /
+  486   1                   ((((u32)speed_cfg) * 2UL) + 4UL);
+  487   1      
+  488   1          LOGI("MAG", "========== QMC6309 Init Start ==========");
+  489   1          LOGI("MAG", "I2C route=P1.4/P1.5 speed_cfg=%u (~%luHz)", speed_cfg, bus_hz);
+  490   1          LOGI("MAG", "probe order primary=0x%02X alt=0x%02X",
+  491   1               QMC6309_I2C_ADDR_PRIMARY, QMC6309_I2C_ADDR_ALT);
+  492   1      
+  493   1          if (QMC6309_EnsureBusIdle()) {
+  494   2              LOGE("MAG", "bus idle check failed before probe");
+  495   2              return -1;
+  496   2          }
+  497   1      
+  498   1          for (retry = 0; retry < 3; retry++) {
+  499   2              retry_num = (u16)retry + 1U;
+  500   2              if (QMC6309_ProbeAddr(QMC6309_I2C_ADDR_PRIMARY) == 0) {
+  501   3                  break;
+  502   3              }
+  503   2      
+  504   2              LOGW("MAG", "primary addr no ACK, try alt");
+  505   2              if (QMC6309_ProbeAddr(QMC6309_I2C_ADDR_ALT) == 0) {
+  506   3                  break;
+  507   3              }
+  508   2      
+  509   2              LOGW("MAG", "addr probe fail try=%u, wait 200ms retry", retry_num);
+  510   2              QMC6309_Delay_ms(200);
+  511   2          }
+  512   1      
+  513   1          if (retry >= 3) {
+  514   2              LOGE("MAG", "no device found after 3 tries");
+  515   2              return -1;
+  516   2          }
+  517   1      
+  518   1          LOGI("MAG", "selected addr=0x%02X write=0x%02X read=0x%02X",
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 9   
+
+  521   1               qmc6309_addr,
+  521   1               QMC6309_I2C_WRITE(qmc6309_addr),
+  521   1               QMC6309_I2C_READ(qmc6309_addr));
+  522   1      
+  523   1          if (QMC6309_Wait_Ready(QMC6309_PWR_UP_DELAY_MS) != 0) {
+  524   2              LOGE("MAG", "wait ready failed");
+  525   2              return -1;
+  526   2          }
+  527   1      
+  528   1          id = QMC6309_ReadID();
+  529   1          if (id != QMC6309_CHIP_ID_VALUE) {
+  530   2              LOGE("MAG", "CHIP_ID error got=0x%02X exp=0x%02X", id, QMC6309_CHIP_ID_VALUE);
+  531   2              return -1;
+  532   2          }
+  533   1          LOGI("MAG", "CHIP_ID=0x%02X OK", id);
+  534   1      
+  535   1          if (QMC6309_Reset() != 0) {
+  536   2              return -1;
+  537   2          }
+  538   1      
+  539   1          if (QMC6309_WriteReg(QMC6309_REG_CONTROL_1, QMC6309_CTRL1_STANDBY) != 0) {
+  540   2              return -1;
+  541   2          }
+  542   1          if (QMC6309_WriteReg(QMC6309_REG_CONTROL_2, QMC6309_CTRL2_INIT) != 0) {
+  543   2              return -1;
+  544   2          }
+  545   1          if (QMC6309_WriteReg(QMC6309_REG_CONTROL_1, QMC6309_CTRL1_ACTIVE) != 0) {
+  546   2              return -1;
+  547   2          }
+  548   1          QMC6309_Delay_ms(2);
+  549   1      
+  550   1          ctrl1_readback = QMC6309_ReadReg(QMC6309_REG_CONTROL_1);
+  551   1          ctrl2_readback = QMC6309_ReadReg(QMC6309_REG_CONTROL_2);
+  552   1          LOGI("MAG", "CTRL1=0x%02X CTRL2=0x%02X", ctrl1_readback, ctrl2_readback);
+  553   1      
+  554   1          if ((ctrl1_readback == 0xFF) || (ctrl2_readback == 0xFF)) {
+  555   2              LOGE("MAG", "register readback error");
+  556   2              return -1;
+  557   2          }
+  558   1      
+  559   1          if (ctrl1_readback != QMC6309_CTRL1_ACTIVE) {
+  560   2              LOGW("MAG", "CTRL1 mismatch read=0x%02X exp=0x%02X",
+  561   2                   ctrl1_readback, QMC6309_CTRL1_ACTIVE);
+  562   2          }
+  563   1          if (ctrl2_readback != QMC6309_CTRL2_INIT) {
+  564   2              LOGW("MAG", "CTRL2 mismatch read=0x%02X exp=0x%02X",
+  565   2                   ctrl2_readback, QMC6309_CTRL2_INIT);
+  566   2          }
+  567   1      
+  568   1          Filter_ResetMagLowPass();
+  569   1      
+  570   1          LOGI("MAG", "========== QMC6309 Init OK ==========");
+  571   1          return 0;
+  572   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      2846     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =         1         31
+  bit size             =    ------     ------
+C251 COMPILER V5.60.0,  QMC6309                                                            27/04/26  00:55:23  PAGE 10  
+
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =      1602     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

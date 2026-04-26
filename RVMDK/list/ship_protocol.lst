@@ -1,0 +1,223 @@
+C251 COMPILER V5.60.0,  ship_protocol                                                      27/04/26  00:55:24  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE ship_protocol
+OBJECT MODULE PLACED IN .\list\ship_protocol.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\WIRELESS\ship_protocol.c XSMALL INTR2 BROWSE INC
+                    -DIR(..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QM
+                    -C6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR
+                    -) DEBUG PRINT(.\list\ship_protocol.lst) TABS(2) OBJECT(.\list\ship_protocol.obj) 
+
+stmt  level    source
+
+    1          #include "ship_protocol.h"
+    2          
+    3          #include "wireless.h"
+    4          #include "..\..\Function\Log\Log.h"
+    5          
+    6          #define SHIP_TAG "SHIP"
+    7          
+    8          static u8 ShipProtocol_Xor(const u8 *buf, u8 len)
+    9          {
+   10   1          u8 i;
+   11   1          u8 val;
+   12   1      
+   13   1          val = 0U;
+   14   1          for (i = 0U; i < len; i++) {
+   15   2              val ^= buf[i];
+   16   2          }
+   17   1          return val;
+   18   1      }
+   19          
+   20          static u16 ShipProtocol_ReadU16BE(const u8 *buf)
+   21          {
+   22   1          return (u16)(((u16)buf[0] << 8) | buf[1]);
+   23   1      }
+   24          
+   25          static void ShipProtocol_LogCoord(const u8 *buf, u8 len)
+   26          {
+   27   1          if (len < 10U) {
+   28   2              LOGW(SHIP_TAG, "coord short len=%u", (u16)len);
+   29   2              return;
+   30   2          }
+   31   1      
+   32   1          LOGI(SHIP_TAG,
+   39   1               "coord lonEW=0x%02X lon=%u.%u latNS=0x%02X lat=%u.%u",
+   39   1               (u16)buf[0],
+   39   1               ShipProtocol_ReadU16BE(&buf[1]),
+   39   1               ShipProtocol_ReadU16BE(&buf[3]),
+   39   1               (u16)buf[5],
+   39   1               ShipProtocol_ReadU16BE(&buf[6]),
+   39   1               ShipProtocol_ReadU16BE(&buf[8]));
+   40   1      }
+   41          
+   42          static void ShipProtocol_HandlePair(const u8 *payload, u8 payload_len)
+   43          {
+   44   1          u8 key1;
+   45   1          u8 key2;
+   46   1          u8 channel;
+   47   1      
+   48   1          if (payload_len < 4U) {
+   49   2              LOGW(SHIP_TAG, "pair short len=%u", (u16)payload_len);
+   50   2              return;
+   51   2          }
+   52   1      
+   53   1          key1 = (u8)((u8)((payload[0] << 4) >> 4) + ((u8)(payload[3] >> 2) + (u8)(payload[3] % 0x03U)));
+   54   1          key2 = (u8)((u8)((payload[1] << 4) >> 4) + ((u8)(payload[2] >> 3) + (u8)(payload[0] % 0x06U)));
+   55   1          if (payload_len >= 5U) {
+   56   2              channel = (u8)(((u8)(((payload[4] + 0x06U) % 0x40U) +
+C251 COMPILER V5.60.0,  ship_protocol                                                      27/04/26  00:55:24  PAGE 2   
+
+   57   2                                   ((payload[2] >> 3) * 0x08U) +
+   58   2                                   (((payload[1] | payload[0]) % 0x08U) / 2U))) % 0x40U);
+   59   2              LOGI(SHIP_TAG,
+   62   2                   "cmd=0x10 pair chip=%02X %02X %02X %02X key=%u/%u ch=%u",
+   62   2                   (u16)payload[0], (u16)payload[1], (u16)payload[2], (u16)payload[3],
+   62   2                   (u16)key1, (u16)key2, (u16)channel);
+   63   2          } else {
+   64   2              LOGI(SHIP_TAG,
+   67   2                   "cmd=0x10 pair chip=%02X %02X %02X %02X key=%u/%u",
+   67   2                   (u16)payload[0], (u16)payload[1], (u16)payload[2], (u16)payload[3],
+   67   2                   (u16)key1, (u16)key2);
+   68   2          }
+   69   1      }
+   70          
+   71          static void ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
+   72          {
+   73   1          if (payload_len < 3U) {
+   74   2              LOGW(SHIP_TAG, "throttle short len=%u", (u16)payload_len);
+   75   2              return;
+   76   2          }
+   77   1      
+   78   1          LOGI(SHIP_TAG, "cmd=0x11 lr=%u ud=%u key=0x%02X",
+   79   1               (u16)payload[0], (u16)payload[1], (u16)payload[2]);
+   80   1      }
+   81          
+   82          static void ShipProtocol_HandleGpsReport(const u8 *payload, u8 payload_len)
+   83          {
+   84   1          if (payload_len < 11U) {
+   85   2              LOGW(SHIP_TAG, "gps short len=%u", (u16)payload_len);
+   86   2              return;
+   87   2          }
+   88   1      
+   89   1          LOGI(SHIP_TAG, "cmd=0x12 gps=%u yaw=%u",
+   90   1               (u16)payload[0], ShipProtocol_ReadU16BE(&payload[1]));
+   91   1          ShipProtocol_LogCoord(&payload[3], (u8)(payload_len - 3U));
+   92   1      }
+   93          
+   94          static void ShipProtocol_Dispatch(u8 cmd, const u8 *payload, u8 payload_len)
+   95          {
+   96   1          switch (cmd) {
+   97   2          case SHIP_CMD_PAIR:
+   98   2              ShipProtocol_HandlePair(payload, payload_len);
+   99   2              break;
+  100   2          case SHIP_CMD_THROTTLE:
+  101   2              ShipProtocol_HandleThrottle(payload, payload_len);
+  102   2              break;
+  103   2          case SHIP_CMD_GPS_REPORT:
+  104   2              ShipProtocol_HandleGpsReport(payload, payload_len);
+  105   2              break;
+  106   2          case SHIP_CMD_RETURN_HOME:
+  107   2              LOGI(SHIP_TAG, "cmd=0x13 return-home len=%u", (u16)payload_len);
+  108   2              ShipProtocol_LogCoord(payload, payload_len);
+  109   2              break;
+  110   2          case SHIP_CMD_GOTO_POINT:
+  111   2              LOGI(SHIP_TAG, "cmd=0x14 goto-point len=%u", (u16)payload_len);
+  112   2              ShipProtocol_LogCoord(payload, payload_len);
+  113   2              break;
+  114   2          case SHIP_CMD_RETURN_SWITCH:
+  115   2              if (payload_len < 1U) {
+  116   3                  LOGW(SHIP_TAG, "return-switch short len=%u", (u16)payload_len);
+  117   3                  break;
+  118   3              }
+  119   2              LOGI(SHIP_TAG, "cmd=0x15 switch=0x%02X len=%u",
+  120   2                   (u16)payload[0], (u16)payload_len);
+  121   2              if (payload_len > 1U) {
+  122   3                  ShipProtocol_LogCoord(&payload[1], (u8)(payload_len - 1U));
+C251 COMPILER V5.60.0,  ship_protocol                                                      27/04/26  00:55:24  PAGE 3   
+
+  123   3              }
+  124   2              break;
+  125   2          default:
+  126   2              LOGW(SHIP_TAG, "unknown cmd=0x%02X len=%u", (u16)cmd, (u16)payload_len);
+  127   2              break;
+  128   2          }
+  129   1      }
+  130          
+  131          s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len)
+  132          {
+  133   1          u8 body_len;
+  134   1          u8 cmd;
+  135   1          u8 data_len;
+  136   1          u8 xor_calc;
+  137   1          u8 xor_recv;
+  138   1      
+  139   1          if ((frame == 0) || (frame_len < 5U)) {
+  140   2              return WIRELESS_ERR_PARAM;
+  141   2          }
+  142   1          if ((frame[0] != SHIP_PROTO_HEAD) || (frame[frame_len - 1U] != SHIP_PROTO_TAIL)) {
+  143   2              LOGW(SHIP_TAG, "bad frame edge h=0x%02X t=0x%02X len=%u",
+  144   2                   (u16)frame[0], (u16)frame[frame_len - 1U], (u16)frame_len);
+  145   2              return WIRELESS_ERR_VERIFY;
+  146   2          }
+  147   1      
+  148   1          body_len = frame[1];
+  149   1          if ((body_len < 2U) || ((u8)(body_len + 3U) != frame_len)) {
+  150   2              LOGW(SHIP_TAG, "bad len field=%u frame=%u", (u16)body_len, (u16)frame_len);
+  151   2              return WIRELESS_ERR_VERIFY;
+  152   2          }
+  153   1      
+  154   1          xor_recv = frame[frame_len - 2U];
+  155   1          xor_calc = ShipProtocol_Xor(&frame[1], body_len);
+  156   1          if (xor_recv != xor_calc) {
+  157   2              LOGW(SHIP_TAG, "bad xor cmd=0x%02X calc=0x%02X recv=0x%02X",
+  158   2                   (u16)frame[2], (u16)xor_calc, (u16)xor_recv);
+  159   2              return WIRELESS_ERR_VERIFY;
+  160   2          }
+  161   1      
+  162   1          cmd = frame[2];
+  163   1          data_len = (u8)(body_len - 2U);
+  164   1          ShipProtocol_Dispatch(cmd, &frame[3], data_len);
+  165   1          return SUCCESS;
+  166   1      }
+  167          
+  168          void ShipProtocol_Poll(void)
+  169          {
+  170   1          u8 frame[SHIP_PROTO_MAX_FRAME_LEN];
+  171   1          u8 frame_len;
+  172   1          s8 rc;
+  173   1      
+  174   1          do {
+  175   2              frame_len = 0U;
+  176   2              rc = Wireless_Receive(frame, SHIP_PROTO_MAX_FRAME_LEN, &frame_len);
+  177   2              if (rc == SUCCESS) {
+  178   3                  (void)ShipProtocol_ParseFrame(frame, frame_len);
+  179   3              }
+  180   2          } while (rc == SUCCESS);
+  181   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      1226     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+C251 COMPILER V5.60.0,  ship_protocol                                                      27/04/26  00:55:24  PAGE 4   
+
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------         79
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =       539     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
