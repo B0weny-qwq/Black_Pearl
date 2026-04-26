@@ -1,5 +1,7 @@
 # Black Pearl v1.1
 
+Chinese version: [README.zh-CN.md](README.zh-CN.md)
+
 Black Pearl v1.1 is an embedded control project based on the STC32G MCU and built with Keil MDK / C251. The current firmware integrates GPS, IMU, magnetometer, wireless communication, motor PWM output, logging, filtering, and fixed-point PID control.
 
 The project is organized around a layered structure: system entry and scheduling in `User/`, official peripheral drivers in `Driver/`, vendor example code in `App/`, and project-specific modules in `Code_boweny/`.
