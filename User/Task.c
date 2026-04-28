@@ -63,6 +63,7 @@ static TASK_COMPONENTS Task_Comps[]=
 };
 
 u8 Tasks_Max = sizeof(Task_Comps)/sizeof(Task_Comps[0]);
+static volatile u32 g_task_tick_ms = 0;
 
 //========================================================================
 // 函数: Task_Handler_Callback
@@ -71,9 +72,18 @@ u8 Tasks_Max = sizeof(Task_Comps)/sizeof(Task_Comps[0]);
 // 返回: None.
 // 版本: V1.0, 2012-10-22
 //========================================================================
+/**
+ * @brief   Timer0 1ms 任务标记回调
+ * @return  none
+ *
+ * @details
+ * 在 Timer0 ISR 中调用。函数会递增全局毫秒 tick，并递减各任务的软件计数器；
+ * 当任务计数归零时置 `Run=1`，由主循环中的 `Task_Pro_Handler_Callback()` 执行。
+ */
 void Task_Marks_Handler_Callback(void)
 {
 	u8 i;
+	g_task_tick_ms++;
 	for(i=0; i<Tasks_Max; i++)
 	{
 		if(Task_Comps[i].TIMCount)    /* If the time is not 0 */
@@ -87,6 +97,27 @@ void Task_Marks_Handler_Callback(void)
 			}
 		}
 	}
+}
+
+/**
+ * @brief   获取系统毫秒 tick
+ * @return  系统启动后的毫秒计数，32 位自然回绕
+ *
+ * @details
+ * `g_task_tick_ms` 在 Timer0 中断中更新。读取 32 位变量时短暂关闭总中断，
+ * 避免 8/16 位 MCU 上多字节读取被中断打断。
+ */
+u32 Task_GetTickMs(void)
+{
+	u32 tick;
+	u8 ea_bak;
+
+	ea_bak = EA;
+	EA = 0;
+	tick = g_task_tick_ms;
+	EA = ea_bak;
+
+	return tick;
 }
 
 //========================================================================

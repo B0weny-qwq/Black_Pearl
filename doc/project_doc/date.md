@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-04-22
- * @version v1.0
+ * @date    2026-04-27
+ * @version v1.7
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,42 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-04-27] - v1.7.0 AHRS姿态融合模块接入
+
+### 新增功能
+- **AHRS模块**: 新增 `Code_boweny/Function/AHRS/`
+  - `AHRS.h`: 新增定点互补滤波参数、船体系轴向映射宏、`AHRS_State_t` 状态结构和对外 API
+  - `AHRS.c`: 新增 Q8 定点姿态融合实现，支持陀螺仪积分、加速度 roll/pitch 慢修正、地磁 yaw 慢修正
+  - `README.md`: 新增调参说明，记录 `+X=船尾`、`+Y=船右/右舷`、`+Z=上` 的机体系定义
+- **主循环融合接入**: `User/Main.c` 中 `IMU_HighRatePoll()` 改为按 Timer0 1ms tick 固定节拍读取 QMI8658 6 轴数据，并调用 AHRS 更新姿态
+- **地磁航向修正**: 主循环每 `AHRS_MAG_PERIOD_MS=100ms` 读取一次 `QMC6309_ReadXYZFiltered()`，通过 AHRS 低频修正 yaw
+- **系统tick接口**: `Task.c/.h` 新增 `Task_GetTickMs()`，为 AHRS 提供真实 `dt_ms`
+
+### Bug 修复
+- **[IMU重复积分风险]** 原主循环按 while 速度直接读取传感器，可能在传感器 ODR 未更新时重复读同一帧。修复：使用 `Task_GetTickMs()` 将 AHRS IMU 更新节拍固定为 `AHRS_IMU_PERIOD_MS=17ms`
+- **[低速积分量化]** AHRS 内部角度使用 Q8 小数保存，角度回绕时不丢弃小数，避免低速角速度积分被整数截断
+- **[轴向散落风险]** 将 IMU/MAG 原始轴到船体系的换轴/取反集中到 `AHRS_IMU_BODY_*` 与 `AHRS_MAG_BODY_*` 宏，避免业务层分散处理导致方向不一致
+
+### 优化改进
+- **调试简单化**: 采用互补滤波而非 EKF，调参集中在 `AHRS.h`，优先保证上电可观测、日志可读、现场调试成本低
+- **抗抖动处理**: 增加陀螺仪死区、三轴低通、加速度模长有效窗口、1g 参考自学习、静止零偏学习和地磁慢修正
+- **中文Doxygen**: 为 `AHRS.h/.c` 补齐中文 Doxygen 风格注释，覆盖文件头、宏、结构体字段、内部关键函数和对外 API
+
+### 变更记录
+- **System_init.c**: 引入 `AHRS.h`，在传感器初始化链路中调用 `AHRS_Reset()`
+- **Main.c**: `IMU_HighRatePoll()` 从单纯加速度日志改为 IMU/MAG 融合入口，周期输出 `rpy_cd` 与 `gyro_dps100`
+- **Task.c/.h**: 新增 1ms tick 计数与临界区读取接口
+- **RVMDK/STC32G-LIB.uvproj**: 新增 `AHRS` 分组，并补充 `..\Code_boweny\Function\AHRS` 头文件搜索路径
+- **total.md**: 同步更新目录结构、启动顺序、主循环说明、模块表、设备说明、任务系统、AHRS 使用边界、文档索引和版本历史
+
+### 开发者备注
+- 当前默认坐标系为 `+X=船尾`、`+Y=船右/右舷`、`+Z=上`
+- 若实测芯片 raw +X 指向船头，优先修改 `AHRS_IMU_BODY_X_SIGN=-1`
+- 若地磁受电机或船体磁性材料干扰明显，联调阶段可先将 `AHRS_MAG_ENABLE=0`
+- 若后续修改 QMI8658 陀螺仪量程，必须同步更新 `AHRS_GYRO_LSB_PER_DPS`
 
 ---
 

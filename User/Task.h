@@ -26,4 +26,14 @@ typedef struct
 void Task_Marks_Handler_Callback(void);
 void Task_Pro_Handler_Callback(void);
 
+/**
+ * @brief   获取 Timer0 维护的系统毫秒计数
+ * @return  系统启动后的毫秒 tick，32 位自然回绕
+ *
+ * @details
+ * 该接口在内部短暂关闭总中断，保证 32 位 tick 读取过程不会被 Timer0 ISR 打断。
+ * 当前主要用于 AHRS 姿态融合计算真实 `dt_ms`。
+ */
+u32 Task_GetTickMs(void);
+
 #endif

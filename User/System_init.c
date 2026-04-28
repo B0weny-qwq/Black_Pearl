@@ -21,6 +21,7 @@
 #include	"..\Code_boweny\Device\QMI8658\QMI8658.h"
 #include	"..\Code_boweny\Device\GPS\GPS.h"
 #include	"..\Code_boweny\Device\WIRELESS\wireless.h"
+#include	"..\Code_boweny\Function\AHRS\AHRS.h"
 
 #include	"STC32G_Soft_UART.h"
 
@@ -294,6 +295,7 @@ void	SYS_Init(void)
 	/* Restore the shared sensor I2C bus after APP_config() pin changes. */
 	Sensor_I2C_prepare();
 	g_qmi8658_ready = 0;
+	AHRS_Reset();
 	QMC6309_Init();
 	/* Run a one-shot QMI8658 IIC self-test during boot. */
 	/* QMI8658 涓婄數 IIC 鑷 */

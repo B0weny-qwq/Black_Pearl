@@ -4,12 +4,12 @@
  *
  * @author  boweny
  * @date    2026-04-27
- * @version v1.6
+ * @version v1.7
  *
  * @details
- * 本文档基于 2026-04-26 当前工程实际代码重新整理，
+ * 本文档基于 2026-04-27 当前工程实际代码重新整理，
  * 在 GPS、IMU、MAG 已接入基础上，补充 WIRELESS 模块接入后的真实运行链路、
- * 资源占用与约束边界，并补充 MOTOR PWM 驱动与 PID 功能模块。
+ * 资源占用与约束边界，并补充 MOTOR PWM 驱动、PID 功能模块与 AHRS 姿态融合模块。
  *
  * @note    详细变更记录请查阅 date.md
  *
@@ -47,6 +47,7 @@ Black_Pearl_v1.1/
 ├── Code_boweny/             # 项目扩展模块
 │   ├── Function/Log/        # UART1 日志系统
 │   ├── Function/Filter/     # Q8 定点低通滤波
+│   ├── Function/AHRS/       # 定点姿态融合与轴向映射
 │   ├── Function/PID/        # Q10 定点 PID 控制器
 │   └── Device/
 │       ├── QMC6309/         # 地磁计驱动
@@ -73,7 +74,7 @@ Black_Pearl_v1.1/
 | 底层驱动层 | `Driver/` | UART/I2C/SPI/Timer/GPIO 等标准外设 API |
 | 示例应用层 | `App/` | 官方示例模块 |
 | 项目设备层 | `Code_boweny/Device/` | QMC6309 / QMI8658 / GPS / WIRELESS 等项目设备驱动 |
-| 项目功能层 | `Code_boweny/Function/` | LOG / Filter / PID 等通用功能模块 |
+| 项目功能层 | `Code_boweny/Function/` | LOG / Filter / AHRS / PID 等通用功能模块 |
 
 ### 3.2 当前真实启动顺序
 
@@ -92,13 +93,14 @@ EAXSFR()
 -> GPS_Init()
 -> Wireless_Init()
 -> Sensor_I2C_prepare()
+-> AHRS_Reset()
 -> QMC6309_Init()
 -> QMI8658_PowerOnSelfTest()
 ```
 
 ### 3.3 当前真实主循环
 
-当前 `User/Main.c` 已接入 GPS、无线协议轮询、任务处理和 IMU 高频读取：
+当前 `User/Main.c` 已接入 GPS、无线协议轮询、任务处理和 AHRS 姿态融合：
 
 ```c
 Wireless_MinimalTestUnit();
@@ -121,7 +123,7 @@ while (1)
 - `ShipProtocol_Poll()` 消费无线收包并维护船端协议状态
 - `Wireless_SearchSignalPoll()` 执行无线搜索/信号扫描相关轮询
 - `Task_Pro_Handler_Callback()` 消费 Timer0 标记任务，当前用于驱动 `P3.6` LED 闪烁
-- `IMU_HighRatePoll()` 继续维持 QMI8658 高频轮询
+- `IMU_HighRatePoll()` 按 Timer0 1ms tick 节拍读取 QMI8658 6 轴数据，调用 AHRS 完成姿态融合，并低频读取 QMC6309 修正航向
 - `DisplayScan()` 当前仍未接入主循环
 - `Task.c` 当前已作为 LED 闪烁调度器参与运行
 
@@ -162,6 +164,7 @@ while (1)
 |------|------|------|
 | `Function/Log` | 启用 | UART1 日志输出 |
 | `Function/Filter` | 启用 | QMI8658 / QMC6309 定点低通 |
+| `Function/AHRS` | 启用 | 定点互补姿态融合，输出 roll/pitch/yaw 与船体系角速度 |
 | `Function/PID` | 已纳入工程 | Q10 定点 PID 控制器，当前提供 API，默认未在启动流中调用 |
 | `Device/QMC6309` | 启用 | 硬件 I2C 地磁计 |
 | `Device/QMI8658` | 启用 | 硬件 I2C IMU |
@@ -224,7 +227,35 @@ MOTOR 模块在 `Motor_Init()` 内部独立执行：
 - 调用前提：`UART_config()` 完成后再 `log_init()`
 - 当前用途：QMC6309 / QMI8658 / GPS 初始化与错误日志
 
-### 6.1.1 PID
+### 6.1.1 AHRS
+
+- 路径：`Code_boweny/Function/AHRS/`
+- 类型：定点互补姿态融合器
+- 机体系：`+X=船尾`，`+Y=船右/右舷`，`+Z=上`
+- 数据格式：姿态角输出为 `deg * 100`，角速度输出为 `deg/s * 100`
+- 当前节拍：IMU 更新周期 `AHRS_IMU_PERIOD_MS=17ms`，地磁修正周期 `AHRS_MAG_PERIOD_MS=100ms`
+- 当前融合策略：
+  - 陀螺仪负责短期角速度积分
+  - 加速度计负责 roll/pitch 慢修正，并通过模长窗口抵抗冲击和船体线加速度
+  - 地磁计负责 yaw 慢修正，可通过 `AHRS_MAG_ENABLE` 关闭
+  - 启动阶段自动学习加速度 1g 参考值和静止陀螺仪零偏
+- 当前对外接口：
+
+```c
+void AHRS_Reset(void);
+s8 AHRS_Update6Axis(int16 ax, int16 ay, int16 az,
+                    int16 gx, int16 gy, int16 gz,
+                    u16 dt_ms);
+s8 AHRS_UpdateRaw6Axis(int16 raw_ax, int16 raw_ay, int16 raw_az,
+                       int16 raw_gx, int16 raw_gy, int16 raw_gz,
+                       u16 dt_ms);
+s8 AHRS_UpdateMag(int16 mx, int16 my, int16 mz);
+s8 AHRS_UpdateRawMag(int16 raw_mx, int16 raw_my, int16 raw_mz);
+const AHRS_State_t *AHRS_GetState(void);
+u8 AHRS_IsReady(void);
+```
+
+### 6.1.2 PID
 
 - 路径：`Code_boweny/Function/PID/`
 - 类型：通用位置式 PID 控制器
@@ -253,13 +284,15 @@ int16 PID_UpdateTarget(PID_Controller_t *pid, int16 target, int16 measured);
 - 总线：硬件 I2C `P1.4/P1.5`
 - 当前状态：启动阶段初始化并读回寄存器
 - 与 QMI8658 共线运行
+- 当前用途：主循环中约 100ms 读取一次滤波地磁数据，供 AHRS 航向慢修正使用
 
 ### 6.3 QMI8658
 
 - 路径：`Code_boweny/Device/QMI8658/`
 - 总线：硬件 I2C `P1.4/P1.5`
-- 当前状态：启动自检后，在主循环中由 `IMU_HighRatePoll()` 高频轮询加速度数据
+- 当前状态：启动自检后，在主循环中由 `IMU_HighRatePoll()` 周期读取加速度 + 陀螺仪并送入 AHRS
 - 自检成功后置 `g_qmi8658_ready = 1`
+- 当前读取接口：`QMI8658_ReadAll()`，一次读取 6 轴数据，避免加速度/陀螺仪分开读取导致时间不一致
 
 ### 6.4 GPS
 
@@ -361,6 +394,7 @@ int16 Motor_GetSpeed(Motor_Id_t motor);
 
 - 任务框架已编译
 - Timer0 中断仍会置任务运行标志
+- `Task_GetTickMs()` 对外提供 1ms 系统 tick，当前用于 AHRS 计算真实 `dt_ms`
 - 主循环会执行任务处理函数
 - 当前唯一实际运行的任务是 `Sample_Lamp()`，用于 `P3.6` LED 闪烁
 
@@ -433,6 +467,15 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 - 对同一个控制对象应使用独立 `PID_Controller_t`，不要让左右电机或不同控制环共用同一个 PID 状态
 - 切换控制模式或目标对象时建议调用 `PID_Reset()`，避免沿用旧积分导致输出突跳
 
+### 8.9 AHRS 使用边界
+
+- AHRS 模块不直接访问 I2C、GPIO、PWM 或传感器寄存器，只消费上层传入的 IMU/MAG 数据
+- AHRS 内部禁止浮点运算，角度输出统一为 `deg * 100`
+- 当前默认坐标系为 `+X=船尾`、`+Y=船右/右舷`、`+Z=上`
+- 芯片丝印、datasheet 和实测确认后，只通过 `AHRS_IMU_BODY_*` / `AHRS_MAG_BODY_*` 宏调整轴向，不在业务层散落取反和换轴
+- 地磁在船体电机附近容易受干扰，航向修正默认慢；若联调阶段发现 yaw 被磁干扰拉偏，可先将 `AHRS_MAG_ENABLE` 置 0
+- 修改 QMI8658 陀螺仪量程后，必须同步更新 `AHRS_GYRO_LSB_PER_DPS`
+
 ---
 
 ## 9. 文档体系
@@ -447,6 +490,7 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 | `WIRELESS/README.md` | `Code_boweny/Device/WIRELESS/README.md` | 无线模块实现说明 |
 | `MOTOR/README.md` | `Code_boweny/Device/MOTOR/README.md` | PWM 电机驱动实现说明 |
 | `PID/README.md` | `Code_boweny/Function/PID/README.md` | PID 定点控制器实现说明 |
+| `AHRS/README.md` | `Code_boweny/Function/AHRS/README.md` | AHRS 姿态融合与调参说明 |
 | `LOG.md` | `doc/device_doc/LOG.md` | LOG 模块说明 |
 | `IMU_QMI8658.md` | `doc/device_doc/IMU_QMI8658.md` | QMI8658 说明 |
 | `QMC6309.md` | `doc/device_doc/QMC6309.md` | QMC6309 说明 |
@@ -463,6 +507,7 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 | 2026-04-26 | v1.4 | 补充 WIRELESS 模块接入、SPI4 资源占用、双天线策略与真实启动/主循环链路 |
 | 2026-04-27 | v1.5 | 新增 MOTOR PWM 驱动模块说明，补充 PWMA CH3/CH4 与 P2.4~P2.7 引脚占用 |
 | 2026-04-27 | v1.6 | 新增 Function/PID 定点 PID 控制器说明，补充 Keil 工程纳入状态与使用边界 |
+| 2026-04-27 | v1.7 | 新增 Function/AHRS 定点姿态融合说明，补充 1ms tick、轴向映射、IMU/MAG 融合链路与使用边界 |
 
 ---
 
