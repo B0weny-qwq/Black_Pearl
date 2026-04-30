@@ -47,7 +47,7 @@
  */
 #define AHRS_GYRO_LSB_PER_DPS            2048L
 
-#define AHRS_GYRO_STILL_DPS100           200L    /**< 静止零偏学习阈值，单位 deg/s * 100 */
+#define AHRS_GYRO_STILL_DPS100           800L    /**< 静止零偏学习阈值，单位 deg/s * 100 */
 #define AHRS_GYRO_DEADBAND_DPS100        12L     /**< 陀螺仪死区，单位 deg/s * 100 */
 #define AHRS_GYRO_LPF_SHIFT              2U      /**< 陀螺仪一阶低通强度，值越大响应越慢 */
 
