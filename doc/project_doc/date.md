@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-01
- * @version v1.7.8
+ * @version v1.7.9
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,14 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-01] - v1.7.9 AHRS测试模式保留错误诊断
+
+### 优化改进
+- **[日志过滤]** `AHRS_TEST_ONLY=1` 下改为放行 `AHRS` 正常日志和所有 `ERROR` 日志。成功时仍只刷 `rpy_cd/flags`，失败时能看到 `[IMU] E: ...` 等真实初始化失败原因。
+- **[噪声控制]** 删除主循环里的 `[AHRS] E: imu not ready` 提示，避免 IMU 自检失败后被重复的泛化错误刷屏。
 
 ---
 

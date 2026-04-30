@@ -98,9 +98,6 @@ static void IMU_HighRatePoll(void)
     static u32 last_mag_ms = 0;
     static u16 sample_div = 0;
     static u8  error_latched = 0;
-#if AHRS_TEST_ONLY
-    static u8  not_ready_reported = 0;
-#endif
     u32 now_ms;
     u32 elapsed_ms;
     u16 dt_ms;
@@ -110,12 +107,6 @@ static void IMU_HighRatePoll(void)
     const AHRS_State_t *att;
 
     if (!g_qmi8658_ready) {
-#if AHRS_TEST_ONLY
-        if (!not_ready_reported) {
-            LOGE("AHRS", "imu not ready");
-            not_ready_reported = 1;
-        }
-#endif
         return;
     }
 

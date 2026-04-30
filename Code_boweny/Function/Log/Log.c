@@ -76,8 +76,9 @@ static void log_vtagged(u8 level, u8 *tag, u8 *fmt, va_list args)
     u8  prefix_len;
 
 #if AHRS_TEST_ONLY
-    if ((tag[0] != 'A') || (tag[1] != 'H') || (tag[2] != 'R') ||
-        (tag[3] != 'S') || (tag[4] != '\0')) {
+    if ((level != 'E') &&
+        ((tag[0] != 'A') || (tag[1] != 'H') || (tag[2] != 'R') ||
+         (tag[3] != 'S') || (tag[4] != '\0'))) {
         return;
     }
 #endif
