@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-01
- * @version v1.7.14
+ * @version v1.7.15
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,17 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-01] - v1.7.15 QMI8658旧I2C路径复测
+
+### 变更记录
+- **[QMI8658复测]** 新增 `QMI8658_LEGACY_I2C_PATH=1` 测试开关，当前版本默认回到 STC 官方 `I2C_ReadNbyte()` / `I2C_WriteNbyte()` 旧路径，用于排除 v1.7.14 分段 ACK 诊断代码对 QMI8658 地址响应的影响。
+- **[启动日志]** QMI8658 初始化日志增加 `i2c=legacy/ackdiag`，便于确认当前烧录固件实际使用哪条 I2C 读写路径。
+
+### 开发者备注
+- 最新实测现象为 `0x6B/0x6A` 均 `DEVW_NACK`，同时 `mag_id=0x90` 正常。若旧路径仍读不到 `WHO_AM_I=0x05`，优先继续排查 QMI8658 的 CSB、VDDIO、SDA/SCL 支路、焊点和芯片方向。
 
 ---
 

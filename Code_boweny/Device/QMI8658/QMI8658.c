@@ -32,6 +32,8 @@
 #undef LOGD
 #define LOGD(tag, ...)
 
+#define QMI8658_LEGACY_I2C_PATH          1U
+
 #define QMI8658_MSACKI_MASK              0x02U
 #define QMI8658_I2C_OK                   0U
 #define QMI8658_I2C_ERR_BUSY             1U
@@ -98,6 +100,15 @@ static u8 QMI8658_EnsureBusIdle(void)
 
 static u8 QMI8658_ReadNByteAtAddr(u8 addr, u8 start_reg, u8 *buf, u8 len);
 static u8 QMI8658_ReadRegAtAddr(u8 addr, u8 reg_addr, u8 *ok);
+static char *QMI8658_I2cPathName(void)
+{
+#if QMI8658_LEGACY_I2C_PATH
+    return "legacy";
+#else
+    return "ackdiag";
+#endif
+}
+
 static char *QMI8658_I2cErrName(u8 err)
 {
     switch (err) {
@@ -197,7 +208,22 @@ static void QMI8658_Delay_ms(u16 ms);
  */
 static u8 QMI8658_WriteReg(u8 reg_addr, u8 reg_val)
 {
+#if QMI8658_LEGACY_I2C_PATH
+    u8 i2c_addr;
+#endif
+
     qmi8658_last_i2c_error = QMI8658_I2C_OK;
+#if QMI8658_LEGACY_I2C_PATH
+    i2c_addr = QMI8658_I2C_WRITE(QMI8658_I2C_Addr);
+    I2C_WriteNbyte(i2c_addr, reg_addr, &reg_val, 1);
+    if (Get_MSBusy_Status()) {
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_BUSY;
+        LOGW("IMU", "WR legacy busy reg=0x%02X val=0x%02X",
+             reg_addr, reg_val);
+        return 1;
+    }
+    return 0;
+#else
     if (QMI8658_EnsureBusIdle() != 0) {
         LOGW("IMU", "WR %s reg=0x%02X val=0x%02X",
              QMI8658_I2cErrName(qmi8658_last_i2c_error), reg_addr, reg_val);
@@ -234,6 +260,7 @@ static u8 QMI8658_WriteReg(u8 reg_addr, u8 reg_val)
 
     Stop();
     return 0;
+#endif
 }
 
 /**
@@ -289,7 +316,11 @@ static u8 QMI8658_ReadRegAtAddr(u8 addr, u8 reg_addr, u8 *ok)
  */
 static u8 QMI8658_ReadNByteAtAddr(u8 addr, u8 start_reg, u8 *buf, u8 len)
 {
+#if QMI8658_LEGACY_I2C_PATH
+    u8 i2c_addr_w;
+#else
     u8 i;
+#endif
 
     qmi8658_last_i2c_error = QMI8658_I2C_OK;
     if ((buf == NULL) || (len == 0)) {
@@ -297,6 +328,15 @@ static u8 QMI8658_ReadNByteAtAddr(u8 addr, u8 start_reg, u8 *buf, u8 len)
         return 1;
     }
 
+#if QMI8658_LEGACY_I2C_PATH
+    i2c_addr_w = QMI8658_I2C_WRITE(addr);
+    I2C_ReadNbyte(i2c_addr_w, start_reg, buf, len);
+    if (Get_MSBusy_Status()) {
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_BUSY;
+        return 1;
+    }
+    return 0;
+#else
     if (QMI8658_EnsureBusIdle() != 0) {
         return 1;
     }
@@ -334,6 +374,7 @@ static u8 QMI8658_ReadNByteAtAddr(u8 addr, u8 start_reg, u8 *buf, u8 len)
     }
     Stop();
     return 0;
+#endif
 }
 
 static u8 QMI8658_ReadNByte(u8 start_reg, u8 *buf, u8 len)
@@ -946,8 +987,10 @@ s8 QMI8658_Init(void)
     u8 ctrl1_rb, ctrl2_rb, ctrl3_rb, ctrl5_rb, ctrl7_rb;
 
     LOGI("IMU", "========== QMI8658 Init Start ==========");
-    LOGI("IMU", "stable bring-up: soft_reset=%u diag=%u",
-         (u16)QMI8658_SOFT_RESET_ENABLE, (u16)QMI8658_DIAG_ENABLE);
+    LOGI("IMU", "stable bring-up: soft_reset=%u diag=%u i2c=%s",
+         (u16)QMI8658_SOFT_RESET_ENABLE,
+         (u16)QMI8658_DIAG_ENABLE,
+         QMI8658_I2cPathName());
     LOGD("IMU", "primary addr=0x%02X alt=0x%02X",
          QMI8658_I2C_WRITE(QMI8658_I2C_ADDR_PRIMARY),
          QMI8658_I2C_WRITE(QMI8658_I2C_ADDR_ALT));
