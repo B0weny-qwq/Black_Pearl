@@ -155,11 +155,22 @@ static void IMU_HighRatePoll(void)
     if (sample_div >= AHRS_LOG_DECIMATION) {
         sample_div = 0;
         att = AHRS_GetState();
-        LOGI("AHRS", "rpy_cd=%d %d %d flags=0x%02X",
-             att->roll_deg100,
-             att->pitch_deg100,
-             att->yaw_deg100,
-             att->flags);
+        if ((att->flags & AHRS_FLAG_GYRO_BIAS_READY) == 0) {
+            LOGI("AHRS", "rpy_cd=%d %d %d gyro_dps100=%d %d %d flags=0x%02X",
+                 att->roll_deg100,
+                 att->pitch_deg100,
+                 att->yaw_deg100,
+                 att->gyro_x_dps100,
+                 att->gyro_y_dps100,
+                 att->gyro_z_dps100,
+                 att->flags);
+        } else {
+            LOGI("AHRS", "rpy_cd=%d %d %d flags=0x%02X",
+                 att->roll_deg100,
+                 att->pitch_deg100,
+                 att->yaw_deg100,
+                 att->flags);
+        }
     }
 }
 

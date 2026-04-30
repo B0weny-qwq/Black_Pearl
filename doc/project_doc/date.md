@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-01
- * @version v1.7.10
+ * @version v1.7.11
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,13 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-01] - v1.7.11 AHRS零偏未就绪时输出陀螺诊断
+
+### 优化改进
+- **[AHRS测试]** 当 `flags` 缺少 `AHRS_FLAG_GYRO_BIAS_READY` 时，AHRS 日志临时追加 `gyro_dps100=x y z`。零偏 ready 后自动恢复只输出 `rpy_cd/flags`，用于定位静止 yaw 漂移是否来自陀螺 Z 零偏或量程系数。
 
 ---
 

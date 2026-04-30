@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-01
- * @version v1.7.10
+ * @version v1.7.11
  *
  * @details
  * 本文档基于 2026-04-27 当前工程实际代码重新整理，
@@ -115,6 +115,8 @@ while (1)
 ```text
 [AHRS] I: rpy_cd=roll pitch yaw flags=0x..
 ```
+
+若 `flags` 尚未包含 `0x08` 陀螺零偏 ready 位，日志会临时追加 `gyro_dps100=x y z`，用于判断 yaw 漂移来源；零偏 ready 后自动恢复为角度-only 输出。
 
 正常完整运行模式为 `AHRS_TEST_ONLY=0`，`User/Main.c` 将接入 GPS、无线协议轮询、任务处理、MAG 独立测试和 AHRS 姿态融合：
 
@@ -525,6 +527,7 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 | 2026-04-26 | v1.4 | 补充 WIRELESS 模块接入、SPI4 资源占用、双天线策略与真实启动/主循环链路 |
 | 2026-04-27 | v1.5 | 新增 MOTOR PWM 驱动模块说明，补充 PWMA CH3/CH4 与 P2.4~P2.7 引脚占用 |
 | 2026-04-27 | v1.6 | 新增 Function/PID 定点 PID 控制器说明，补充 Keil 工程纳入状态与使用边界 |
+| 2026-05-01 | v1.7.11 | AHRS 测试模式在陀螺零偏未就绪时追加 `gyro_dps100` 诊断 |
 | 2026-05-01 | v1.7.10 | QMI8658 初始化改为按 `WHO_AM_I=0x05` 选择 `0x6B/0x6A` 地址 |
 | 2026-05-01 | v1.7.9 | AHRS 测试模式保留 ERROR 诊断，并移除泛化 `imu not ready` 刷屏 |
 | 2026-05-01 | v1.7.8 | 新增 AHRS 角度-only 串口测试模式，只保留 `rpy_cd/flags` 输出 |
