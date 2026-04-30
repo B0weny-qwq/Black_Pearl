@@ -27,6 +27,10 @@
 
 u8 g_qmi8658_ready = 0;
 
+#define SENSOR_SETTLE_DELAY_MS      1500U
+#define QMI8658_BOOT_RETRY_COUNT    4U
+#define QMI8658_BOOT_RETRY_DELAY_MS 500U
+
 //========================================================================
 //                                IO口配置
 //========================================================================
@@ -167,11 +171,28 @@ static void	Sensor_I2C_prepare(void)
 static void	QMI8658_PowerOnSelfTest(void)
 {
 	u8 id;
+	u8 init_try;
 	u8 retry;
 	int16 ax, ay, az;
 	g_qmi8658_ready = 0;
 
-	if (QMI8658_Init() != 0) {
+	for (init_try = 0; init_try < QMI8658_BOOT_RETRY_COUNT; init_try++) {
+		Sensor_I2C_prepare();
+		QMI8658_BusRecover();
+		delay_ms(100);
+
+		if (QMI8658_Init() == 0) {
+			break;
+		}
+
+		LOGE("IMU", "init retry %u/%u mag_id=0x%02X",
+		     (u16)(init_try + 1),
+		     (u16)QMI8658_BOOT_RETRY_COUNT,
+		     QMC6309_ReadID());
+		delay_ms(QMI8658_BOOT_RETRY_DELAY_MS);
+	}
+
+	if (init_try >= QMI8658_BOOT_RETRY_COUNT) {
 		LOGE("IMU", "boot check fail: init");
 		return;
 	}
@@ -295,6 +316,9 @@ void	SYS_Init(void)
 #endif
 
 	/* QMC6309 地磁计初始化 */
+#if AHRS_TEST_ONLY
+	delay_ms(SENSOR_SETTLE_DELAY_MS);
+#endif
 	/* Restore the shared sensor I2C bus after APP_config() pin changes. */
 	Sensor_I2C_prepare();
 	g_qmi8658_ready = 0;

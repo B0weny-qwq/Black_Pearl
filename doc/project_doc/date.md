@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-01
- * @version v1.7.11
+ * @version v1.7.12
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,15 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-01] - v1.7.12 QMI8658偶发全0xFF启动重试
+
+### 优化改进
+- **[上电时序]** `AHRS_TEST_ONLY=1` 下在传感器初始化前增加 `1500ms` 稳定等待，补回跳过 GPS / Wireless 后减少的启动延时。
+- **[IMU自检重试]** `QMI8658_PowerOnSelfTest()` 初始化失败后会重新 `Sensor_I2C_prepare()`、执行 `QMI8658_BusRecover()` 并延时重试，最多 4 次，避免偶发 `WHO_AM_I=0xFF` 直接导致 AHRS 不启动。
+- **[失败诊断]** 每次重试输出 `mag_id=...`，用于判断 QMC6309 是否仍能在同一 I2C 总线上正常响应。
 
 ---
 
