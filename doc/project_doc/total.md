@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-01
- * @version v1.7.16
+ * @version v1.7.17
  *
  * @details
  * 本文档基于 2026-04-27 当前工程实际代码重新整理，
@@ -508,6 +508,8 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 |------|------|------|
 | `total.md` | `doc/project_doc/total.md` | 当前工程总览 |
 | `date.md` | `doc/project_doc/date.md` | 变更日志 |
+| `ahrs_report.md` | `doc/project_doc/ahrs_report.md` | AHRS 融合算法、判断逻辑和升级路线汇报 |
+| `control_strategy_report.md` | `doc/project_doc/control_strategy_report.md` | 当前硬件条件下的控制闭环策略汇报 |
 | `README_GPS.md` | `doc/build_doc/README_GPS.md` | GPS 模块开发参考手册 |
 | `GPS/README.md` | `Code_boweny/Device/GPS/README.md` | GPS 模块实现说明 |
 | `README_wireless.md` | `doc/build_doc/README_wireless.md` | 无线模块移植与接入说明 |
@@ -525,6 +527,7 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-01 | v1.7.17 | 新增 AHRS 融合算法汇报和当前硬件条件下的控制闭环策略汇报，明确先做陀螺 Z 轴角速度内环，再做航向保持外环，磁力计/GPS 仅低频门控参与 |
 | 2026-04-22 | v1.0 | 初版工程总览建立 |
 | 2026-04-23 | v1.1 | 补充 QMC6309 / QMI8658 / Filter 相关说明 |
 | 2026-04-24 | v1.3 | 按当前工程真实状态重写总览，补充 GPS 模块、UART2 路由、Timer2 资源调整和当前主循环事实 |
