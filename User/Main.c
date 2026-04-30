@@ -18,6 +18,8 @@
 #endif
 
 #define AHRS_LOG_DECIMATION  32
+#define AHRS_YAW_ZERO_STABLE_CD       150
+#define AHRS_YAW_ZERO_STABLE_SAMPLES  6
 
 #if !AHRS_TEST_ONLY
 #define MAG_TEST_PERIOD_MS   1000U
@@ -137,7 +139,10 @@ static void IMU_HighRatePoll(void)
     static u16 sample_div = 0;
     static u8  error_latched = 0;
     static u8  yaw_zero_valid = 0;
+    static u8  yaw_last_valid = 0;
+    static u8  yaw_stable_count = 0;
     static int16 yaw_zero_cd = 0;
+    static int16 yaw_last_cd = 0;
     u32 now_ms;
     u32 elapsed_ms;
     u16 dt_ms;
@@ -145,6 +150,7 @@ static void IMU_HighRatePoll(void)
     int16 gx, gy, gz;
     int16 mx, my, mz;
     int16 yaw_rel_cd;
+    int16 yaw_delta_cd;
     const AHRS_State_t *att;
 
     if (!g_qmi8658_ready) {
@@ -197,6 +203,9 @@ static void IMU_HighRatePoll(void)
         sample_div = 0;
         att = AHRS_GetState();
         if ((att->flags & AHRS_FLAG_GYRO_BIAS_READY) == 0) {
+            yaw_zero_valid = 0;
+            yaw_last_valid = 0;
+            yaw_stable_count = 0;
             LOGI("AHRS",
                  "r=%c%u.%02u p=%c%u.%02u y=%c%u.%02u g=%c%u.%02u %c%u.%02u %c%u.%02u f=%02X",
                  AHRS_SignChar(att->roll_deg100),
@@ -220,8 +229,56 @@ static void IMU_HighRatePoll(void)
                  att->flags);
         } else {
             if (!yaw_zero_valid) {
-                yaw_zero_cd = att->yaw_deg100;
-                yaw_zero_valid = 1;
+                if (!yaw_last_valid) {
+                    yaw_last_cd = att->yaw_deg100;
+                    yaw_last_valid = 1;
+                    yaw_stable_count = 0;
+                } else {
+                    yaw_delta_cd =
+                        AHRS_WrapCdLocal((int32)att->yaw_deg100 - yaw_last_cd);
+                    yaw_last_cd = att->yaw_deg100;
+                    if (yaw_delta_cd < 0) {
+                        yaw_delta_cd = (int16)(-yaw_delta_cd);
+                    }
+                    if (yaw_delta_cd <= AHRS_YAW_ZERO_STABLE_CD) {
+                        if (yaw_stable_count < 255U) {
+                            yaw_stable_count++;
+                        }
+                    } else {
+                        yaw_stable_count = 0;
+                    }
+                }
+
+                if (yaw_stable_count >= AHRS_YAW_ZERO_STABLE_SAMPLES) {
+                    yaw_zero_cd = att->yaw_deg100;
+                    yaw_zero_valid = 1;
+                }
+            }
+
+            if (!yaw_zero_valid) {
+                LOGI("AHRS",
+                     "r=%c%u.%02u p=%c%u.%02u y=%c%u.%02u ys=%u g=%c%u.%02u %c%u.%02u %c%u.%02u f=%02X",
+                     AHRS_SignChar(att->roll_deg100),
+                     AHRS_AbsWholeCd(att->roll_deg100),
+                     AHRS_AbsFracCd(att->roll_deg100),
+                     AHRS_SignChar(att->pitch_deg100),
+                     AHRS_AbsWholeCd(att->pitch_deg100),
+                     AHRS_AbsFracCd(att->pitch_deg100),
+                     AHRS_SignChar(att->yaw_deg100),
+                     AHRS_AbsWholeCd(att->yaw_deg100),
+                     AHRS_AbsFracCd(att->yaw_deg100),
+                     (u16)yaw_stable_count,
+                     AHRS_SignChar(att->gyro_x_dps100),
+                     AHRS_AbsWholeCd(att->gyro_x_dps100),
+                     AHRS_AbsFracCd(att->gyro_x_dps100),
+                     AHRS_SignChar(att->gyro_y_dps100),
+                     AHRS_AbsWholeCd(att->gyro_y_dps100),
+                     AHRS_AbsFracCd(att->gyro_y_dps100),
+                     AHRS_SignChar(att->gyro_z_dps100),
+                     AHRS_AbsWholeCd(att->gyro_z_dps100),
+                     AHRS_AbsFracCd(att->gyro_z_dps100),
+                     att->flags);
+                return;
             }
             yaw_rel_cd = AHRS_WrapCdLocal((int32)att->yaw_deg100 - yaw_zero_cd);
 
