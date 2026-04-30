@@ -42,6 +42,62 @@
 
 u8 QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;  /**< 当前使用的7位I2C地址 */
 
+static void QMI8658_Delay_ms(u16 ms);
+static u8 QMI8658_ReadRegAtAddr(u8 addr, u8 reg_addr, u8 *ok);
+
+static u8 QMI8658_SelectAddrByWhoAmI(u8 *selected_id)
+{
+    u8 retry;
+    u8 primary_ok = 0;
+    u8 alt_ok = 0;
+    u8 primary_id = 0xFF;
+    u8 alt_id = 0xFF;
+
+    for (retry = 0; retry < 5; retry++) {
+        primary_id = QMI8658_ReadRegAtAddr(QMI8658_I2C_ADDR_PRIMARY,
+                                           QMI8658_REG_WHO_AM_I,
+                                           &primary_ok);
+        if ((primary_ok != 0) && (primary_id == QMI8658_CHIP_ID_VALUE)) {
+            QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;
+            if (selected_id != NULL) {
+                *selected_id = primary_id;
+            }
+            LOGI("IMU", "id probe primary ok id=0x%02X addr=0x%02X",
+                 primary_id, QMI8658_I2C_Addr);
+            return 0;
+        }
+
+        alt_id = QMI8658_ReadRegAtAddr(QMI8658_I2C_ADDR_ALT,
+                                       QMI8658_REG_WHO_AM_I,
+                                       &alt_ok);
+        if ((alt_ok != 0) && (alt_id == QMI8658_CHIP_ID_VALUE)) {
+            QMI8658_I2C_Addr = QMI8658_I2C_ADDR_ALT;
+            if (selected_id != NULL) {
+                *selected_id = alt_id;
+            }
+            LOGI("IMU", "id probe alt ok id=0x%02X addr=0x%02X",
+                 alt_id, QMI8658_I2C_Addr);
+            return 0;
+        }
+
+        LOGW("IMU", "id probe try=%u p=0x%02X ok=%u a=0x%02X ok=%u",
+             (u16)(retry + 1),
+             primary_id,
+             (u16)primary_ok,
+             alt_id,
+             (u16)alt_ok);
+        QMI8658_BusRecover();
+        QMI8658_Delay_ms(200);
+    }
+
+    LOGE("IMU", "id probe fail p=0x%02X ok=%u a=0x%02X ok=%u",
+         primary_id,
+         (u16)primary_ok,
+         alt_id,
+         (u16)alt_ok);
+    return 1;
+}
+
 /*==============================================================
  *                       内部辅助函数
  *==============================================================*/
@@ -90,6 +146,26 @@ static u8 QMI8658_ReadReg(u8 reg_addr)
     if (Get_MSBusy_Status()) {
         LOGE("IMU", "RD NACK reg=0x%02X", reg_addr);
         return 0xFF;
+    }
+    return reg_val;
+}
+
+static u8 QMI8658_ReadRegAtAddr(u8 addr, u8 reg_addr, u8 *ok)
+{
+    u8 i2c_addr_w = QMI8658_I2C_WRITE(addr);
+    u8 reg_val = 0xFF;
+
+    I2C_ReadNbyte(i2c_addr_w, reg_addr, &reg_val, 1);
+
+    if (Get_MSBusy_Status()) {
+        if (ok != NULL) {
+            *ok = 0;
+        }
+        return 0xFF;
+    }
+
+    if (ok != NULL) {
+        *ok = 1;
     }
     return reg_val;
 }
@@ -700,8 +776,7 @@ void QMI8658_DumpRawRegs(void)
  */
 s8 QMI8658_Init(void)
 {
-    u8 id;
-    u8 retry;
+    u8 id = 0xFF;
     u8 reset_state;
     u8 ctrl1_rb, ctrl2_rb, ctrl3_rb, ctrl5_rb, ctrl7_rb;
 
@@ -713,47 +788,16 @@ s8 QMI8658_Init(void)
          QMI8658_I2C_WRITE(QMI8658_I2C_ADDR_ALT));
 
     /*---------------------------- 地址探测 ----------------------------*/
-    for (retry = 0; retry < 3; retry++) {
-        QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;
-        LOGD("IMU", "probe primary 0x%02X try=%u",
-             QMI8658_I2C_WRITE(QMI8658_I2C_Addr), retry + 1);
-        if (QMI8658_ProbeAddr(QMI8658_I2C_ADDR_PRIMARY) == 0) {
-            LOGD("IMU", "found device at primary addr=0x%02X",
-                 QMI8658_I2C_WRITE(QMI8658_I2C_Addr));
-            break;
-        }
-
-        LOGW("IMU", "primary addr no ACK, try alt");
-        QMI8658_I2C_Addr = QMI8658_I2C_ADDR_ALT;
-        LOGD("IMU", "probe alt 0x%02X",
-             QMI8658_I2C_WRITE(QMI8658_I2C_Addr));
-        if (QMI8658_ProbeAddr(QMI8658_I2C_ADDR_ALT) == 0) {
-            LOGD("IMU", "found device at alt addr=0x%02X",
-                 QMI8658_I2C_WRITE(QMI8658_I2C_Addr));
-            break;
-        }
-
-        QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;
-        LOGW("IMU", "addr probe fail try=%u, wait 200ms retry", retry + 1);
-        QMI8658_Delay_ms(200);
-    }
-
-    if (retry >= 3) {
-        LOGE("IMU", "no device found after 3 tries");
-        return -1;
-    }
-
     /*---------------------------- 上电等待 ----------------------------*/
     LOGD("IMU", "power-up wait %ums", QMI8658_PWR_UP_DELAY_MS);
     QMI8658_Delay_ms(QMI8658_PWR_UP_DELAY_MS);
 
     /*---------------------------- WHO_AM_I 检测 ------------------------*/
-    id = QMI8658_ReadID();
-    if (id != QMI8658_CHIP_ID_VALUE) {
+    if (QMI8658_SelectAddrByWhoAmI(&id) != 0) {
         LOGE("IMU", "WHO_AM_I error got=0x%02X exp=0x%02X", id, QMI8658_CHIP_ID_VALUE);
         return -1;
     }
-    LOGD("IMU", "WHO_AM_I=0x%02X OK", id);
+    LOGD("IMU", "WHO_AM_I=0x%02X OK addr=0x%02X", id, QMI8658_I2C_Addr);
 
     /*---------------------------- RESET_STATE 检测 ------------------------*/
     reset_state = QMI8658_ReadReg(QMI8658_REG_RESET_STATE);
