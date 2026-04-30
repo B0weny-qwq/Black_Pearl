@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-01
- * @version v1.7.13
+ * @version v1.7.14
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,14 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-01] - v1.7.14 QMI8658 I2C ACK分段诊断
+
+### 优化改进
+- **[QMI8658诊断]** QMI8658 寄存器读写改为逐段检查 I2C ACK，不再依赖 STC 官方 `I2C_ReadNbyte()` 的 `Get_MSBusy_Status()` 间接判断。
+- **[启动定位]** `WHO_AM_I` 地址探测日志新增 `DEVW_NACK / REG_NACK / DEVR_NACK / BUSY` 错误名，用于区分 QMI8658 地址阶段无响应、寄存器地址无响应、读地址无响应和总线忙。
 
 ---
 

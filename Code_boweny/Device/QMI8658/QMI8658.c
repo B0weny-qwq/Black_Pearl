@@ -32,6 +32,23 @@
 #undef LOGD
 #define LOGD(tag, ...)
 
+#define QMI8658_MSACKI_MASK              0x02U
+#define QMI8658_I2C_OK                   0U
+#define QMI8658_I2C_ERR_BUSY             1U
+#define QMI8658_I2C_ERR_DEVW_NACK        2U
+#define QMI8658_I2C_ERR_REG_NACK         3U
+#define QMI8658_I2C_ERR_DEVR_NACK        4U
+#define QMI8658_I2C_ERR_DATA_NACK        5U
+#define QMI8658_I2C_ERR_PARAM            6U
+
+extern void Start(void);
+extern void SendData(char dat);
+extern void RecvACK(void);
+extern char RecvData(void);
+extern void SendACK(void);
+extern void SendNAK(void);
+extern void Stop(void);
+
 /*==============================================================
  *                       外部 Driver 层 API
  *==============================================================*/
@@ -43,7 +60,63 @@
 u8 QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;  /**< 当前使用的7位I2C地址 */
 
 static void QMI8658_Delay_ms(u16 ms);
+static u8 qmi8658_last_i2c_error = QMI8658_I2C_OK;
+
+static u8 QMI8658_RecvAck(void)
+{
+    RecvACK();
+    return ((I2CMSST & QMI8658_MSACKI_MASK) != 0);
+}
+
+static u8 QMI8658_BusNeedsRecover(void)
+{
+    if (Get_MSBusy_Status()) {
+        return 1;
+    }
+    if (P14 == 0) {
+        return 1;
+    }
+    if (P15 == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static u8 QMI8658_EnsureBusIdle(void)
+{
+    if (!QMI8658_BusNeedsRecover()) {
+        return 0;
+    }
+
+    QMI8658_BusRecover();
+    if (QMI8658_BusNeedsRecover()) {
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_BUSY;
+        return 1;
+    }
+    return 0;
+}
+
+static u8 QMI8658_ReadNByteAtAddr(u8 addr, u8 start_reg, u8 *buf, u8 len);
 static u8 QMI8658_ReadRegAtAddr(u8 addr, u8 reg_addr, u8 *ok);
+static char *QMI8658_I2cErrName(u8 err)
+{
+    switch (err) {
+    case QMI8658_I2C_OK:
+        return "OK";
+    case QMI8658_I2C_ERR_BUSY:
+        return "BUSY";
+    case QMI8658_I2C_ERR_DEVW_NACK:
+        return "DEVW_NACK";
+    case QMI8658_I2C_ERR_REG_NACK:
+        return "REG_NACK";
+    case QMI8658_I2C_ERR_DEVR_NACK:
+        return "DEVR_NACK";
+    case QMI8658_I2C_ERR_DATA_NACK:
+        return "DATA_NACK";
+    default:
+        return "PARAM";
+    }
+}
 
 static u8 QMI8658_SelectAddrByWhoAmI(u8 *selected_id)
 {
@@ -52,11 +125,14 @@ static u8 QMI8658_SelectAddrByWhoAmI(u8 *selected_id)
     u8 alt_ok = 0;
     u8 primary_id = 0xFF;
     u8 alt_id = 0xFF;
+    u8 primary_err = QMI8658_I2C_OK;
+    u8 alt_err = QMI8658_I2C_OK;
 
     for (retry = 0; retry < 5; retry++) {
         primary_id = QMI8658_ReadRegAtAddr(QMI8658_I2C_ADDR_PRIMARY,
                                            QMI8658_REG_WHO_AM_I,
                                            &primary_ok);
+        primary_err = qmi8658_last_i2c_error;
         if ((primary_ok != 0) && (primary_id == QMI8658_CHIP_ID_VALUE)) {
             QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;
             if (selected_id != NULL) {
@@ -70,6 +146,7 @@ static u8 QMI8658_SelectAddrByWhoAmI(u8 *selected_id)
         alt_id = QMI8658_ReadRegAtAddr(QMI8658_I2C_ADDR_ALT,
                                        QMI8658_REG_WHO_AM_I,
                                        &alt_ok);
+        alt_err = qmi8658_last_i2c_error;
         if ((alt_ok != 0) && (alt_id == QMI8658_CHIP_ID_VALUE)) {
             QMI8658_I2C_Addr = QMI8658_I2C_ADDR_ALT;
             if (selected_id != NULL) {
@@ -80,21 +157,25 @@ static u8 QMI8658_SelectAddrByWhoAmI(u8 *selected_id)
             return 0;
         }
 
-        LOGW("IMU", "id probe try=%u p=0x%02X ok=%u a=0x%02X ok=%u",
+        LOGW("IMU", "id probe try=%u p=0x%02X ok=%u %s a=0x%02X ok=%u %s",
              (u16)(retry + 1),
              primary_id,
              (u16)primary_ok,
+             QMI8658_I2cErrName(primary_err),
              alt_id,
-             (u16)alt_ok);
+             (u16)alt_ok,
+             QMI8658_I2cErrName(alt_err));
         QMI8658_BusRecover();
         QMI8658_Delay_ms(200);
     }
 
-    LOGE("IMU", "id probe fail p=0x%02X ok=%u a=0x%02X ok=%u",
+    LOGE("IMU", "id probe fail p=0x%02X ok=%u %s a=0x%02X ok=%u %s",
          primary_id,
          (u16)primary_ok,
+         QMI8658_I2cErrName(primary_err),
          alt_id,
-         (u16)alt_ok);
+         (u16)alt_ok,
+         QMI8658_I2cErrName(alt_err));
     return 1;
 }
 
@@ -111,19 +192,47 @@ static void QMI8658_Delay_ms(u16 ms);
  * @return     0=成功，1=失败
  *
  * @details
- * 调用 Driver 层 I2C_WriteNbyte() 写入 1 字节。
- * 驱动内部使用，不对外暴露。
+ * Uses low-level I2C steps so every ACK phase can be checked explicitly.
+ * Driver-internal helper; not exposed outside this file.
  */
 static u8 QMI8658_WriteReg(u8 reg_addr, u8 reg_val)
 {
-    u8 i2c_addr = QMI8658_I2C_WRITE(QMI8658_I2C_Addr);
-
-    I2C_WriteNbyte(i2c_addr, reg_addr, &reg_val, 1);
-
-    if (Get_MSBusy_Status()) {
-        LOGW("IMU", "WR NACK reg=0x%02X val=0x%02X", reg_addr, reg_val);
+    qmi8658_last_i2c_error = QMI8658_I2C_OK;
+    if (QMI8658_EnsureBusIdle() != 0) {
+        LOGW("IMU", "WR %s reg=0x%02X val=0x%02X",
+             QMI8658_I2cErrName(qmi8658_last_i2c_error), reg_addr, reg_val);
         return 1;
     }
+
+    Start();
+    SendData(QMI8658_I2C_WRITE(QMI8658_I2C_Addr));
+    if (QMI8658_RecvAck()) {
+        Stop();
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_DEVW_NACK;
+        LOGW("IMU", "WR DEVW_NACK addr=0x%02X reg=0x%02X",
+             QMI8658_I2C_Addr, reg_addr);
+        return 1;
+    }
+
+    SendData(reg_addr);
+    if (QMI8658_RecvAck()) {
+        Stop();
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_REG_NACK;
+        LOGW("IMU", "WR REG_NACK addr=0x%02X reg=0x%02X",
+             QMI8658_I2C_Addr, reg_addr);
+        return 1;
+    }
+
+    SendData(reg_val);
+    if (QMI8658_RecvAck()) {
+        Stop();
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_DATA_NACK;
+        LOGW("IMU", "WR DATA_NACK addr=0x%02X reg=0x%02X val=0x%02X",
+             QMI8658_I2C_Addr, reg_addr, reg_val);
+        return 1;
+    }
+
+    Stop();
     return 0;
 }
 
@@ -133,18 +242,18 @@ static u8 QMI8658_WriteReg(u8 reg_addr, u8 reg_val)
  * @return     读取到的数据，0xFF 表示读取失败
  *
  * @details
- * 调用 Driver 层 I2C_ReadNbyte() 读取 1 字节。
- * 驱动内部使用，不对外暴露。
+ * Uses low-level I2C steps so every ACK phase can be checked explicitly.
+ * Driver-internal helper; not exposed outside this file.
  */
 static u8 QMI8658_ReadReg(u8 reg_addr)
 {
-    u8 i2c_addr_w = QMI8658_I2C_WRITE(QMI8658_I2C_Addr);
     u8 reg_val = 0xFF;
 
-    I2C_ReadNbyte(i2c_addr_w, reg_addr, &reg_val, 1);
-
-    if (Get_MSBusy_Status()) {
-        LOGE("IMU", "RD NACK reg=0x%02X", reg_addr);
+    if (QMI8658_ReadNByteAtAddr(QMI8658_I2C_Addr, reg_addr, &reg_val, 1) != 0) {
+        LOGE("IMU", "RD %s addr=0x%02X reg=0x%02X",
+             QMI8658_I2cErrName(qmi8658_last_i2c_error),
+             QMI8658_I2C_Addr,
+             reg_addr);
         return 0xFF;
     }
     return reg_val;
@@ -152,12 +261,9 @@ static u8 QMI8658_ReadReg(u8 reg_addr)
 
 static u8 QMI8658_ReadRegAtAddr(u8 addr, u8 reg_addr, u8 *ok)
 {
-    u8 i2c_addr_w = QMI8658_I2C_WRITE(addr);
     u8 reg_val = 0xFF;
 
-    I2C_ReadNbyte(i2c_addr_w, reg_addr, &reg_val, 1);
-
-    if (Get_MSBusy_Status()) {
+    if (QMI8658_ReadNByteAtAddr(addr, reg_addr, &reg_val, 1) != 0) {
         if (ok != NULL) {
             *ok = 0;
         }
@@ -178,17 +284,66 @@ static u8 QMI8658_ReadRegAtAddr(u8 addr, u8 reg_addr, u8 *ok)
  * @return     0=成功，1=失败
  *
  * @details
- * 调用 Driver 层 I2C_ReadNbyte() 连续读取 len 字节。
- * 驱动内部使用，不对外暴露。
+ * Uses low-level I2C steps so every ACK phase can be checked explicitly.
+ * Driver-internal helper; not exposed outside this file.
  */
+static u8 QMI8658_ReadNByteAtAddr(u8 addr, u8 start_reg, u8 *buf, u8 len)
+{
+    u8 i;
+
+    qmi8658_last_i2c_error = QMI8658_I2C_OK;
+    if ((buf == NULL) || (len == 0)) {
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_PARAM;
+        return 1;
+    }
+
+    if (QMI8658_EnsureBusIdle() != 0) {
+        return 1;
+    }
+
+    Start();
+    SendData(QMI8658_I2C_WRITE(addr));
+    if (QMI8658_RecvAck()) {
+        Stop();
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_DEVW_NACK;
+        return 1;
+    }
+
+    SendData(start_reg);
+    if (QMI8658_RecvAck()) {
+        Stop();
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_REG_NACK;
+        return 1;
+    }
+
+    Start();
+    SendData(QMI8658_I2C_READ(addr));
+    if (QMI8658_RecvAck()) {
+        Stop();
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_DEVR_NACK;
+        return 1;
+    }
+
+    for (i = 0; i < len; i++) {
+        buf[i] = (u8)RecvData();
+        if ((u8)(i + 1) < len) {
+            SendACK();
+        } else {
+            SendNAK();
+        }
+    }
+    Stop();
+    return 0;
+}
+
 static u8 QMI8658_ReadNByte(u8 start_reg, u8 *buf, u8 len)
 {
-    u8 i2c_addr_w = QMI8658_I2C_WRITE(QMI8658_I2C_Addr);
-
-    I2C_ReadNbyte(i2c_addr_w, start_reg, buf, len);
-
-    if (Get_MSBusy_Status()) {
-        LOGE("IMU", "RNB NACK reg=0x%02X len=%u", start_reg, len);
+    if (QMI8658_ReadNByteAtAddr(QMI8658_I2C_Addr, start_reg, buf, len) != 0) {
+        LOGE("IMU", "RNB %s addr=0x%02X reg=0x%02X len=%u",
+             QMI8658_I2cErrName(qmi8658_last_i2c_error),
+             QMI8658_I2C_Addr,
+             start_reg,
+             len);
         return 1;
     }
     return 0;
@@ -379,10 +534,20 @@ static void QMI8658_Delay_ms(u16 ms)
  */
 static u8 QMI8658_ProbeAddr(u8 addr)
 {
-    u8 i2c_addr = QMI8658_I2C_WRITE(addr);
-    u8 dummy = QMI8658_REG_WHO_AM_I;
+    qmi8658_last_i2c_error = QMI8658_I2C_OK;
 
-    I2C_WriteNbyte(i2c_addr, QMI8658_REG_WHO_AM_I, &dummy, 0);
+    if (QMI8658_EnsureBusIdle() != 0) {
+        return 1;
+    }
+
+    Start();
+    SendData(QMI8658_I2C_WRITE(addr));
+    if (QMI8658_RecvAck()) {
+        Stop();
+        qmi8658_last_i2c_error = QMI8658_I2C_ERR_DEVW_NACK;
+        return 1;
+    }
+    Stop();
 
     if (Get_MSBusy_Status()) {
         return 1;  /* NACK: 无设备 */
