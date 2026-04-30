@@ -14,9 +14,8 @@ Recommended first tuning path:
 
 Runtime output is `deg * 100`.
 
-Default IMU update period is 17 ms because the current QMI8658 bring-up
-configuration uses `CTRL2/CTRL3 = 0x07`, which maps to 58 Hz in the local
-driver header.
+Default IMU update period is 17 ms while QMI8658 is being retested with the
+legacy bring-up configuration `CTRL2/CTRL3 = 0x07/0x07`.
 
 Body frame:
 

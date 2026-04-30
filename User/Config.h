@@ -24,6 +24,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+/*
+ * AHRS bring-up mode:
+ * 1 = keep only IMU + MAG fusion path running and only print AHRS logs.
+ * 0 = normal firmware runtime with GPS, wireless, protocol and sensor tests.
+ */
+#define AHRS_TEST_ONLY  1
+
 //========================================================================
 //                             外部函数和变量声明
 //========================================================================

@@ -10,7 +10,7 @@
  * - 支持轮询方式获取 Accelerometer / Gyroscope / Temperature 数据
  * - 保留原始陀螺仪读取接口，并新增软件低通后的滤波读取接口
  * - I2C 地址: 0x6B (SA0=浮空/高) / 0x6A (SA0=地)
- * - 默认配置: ACC ±4G / ODR=117Hz, GYRO ±128°/s / ODR=117Hz
+ * - 默认配置: 旧版 bring-up 复测 `CTRL2/CTRL3=0x07/0x07`
  *
  * @hardware
  *   - I2C接口: P1.4(SDA) / P1.5(SCL)，硬件I2C
@@ -49,6 +49,9 @@
 #define QMI8658_REG_CTRL7         0x08    /**< 传感器使能: Bit1=gEN, Bit0=aEN */
 #define QMI8658_REG_CTRL8         0x09    /**< FIFO/ODR 配置(可选) */
 #define QMI8658_REG_CTRL9         0x0A    /**< AHB时钟门控(可选) */
+#define QMI8658_REG_FIFO_WTM      0x13    /**< FIFO 水位阈值 */
+#define QMI8658_REG_FIFO_CTRL     0x14    /**< FIFO 控制寄存器 */
+#define QMI8658_REG_FIFO_STATUS   0x16    /**< FIFO 状态寄存器 */
 #define QMI8658_REG_RESET         0x60    /**< 软复位寄存器，只写。写入0xB0触发复位 */
 
 /* 状态寄存器 */
@@ -56,6 +59,9 @@
 #define QMI8658_REG_STATUS0       0x2E    /**< 数据就绪状态: Bit0=aDA, Bit1=gDA, Bit2=TempDA */
 
 /* 数据寄存器 */
+#define QMI8658_REG_TIMESTAMP_L   0x30    /**< 采样时间戳低字节 */
+#define QMI8658_REG_TIMESTAMP_M   0x31    /**< 采样时间戳中字节 */
+#define QMI8658_REG_TIMESTAMP_H   0x32    /**< 采样时间戳高字节 */
 #define QMI8658_REG_TEMP_L        0x33    /**< 温度数据低字节 (int12, 25°C=0) */
 #define QMI8658_REG_TEMP_H        0x34    /**< 温度数据高字节 */
 #define QMI8658_REG_AX_L          0x35    /**< X轴加速度低字节 */
@@ -84,7 +90,7 @@
 #define QMI8658_I2C_READ(addr)    (((addr) << 1) | 0x01)
 
 /*==============================================================
- *                   加速度 ODR 配置 (CTRL2 高4位)
+ *                   加速度 ODR 配置 (CTRL2 低4位)
  *==============================================================*/
 #define QMI8658_ACC_ODR_3HZ       0x0F    /**< 3Hz   */
 #define QMI8658_ACC_ODR_11HZ      0x0E    /**< 11Hz  */
@@ -97,7 +103,7 @@
 #define QMI8658_ACC_ODR_940HZ     0x03    /**< 940Hz */
 
 /*==============================================================
- *                   陀螺仪 ODR 配置 (CTRL3 高4位)
+ *                   陀螺仪 ODR 配置 (CTRL3 低4位)
  *==============================================================*/
 #define QMI8658_GYRO_ODR_29HZ     0x08    /**< 29Hz  */
 #define QMI8658_GYRO_ODR_58HZ     0x07    /**< 58Hz  */
@@ -110,7 +116,7 @@
 #define QMI8658_GYRO_ODR_7520HZ   0x00    /**< 7520Hz */
 
 /*==============================================================
- *                   加速度量程配置 (CTRL2 低4位)
+ *                   加速度量程配置 (CTRL2 高4位)
  *==============================================================*/
 #define QMI8658_ACC_RANGE_2G       0x00    /**< ±2G  ，灵敏度 16384 LSB/g */
 #define QMI8658_ACC_RANGE_4G       0x10    /**< ±4G  ，灵敏度 8192 LSB/g  */
@@ -118,12 +124,12 @@
 #define QMI8658_ACC_RANGE_16G      0x30    /**< ±16G ，灵敏度 2048 LSB/g  */
 
 /*==============================================================
- *                   陀螺音量程配置 (CTRL3 低4位)
+ *                   陀螺仪量程配置 (CTRL3 高4位)
  *==============================================================*/
 #define QMI8658_GYRO_RANGE_16     0x00    /**< ±16°/s   ，灵敏度 2048 LSB/°/s */
 #define QMI8658_GYRO_RANGE_32     0x10    /**< ±32°/s   ，灵敏度 1024 LSB/°/s */
 #define QMI8658_GYRO_RANGE_64     0x20    /**< ±64°/s   ，灵敏度 512 LSB/°/s  */
-#define QMI8658_GYRO_RANGE_125    0x30    /**< ±125°/s  ，灵敏度 256 LSB/°/s  */
+#define QMI8658_GYRO_RANGE_125    0x30    /**< ±125/128°/s，灵敏度 256 LSB/°/s */
 #define QMI8658_GYRO_RANGE_250    0x40    /**< ±250°/s  ，灵敏度 128 LSB/°/s  */
 #define QMI8658_GYRO_RANGE_512    0x50    /**< ±512°/s  ，灵敏度 64 LSB/°/s   */
 #define QMI8658_GYRO_RANGE_1024   0x60    /**< ±1024°/s ，灵敏度 32 LSB/°/s   */
@@ -132,11 +138,20 @@
 /*==============================================================
  *                      初始化默认值
  *==============================================================*/
-#define QMI8658_CTRL1_INIT        0x40    /**< 数字低通滤波器配置 */
-#define QMI8658_CTRL2_INIT        0x07    /**< 当前模组已验证可出数的 bring-up 配置 */
-#define QMI8658_CTRL3_INIT        0x07    /**< 当前模组已验证可出数的 bring-up 配置 */
+#define QMI8658_CTRL1_INIT        0x40    /**< 地址自动递增，小端数据 */
+#define QMI8658_CTRL2_INIT        0x07    /**< 旧版实测可出数的 bring-up 配置 */
+#define QMI8658_CTRL3_INIT        0x07    /**< 旧版实测可出数的 bring-up 配置 */
 #define QMI8658_CTRL5_INIT        0x11    /**< 加速度计配置 */
+#define QMI8658_CTRL6_INIT        0x00    /**< 关闭保留/扩展数据通路 */
 #define QMI8658_CTRL7_INIT        0x03    /**< 当前模组已验证可出数的 bring-up 配置 */
+#define QMI8658_CTRL8_INIT        0x00    /**< 关闭 SyncSample/FIFO 触发等扩展功能 */
+#define QMI8658_CLEAR_DATAPATH_ENABLE 0   /**< 旧版复测时跳过 CTRL6/8/FIFO/CTRL9 清理 */
+
+#define QMI8658_CTRL9_CMD_ACK     0x00    /**< CTRL9 命令 ACK / NOP */
+#define QMI8658_CTRL9_CMD_RST_FIFO 0x04   /**< CTRL9 重置 FIFO 命令 */
+
+#define QMI8658_FIFO_WTM_INIT     0x00    /**< FIFO 水位关闭 */
+#define QMI8658_FIFO_CTRL_BYPASS  0x00    /**< FIFO bypass，数据从普通寄存器输出 */
 
 /*==============================================================
  *                      芯片标识值
@@ -235,7 +250,7 @@ s8 QMI8658_ReadAcc(int16 *x, int16 *y, int16 *z);
  *
  * @details
  * 连续读取 6 字节 (0x3B~0x40)，小端序组装为 int16。
- * 默认量程 ±128°/s，灵敏度 256 LSB/°/s。
+ * 旧版 bring-up 复测阶段先按 ±16°/s，灵敏度 2048 LSB/°/s。
  *
  * @example
  * @code
@@ -363,5 +378,25 @@ s8 QMI8658_Enable(void);
  * @details 写入 CTRL7=0x00，禁用加速度计和陀螺仪，进入低功耗模式
  */
 s8 QMI8658_Disable(void);
+
+/**
+ * @brief   Dump key QMI8658 registers with single-byte reads.
+ * @return  none
+ *
+ * @details Used only for bring-up diagnostics after normal ReadAcc fails.
+ */
+void QMI8658_DumpRawRegs(void);
+
+#undef QMI8658_RESET_DELAY_MS
+#undef QMI8658_PWR_UP_DELAY_MS
+#undef QMI8658_ENABLE_DELAY_MS
+#undef QMI8658_READY_TIMEOUT_MS
+#define QMI8658_LEGACY_EXACT_TEST 0
+#define QMI8658_SOFT_RESET_ENABLE 0
+#define QMI8658_DIAG_ENABLE       0
+#define QMI8658_RESET_DELAY_MS    500
+#define QMI8658_PWR_UP_DELAY_MS   500
+#define QMI8658_ENABLE_DELAY_MS   30
+#define QMI8658_READY_TIMEOUT_MS  200
 
 #endif

@@ -82,6 +82,13 @@ Kept:
 - bus recovery / error logs
 - successful `WriteReg` data logs
 
+Standalone runtime probe:
+
+- `User/Main.c` calls `MAG_StandalonePoll()` every 1000ms when `AHRS_TEST_ONLY=0`
+- `AHRS_TEST_ONLY=1` disables the standalone MAG log; AHRS still reads filtered MAG data internally for yaw correction
+- log format: `[MAG] I: test raw=x y z norm1=n`
+- this path reads `QMC6309_ReadXYZ()` directly and does not depend on QMI8658/AHRS readiness
+
 Removed:
 
 - temporary `TEST` logs in `Main.c`

@@ -17,9 +17,14 @@
  * @see     Code_boweny/Function/Log/Log.h
  */
 
+#include "..\..\..\User\config.h"
 #include "Log.h"
 
 #define LOG_BUF_SIZE  128
+
+#ifndef AHRS_TEST_ONLY
+#define AHRS_TEST_ONLY  0
+#endif
 
 /*---------------------------------- 本地变量 ----------------------------------*/
 
@@ -69,6 +74,13 @@ static void log_vtagged(u8 level, u8 *tag, u8 *fmt, va_list args)
 {
     u8  i;
     u8  prefix_len;
+
+#if AHRS_TEST_ONLY
+    if ((tag[0] != 'A') || (tag[1] != 'H') || (tag[2] != 'R') ||
+        (tag[3] != 'S') || (tag[4] != '\0')) {
+        return;
+    }
+#endif
 
     /* 构建 [tag] X: 前缀 */
     log_buf[0] = '[';
@@ -125,12 +137,14 @@ void log_init(void)
 {
     log_ready = 1;
 
+#if !AHRS_TEST_ONLY
     PrintString1("\r\n");
     log_printf("[SYS] I: ============== Black Pearl v1.1 ==============");
     log_printf("[SYS] I:   MCU : STC32G  Fosc=%luHz", (u32)MAIN_Fosc);
     log_printf("[SYS] I:   Author : boweny  Build : %s %s", __DATE__, __TIME__);
     log_printf("[SYS] I: LOG Ready. Use LOGI/LOGW/LOGE/LOGD/log_printf");
     PrintString1("\r\n");
+#endif
 }
 
 /*---------------------------------- 公共函数 ----------------------------------*/
@@ -218,6 +232,9 @@ void log_printf(u8 *fmt, ...)
     va_list args;
 
     if (!log_ready) return;
+#if AHRS_TEST_ONLY
+    return;
+#endif
 
     va_start(args, fmt);
     log_vprint(fmt, args);

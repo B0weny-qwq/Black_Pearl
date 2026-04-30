@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 工程总览文档
  *
  * @author  boweny
- * @date    2026-04-27
- * @version v1.7
+ * @date    2026-05-01
+ * @version v1.7.8
  *
  * @details
  * 本文档基于 2026-04-27 当前工程实际代码重新整理，
@@ -90,8 +90,8 @@ EAXSFR()
 -> EA = 1
 -> APP_config()
 -> log_init()
--> GPS_Init()
--> Wireless_Init()
+-> GPS_Init()              [skipped when AHRS_TEST_ONLY=1]
+-> Wireless_Init()         [skipped when AHRS_TEST_ONLY=1]
 -> Sensor_I2C_prepare()
 -> AHRS_Reset()
 -> QMC6309_Init()
@@ -100,7 +100,23 @@ EAXSFR()
 
 ### 3.3 当前真实主循环
 
-当前 `User/Main.c` 已接入 GPS、无线协议轮询、任务处理和 AHRS 姿态融合：
+当前 `User/config.h` 中 `AHRS_TEST_ONLY=1`，固件处于 AHRS 角度-only 测试模式。该模式会保留 QMI8658 + QMC6309 融合链路，但跳过 GPS / Wireless 初始化和主循环轮询，并通过日志过滤只放行 `AHRS` tag：
+
+```c
+while (1)
+{
+    Task_Pro_Handler_Callback();
+    IMU_HighRatePoll();
+}
+```
+
+当前串口输出格式：
+
+```text
+[AHRS] I: rpy_cd=roll pitch yaw flags=0x..
+```
+
+正常完整运行模式为 `AHRS_TEST_ONLY=0`，`User/Main.c` 将接入 GPS、无线协议轮询、任务处理、MAG 独立测试和 AHRS 姿态融合：
 
 ```c
 Wireless_MinimalTestUnit();
@@ -111,6 +127,7 @@ while (1)
     ShipProtocol_Poll();
     Wireless_SearchSignalPoll();
     Task_Pro_Handler_Callback();
+    MAG_StandalonePoll();
     IMU_HighRatePoll();
 }
 ```
@@ -123,6 +140,7 @@ while (1)
 - `ShipProtocol_Poll()` 消费无线收包并维护船端协议状态
 - `Wireless_SearchSignalPoll()` 执行无线搜索/信号扫描相关轮询
 - `Task_Pro_Handler_Callback()` 消费 Timer0 标记任务，当前用于驱动 `P3.6` LED 闪烁
+- `MAG_StandalonePoll()` 每 1000ms 独立读取一次 QMC6309 原始三轴地磁数据，用于 IMU 不 ready 时单独验证磁力计；`AHRS_TEST_ONLY=1` 时不调用
 - `IMU_HighRatePoll()` 按 Timer0 1ms tick 节拍读取 QMI8658 6 轴数据，调用 AHRS 完成姿态融合，并低频读取 QMC6309 修正航向
 - `DisplayScan()` 当前仍未接入主循环
 - `Task.c` 当前已作为 LED 闪烁调度器参与运行
@@ -140,7 +158,7 @@ while (1)
 | `Timer_config()` | 启用 | 仅启用 Timer0 1ms 中断 |
 | `UART_config()` | 启用 | 只初始化 UART1，用于 LOG |
 | `I2C_config()` | 启用 | 初始化硬件 I2C |
-| `Wireless_Init()` | 启用 | 初始化 LT8920、SPI4 和双天线扫描 |
+| `Wireless_Init()` | 测试模式跳过 | `AHRS_TEST_ONLY=0` 时初始化 LT8920、SPI4 和双天线扫描 |
 | `APP_config()` | 启用 | 当前保留 `Lamp_init()`，配置 `P3.6` LED |
 | `Task.c` | 启用 | 主循环已调用，当前执行 `Sample_Lamp()` |
 
@@ -507,6 +525,7 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 | 2026-04-26 | v1.4 | 补充 WIRELESS 模块接入、SPI4 资源占用、双天线策略与真实启动/主循环链路 |
 | 2026-04-27 | v1.5 | 新增 MOTOR PWM 驱动模块说明，补充 PWMA CH3/CH4 与 P2.4~P2.7 引脚占用 |
 | 2026-04-27 | v1.6 | 新增 Function/PID 定点 PID 控制器说明，补充 Keil 工程纳入状态与使用边界 |
+| 2026-05-01 | v1.7.8 | 新增 AHRS 角度-only 串口测试模式，只保留 `rpy_cd/flags` 输出 |
 | 2026-04-27 | v1.7 | 新增 Function/AHRS 定点姿态融合说明，补充 1ms tick、轴向映射、IMU/MAG 融合链路与使用边界 |
 
 ---

@@ -13,7 +13,14 @@
 #include "..\Code_boweny\Function\AHRS\AHRS.h"
 #include "..\Code_boweny\Function\Log\Log.h"
 
-#define AHRS_LOG_DECIMATION  64
+#ifndef AHRS_TEST_ONLY
+#define AHRS_TEST_ONLY  0
+#endif
+
+#define AHRS_LOG_DECIMATION  32
+
+#if !AHRS_TEST_ONLY
+#define MAG_TEST_PERIOD_MS   1000U
 
 static void Wireless_MinimalTestUnit(void)
 {
@@ -29,6 +36,51 @@ static void Wireless_MinimalTestUnit(void)
     }
 }
 
+static u32 MAG_Abs16ToU32(int16 value)
+{
+    int32 v;
+
+    v = (int32)value;
+    if (v < 0) {
+        return (u32)(-v);
+    }
+
+    return (u32)v;
+}
+
+static void MAG_StandalonePoll(void)
+{
+    static u8  timing_started = 0;
+    static u32 last_mag_ms = 0;
+    static u8  error_latched = 0;
+    u32 now_ms;
+    u32 norm1;
+    int16 mx, my, mz;
+
+    now_ms = Task_GetTickMs();
+    if (!timing_started) {
+        timing_started = 1;
+        last_mag_ms = now_ms;
+    } else if ((now_ms - last_mag_ms) < MAG_TEST_PERIOD_MS) {
+        return;
+    } else {
+        last_mag_ms = now_ms;
+    }
+
+    if (QMC6309_ReadXYZ(&mx, &my, &mz) != 0) {
+        if (!error_latched) {
+            LOGW("MAG", "test read fail id=0x%02X", QMC6309_ReadID());
+            error_latched = 1;
+        }
+        return;
+    }
+
+    error_latched = 0;
+    norm1 = MAG_Abs16ToU32(mx) + MAG_Abs16ToU32(my) + MAG_Abs16ToU32(mz);
+    LOGI("MAG", "test raw=%d %d %d norm1=%lu", mx, my, mz, norm1);
+}
+#endif
+
 /**
  * @brief   高频 IMU/AHRS 轮询入口
  * @return  none
@@ -37,7 +89,7 @@ static void Wireless_MinimalTestUnit(void)
  * - 使用 `Task_GetTickMs()` 将 QMI8658 6 轴读取固定到 AHRS 配置周期
  * - 读取 `QMI8658_ReadAll()` 后调用 `AHRS_UpdateRaw6Axis()` 更新姿态
  * - 每 `AHRS_MAG_PERIOD_MS` 读取一次滤波地磁数据，通过 `AHRS_UpdateRawMag()` 慢修正航向
- * - 按抽样比例输出 `rpy_cd` 与 `gyro_dps100`，便于串口调试
+ * - Output sampled `rpy_cd` and `flags` for UART AHRS testing.
  */
 static void IMU_HighRatePoll(void)
 {
@@ -46,6 +98,9 @@ static void IMU_HighRatePoll(void)
     static u32 last_mag_ms = 0;
     static u16 sample_div = 0;
     static u8  error_latched = 0;
+#if AHRS_TEST_ONLY
+    static u8  not_ready_reported = 0;
+#endif
     u32 now_ms;
     u32 elapsed_ms;
     u16 dt_ms;
@@ -55,6 +110,12 @@ static void IMU_HighRatePoll(void)
     const AHRS_State_t *att;
 
     if (!g_qmi8658_ready) {
+#if AHRS_TEST_ONLY
+        if (!not_ready_reported) {
+            LOGE("AHRS", "imu not ready");
+            not_ready_reported = 1;
+        }
+#endif
         return;
     }
 
@@ -103,13 +164,10 @@ static void IMU_HighRatePoll(void)
     if (sample_div >= AHRS_LOG_DECIMATION) {
         sample_div = 0;
         att = AHRS_GetState();
-        LOGI("AHRS", "rpy_cd=%d %d %d gyro_dps100=%d %d %d flags=0x%02X",
+        LOGI("AHRS", "rpy_cd=%d %d %d flags=0x%02X",
              att->roll_deg100,
              att->pitch_deg100,
              att->yaw_deg100,
-             att->gyro_x_dps100,
-             att->gyro_y_dps100,
-             att->gyro_z_dps100,
              att->flags);
     }
 }
@@ -124,14 +182,19 @@ static void IMU_HighRatePoll(void)
 void main(void)
 {
     SYS_Init();
+#if !AHRS_TEST_ONLY
     Wireless_MinimalTestUnit();
+#endif
 
     while(1)
     {
+#if !AHRS_TEST_ONLY
         GPS_Poll();
         Wireless_Poll();
         ShipProtocol_Poll();
         Wireless_SearchSignalPoll();
+        MAG_StandalonePoll();
+#endif
         Task_Pro_Handler_Callback();
         IMU_HighRatePoll();
     }

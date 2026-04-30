@@ -196,6 +196,7 @@ static void	QMI8658_PowerOnSelfTest(void)
 
 	LOGE("IMU", "boot check fail: readacc i2c_addr=0x%02X data_reg=0x35",
 	     QMI8658_I2C_Addr);
+	QMI8658_DumpRawRegs();
 }
 
 void	SPI_config(void)
@@ -288,8 +289,10 @@ void	SYS_Init(void)
 
 	APP_config();
 	log_init();        /* UART_config 完成后才能初始化 LOG */
+#if !AHRS_TEST_ONLY
 	GPS_Init();
 	Wireless_Init();
+#endif
 
 	/* QMC6309 地磁计初始化 */
 	/* Restore the shared sensor I2C bus after APP_config() pin changes. */

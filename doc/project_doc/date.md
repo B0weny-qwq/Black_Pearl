@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-04-27
- * @version v1.7
+ * @date    2026-05-01
+ * @version v1.7.8
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,114 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-01] - v1.7.8 AHRS角度-only串口测试模式
+
+### 优化改进
+- **[AHRS测试输出]** 新增 `AHRS_TEST_ONLY=1` 测试开关：启动后跳过 GPS / Wireless 初始化和主循环轮询，关闭无线扫描、协议轮询和 `MAG_StandalonePoll()` 独立地磁日志。
+- **[日志过滤]** `Log.c` 在 AHRS 测试模式下只放行 `AHRS` tag，屏蔽 SYS 横幅、MAG/IMU/WL/GPS 等初始化和运行日志，串口只保留融合链路输出。
+- **[角度日志]** AHRS 日志简化为 `rpy_cd=roll pitch yaw flags=0x..`，去掉 `gyro_dps100`，便于直接观察融合姿态角。
+
+### 开发者备注
+- 本模式下 AHRS 内部仍会按 `AHRS_MAG_PERIOD_MS` 读取 `QMC6309_ReadXYZFiltered()` 参与 yaw 慢修正，只是不再单独打印磁力计 raw。
+- 若要恢复完整外设联调，将 `User/config.h` 中 `AHRS_TEST_ONLY` 改回 `0`。
+
+---
+
+## [2026-05-01] - v1.7.7 QMI8658换芯确认与AHRS测试模式
+
+### Bug 修复
+- **[QMI8658数据域失效]** 实测旧芯片表现为 `WHO_AM_I=0x05`、`REV=0x7C`、`CTRL1/2/3/5/7` 可读写，但 `RESET_STATE=0x00` 且 `STATUS0/temp/acc/gyro` 单字节 dump 全 `00`。更换 QMI8658 后恢复 `RESET_STATE=0x80` 与 `ready ... acc=...`，确认问题在旧芯片数据/采样域而非 I2C、AHRS 或地磁链路。
+
+### 变更记录
+- **QMI8658**: 固定为稳定 bring-up 测试路径：`CTRL2=0x07`、`CTRL3=0x07`、`CTRL5=0x11`、`CTRL7=0x03`，默认 `QMI8658_SOFT_RESET_ENABLE=0`，失败时才调用 `QMI8658_DumpRawRegs()`。
+- **AHRS测试**: 保持 `AHRS_IMU_PERIOD_MS=17ms`、`AHRS_GYRO_LSB_PER_DPS=2048`，将 AHRS 日志抽样调整为约 0.5 秒一条，便于观察 `rpy_cd/gyro_dps100/flags`。
+- **MAG日志**: 独立磁力计测试日志周期从 250ms 调整为 1000ms，减少串口干扰，同时保留磁力计活性观察。
+
+### 开发者备注
+- 下一轮上板重点看 `[AHRS] I: rpy_cd=... gyro_dps100=... flags=0x..`。静止放平后 `gyro_dps100` 应接近 0，`roll/pitch` 应稳定；倾斜板子后 `roll/pitch` 应跟随变化。
+- 若 `flags` 长期缺少 acc/mag valid，再回查 `AHRS_UpdateRaw6Axis()` 的加速度模长窗口和地磁干扰。
+
+---
+
+## [2026-04-30] - v1.7.6 QMI8658单字节寄存器dump
+
+### 新增功能
+- **[IMU诊断]** 新增 `QMI8658_DumpRawRegs()`，在启动自检 `ReadAcc()` 连续失败后，用单字节读取方式输出 `WHO/REV/RESET/CTRL/STATUS/TEMP/ACC/GYRO` 关键寄存器。
+
+### 开发者备注
+- 若 dump 中 `acc/gyr/temp` 单字节也全为 `00`，说明不是多字节自动递增读取问题，而是 QMI8658 数据寄存器本身未更新。
+- 若单字节 dump 有数据而 `ReadAcc()` 全 0，则回查 `CTRL1` 自动递增配置或 STC `I2C_ReadNbyte()` 多字节读流程。
+
+---
+
+## [2026-04-30] - v1.7.5 QMI8658旧版精确读数路径复测
+
+### 变更记录
+- **[IMU复测]** 新增 `QMI8658_LEGACY_EXACT_TEST=1`，恢复旧版关键路径：`CTRL2/CTRL3=0x07/0x07`、按 `RESET_STATE` 条件软复位、`500ms/30ms/200ms` 等待参数。
+- **[诊断隔离]** `QMI8658_DIAG_ENABLE=0`，关闭初始化期间的 timestamp/temp/raw 数据窗口诊断，避免诊断读取改变第一帧行为；是否成功只看 `QMI8658_PowerOnSelfTest()` 后续直接读 `0x35~0x3A` 的 `ready ... acc=...`。
+
+### 开发者备注
+- 这是与 2026-04-23 实测成功路径最接近的一轮对照。若仍然全 0，说明问题不在 AHRS、地磁轮询、量程改动或诊断读取，而要回到 QMI8658 硬件数据域。
+
+---
+
+## [2026-04-30] - v1.7.4 QMI8658无软复位长等待复测
+
+### 变更记录
+- **[IMU复测]** 新增 `QMI8658_SOFT_RESET_ENABLE=0`，本轮完全跳过 QMI8658 软复位，只做旧版 `CTRL2/CTRL3=0x07/0x07` 配置写入和数据窗口观察。
+- **[等待拉长]** 将 QMI8658 上电等待拉长到 `1000ms`，使能后等待拉长到 `200ms`，ready 轮询超时拉长到 `2000ms`，用于排除数据域启动慢或 reset 后恢复慢的问题。
+
+### 开发者备注
+- 若无软复位后恢复出数，说明 `RESET=0xB0` 或 reset 完成判据会触发当前板子的异常，后续默认禁用软复位。
+- 若无软复位仍全 0，且 QMC6309 同总线正常，则优先查 QMI8658 电源/焊接/芯片本体。
+
+---
+
+## [2026-04-30] - v1.7.3 QMI8658旧版bring-up复测
+
+### 变更记录
+- **[IMU复测]** 将 QMI8658 默认配置临时回退到旧版实测可出数的 `CTRL2=0x07`、`CTRL3=0x07`，并同步 AHRS 周期为 `17ms`、陀螺仪灵敏度为 `2048 LSB/(deg/s)`。
+- **[初始化隔离]** `QMI8658_CLEAR_DATAPATH_ENABLE=0`，本轮跳过新增的 `CTRL6/CTRL8/FIFO/CTRL9` 清理流程，并恢复为 `RESET_STATE != 0x80` 时才软复位，只保留数据通路诊断日志，用于区分“新增初始化流程导致不出数”和“芯片/供电数据域本身不出数”。
+
+### 开发者备注
+- 若本轮旧版 bring-up 路径恢复 `ready ... acc=...`，下一步逐项打开 `0x16/0x36` 和 CTRL9/FIFO 清理，定位具体触发点。
+- 若本轮仍然 `STATUS0=0x00`、timestamp/temp/raw 全 0，则优先查 QMI8658 电源、焊接、芯片状态或同板硬件变化。
+
+---
+
+## [2026-04-30] - v1.7.2 QMC6309独立读数测试入口
+
+### 新增功能
+- **[MAG独立测试]** 在 `User/Main.c` 新增 `MAG_StandalonePoll()`，主循环每 250ms 直接读取一次 `QMC6309_ReadXYZ()`，输出 `test raw=x y z norm1=n`，不再依赖 QMI8658 ready 状态。
+
+### 变更记录
+- **Main.c**: 主循环新增 `MAG_StandalonePoll()`，即使 `g_qmi8658_ready=0` 导致 AHRS/IMU 轮询提前返回，也可以持续验证 QMC6309 原始三轴地磁数据是否变化。
+
+### 开发者备注
+- 当前日志用于判断磁力计是否真实出数：旋转板子时 `raw` 三轴应明显变化；若持续 all zero/all 0xFF 或 `test read fail`，再查 QMC6309 数据通路/I2C ACK/周边磁场。
+
+---
+
+## [2026-04-30] - v1.7.1 QMI8658数据通路诊断与AHRS参数同步
+
+### Bug 修复
+- **[IMU不出数]** 实测启动日志显示 `WHO_AM_I=0x05` 但 `STATUS0=0x00`、`acc=0 0 0`，导致 `g_qmi8658_ready=0`，AHRS 主循环直接返回。修复：QMI8658 初始化阶段固定执行一次软复位，避免旧状态下数字通信正常但数据通路未启动。
+- **[量程参数不同步]** 将 QMI8658 默认配置从 bring-up 的 `CTRL2/CTRL3=0x07/0x07` 调整为常规 6 轴配置 `CTRL2=0x16`、`CTRL3=0x36`，并同步 AHRS 陀螺仪灵敏度为 `256 LSB/(deg/s)`、IMU 融合周期为 `9ms`。
+
+### 优化改进
+- **[启动诊断]** QMI8658 初始化现在会输出 `CTRL1/CTRL2/CTRL3/CTRL5/CTRL6/CTRL7/CTRL8/CTRL9`、FIFO 寄存器、`STATUSINT/STATUS0`、timestamp、temp 和首帧 raw acc/gyro 数据，便于判断失败点是在寄存器写入、ready 标志、FIFO 模式还是数据寄存器。
+- **[延迟出数诊断]** 若 `STATUS0.aDA` 在 200ms 内仍未置位，启动阶段会追加约 1 秒短轮询窗口，连续观察 status、timestamp、temp 和 raw acc/gyro 是否延迟变为非零。
+
+### 变更记录
+- **QMI8658.h**: 默认 ACC 改为 ±4G/117Hz，GYRO 改为 ±125/128dps/117Hz。
+- **QMI8658.c**: 初始化强制软复位，显式清理 FIFO/CTRL8/CTRL9/CTRL6 数据路径，并在 clear、enable 后与 ready/timeout 后输出数据通路快照；timeout 后追加 `data window` 轮询。
+- **AHRS.h**: `AHRS_IMU_PERIOD_MS` 改为 `9U`，`AHRS_GYRO_LSB_PER_DPS` 改为 `256L`。
+
+### 开发者备注
+- 下一轮上板重点观察 `after_clear/after_enable/not_ready/ready` 四组 IMU 日志和 `data window result`；若 `CTRL*` 与 FIFO 读回正确但 `STATUS0`、timestamp、temp 和 raw 持续为 0，优先排查 QMI8658 传感器电源/焊接/芯片数据通路，而不是 AHRS 算法。
 
 ---
 

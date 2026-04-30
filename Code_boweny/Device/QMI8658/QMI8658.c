@@ -46,6 +46,8 @@ u8 QMI8658_I2C_Addr = QMI8658_I2C_ADDR_PRIMARY;  /**< 当前使用的7位I2C地�
  *                       内部辅助函数
  *==============================================================*/
 
+static void QMI8658_Delay_ms(u16 ms);
+
 /**
  * @brief      I2C 单字节写入
  * @param[in]  reg_addr  寄存器地址
@@ -112,6 +114,170 @@ static u8 QMI8658_ReadNByte(u8 start_reg, u8 *buf, u8 len)
     if (Get_MSBusy_Status()) {
         LOGE("IMU", "RNB NACK reg=0x%02X len=%u", start_reg, len);
         return 1;
+    }
+    return 0;
+}
+
+static void QMI8658_LogDataPath(u8 *phase)
+{
+    u8 ctrl1;
+    u8 ctrl2;
+    u8 ctrl3;
+    u8 ctrl5;
+    u8 ctrl6;
+    u8 ctrl7;
+    u8 ctrl8;
+    u8 ctrl9;
+    u8 fifo_wtm;
+    u8 fifo_ctrl;
+    u8 fifo_status;
+    u8 statusint;
+    u8 status0;
+    u8 ts_raw[3];
+    u8 temp_raw[2];
+    u8 raw[12];
+    u32 ts;
+    int16 temp;
+    int16 ax;
+    int16 ay;
+    int16 az;
+    int16 gx;
+    int16 gy;
+    int16 gz;
+
+    ctrl1 = QMI8658_ReadReg(QMI8658_REG_CTRL1);
+    ctrl2 = QMI8658_ReadReg(QMI8658_REG_CTRL2);
+    ctrl3 = QMI8658_ReadReg(QMI8658_REG_CTRL3);
+    ctrl5 = QMI8658_ReadReg(QMI8658_REG_CTRL5);
+    ctrl6 = QMI8658_ReadReg(QMI8658_REG_CTRL6);
+    ctrl7 = QMI8658_ReadReg(QMI8658_REG_CTRL7);
+    ctrl8 = QMI8658_ReadReg(QMI8658_REG_CTRL8);
+    ctrl9 = QMI8658_ReadReg(QMI8658_REG_CTRL9);
+    fifo_wtm = QMI8658_ReadReg(QMI8658_REG_FIFO_WTM);
+    fifo_ctrl = QMI8658_ReadReg(QMI8658_REG_FIFO_CTRL);
+    fifo_status = QMI8658_ReadReg(QMI8658_REG_FIFO_STATUS);
+    statusint = QMI8658_ReadReg(QMI8658_REG_STATUSINT);
+    status0 = QMI8658_ReadReg(QMI8658_REG_STATUS0);
+
+    LOGI("IMU", "%s regs c1=%02X c2=%02X c3=%02X c5=%02X c6=%02X",
+         phase, ctrl1, ctrl2, ctrl3, ctrl5, ctrl6);
+    LOGI("IMU", "%s regs c7=%02X c8=%02X c9=%02X fw=%02X fc=%02X fs=%02X",
+         phase, ctrl7, ctrl8, ctrl9, fifo_wtm, fifo_ctrl, fifo_status);
+    LOGI("IMU", "%s status int=%02X s0=%02X", phase, statusint, status0);
+
+    if (QMI8658_ReadNByte(QMI8658_REG_TIMESTAMP_L, ts_raw, 3) == 0) {
+        ts = ((u32)ts_raw[2] << 16) | ((u32)ts_raw[1] << 8) | ts_raw[0];
+        LOGI("IMU", "%s ts=%lu", phase, ts);
+    }
+
+    if (QMI8658_ReadNByte(QMI8658_REG_TEMP_L, temp_raw, 2) == 0) {
+        temp = (int16)((u16)temp_raw[1] << 8 | temp_raw[0]);
+        LOGI("IMU", "%s temp_raw=%d", phase, temp);
+    }
+
+    if (QMI8658_ReadNByte(QMI8658_REG_AX_L, raw, 12) != 0) {
+        LOGW("IMU", "%s raw read fail", phase);
+        return;
+    }
+
+    ax = (int16)((u16)raw[1] << 8 | raw[0]);
+    ay = (int16)((u16)raw[3] << 8 | raw[2]);
+    az = (int16)((u16)raw[5] << 8 | raw[4]);
+    gx = (int16)((u16)raw[7] << 8 | raw[6]);
+    gy = (int16)((u16)raw[9] << 8 | raw[8]);
+    gz = (int16)((u16)raw[11] << 8 | raw[10]);
+
+    LOGI("IMU", "%s raw a=%d %d %d g=%d %d %d",
+         phase, ax, ay, az, gx, gy, gz);
+}
+
+static u8 QMI8658_LogDataWindow(void)
+{
+    u8 i;
+    u8 statusint;
+    u8 status0;
+    u8 ts_raw[3];
+    u8 temp_raw[2];
+    u8 raw[12];
+    u32 ts;
+    int16 temp;
+    int16 ax;
+    int16 ay;
+    int16 az;
+    int16 gx;
+    int16 gy;
+    int16 gz;
+    u8 saw_data;
+
+    saw_data = 0;
+    LOGI("IMU", "data window start");
+
+    for (i = 0; i < 10; i++) {
+        statusint = QMI8658_ReadReg(QMI8658_REG_STATUSINT);
+        status0 = QMI8658_ReadReg(QMI8658_REG_STATUS0);
+
+        ts = 0;
+        if (QMI8658_ReadNByte(QMI8658_REG_TIMESTAMP_L, ts_raw, 3) == 0) {
+            ts = ((u32)ts_raw[2] << 16) | ((u32)ts_raw[1] << 8) | ts_raw[0];
+        }
+
+        temp = 0;
+        if (QMI8658_ReadNByte(QMI8658_REG_TEMP_L, temp_raw, 2) == 0) {
+            temp = (int16)((u16)temp_raw[1] << 8 | temp_raw[0]);
+        }
+
+        ax = 0; ay = 0; az = 0;
+        gx = 0; gy = 0; gz = 0;
+        if (QMI8658_ReadNByte(QMI8658_REG_AX_L, raw, 12) == 0) {
+            ax = (int16)((u16)raw[1] << 8 | raw[0]);
+            ay = (int16)((u16)raw[3] << 8 | raw[2]);
+            az = (int16)((u16)raw[5] << 8 | raw[4]);
+            gx = (int16)((u16)raw[7] << 8 | raw[6]);
+            gy = (int16)((u16)raw[9] << 8 | raw[8]);
+            gz = (int16)((u16)raw[11] << 8 | raw[10]);
+        }
+
+        LOGI("IMU", "poll%u si=%02X s0=%02X ts=%lu t=%d a=%d %d %d",
+             (u16)i, statusint, status0, ts, temp, ax, ay, az);
+        LOGI("IMU", "poll%u g=%d %d %d", (u16)i, gx, gy, gz);
+
+        if ((status0 != 0U) || (ts != 0UL) || (temp != 0) ||
+            (ax != 0) || (ay != 0) || (az != 0) ||
+            (gx != 0) || (gy != 0) || (gz != 0)) {
+            saw_data = 1;
+            break;
+        }
+
+        QMI8658_Delay_ms(100);
+    }
+
+    LOGI("IMU", "data window result=%s", saw_data ? "DATA" : "ALL_ZERO");
+    return saw_data;
+}
+
+static s8 QMI8658_ClearDataPath(void)
+{
+    if (QMI8658_WriteReg(QMI8658_REG_CTRL7, 0x00) != 0) {
+        return -1;
+    }
+    if (QMI8658_WriteReg(QMI8658_REG_CTRL6, QMI8658_CTRL6_INIT) != 0) {
+        return -1;
+    }
+    if (QMI8658_WriteReg(QMI8658_REG_CTRL8, QMI8658_CTRL8_INIT) != 0) {
+        return -1;
+    }
+    if (QMI8658_WriteReg(QMI8658_REG_FIFO_WTM, QMI8658_FIFO_WTM_INIT) != 0) {
+        return -1;
+    }
+    if (QMI8658_WriteReg(QMI8658_REG_FIFO_CTRL, QMI8658_FIFO_CTRL_BYPASS) != 0) {
+        return -1;
+    }
+    if (QMI8658_WriteReg(QMI8658_REG_CTRL9, QMI8658_CTRL9_CMD_RST_FIFO) != 0) {
+        return -1;
+    }
+    QMI8658_Delay_ms(2);
+    if (QMI8658_WriteReg(QMI8658_REG_CTRL9, QMI8658_CTRL9_CMD_ACK) != 0) {
+        return -1;
     }
     return 0;
 }
@@ -469,6 +635,52 @@ s8 QMI8658_Disable(void)
     return 0;
 }
 
+void QMI8658_DumpRawRegs(void)
+{
+    u8 who;
+    u8 rev;
+    u8 reset_state;
+    u8 ctrl1, ctrl2, ctrl3, ctrl5, ctrl7;
+    u8 statusint, status0;
+    u8 temp_l, temp_h;
+    u8 ax_l, ax_h, ay_l, ay_h, az_l, az_h;
+    u8 gx_l, gx_h, gy_l, gy_h, gz_l, gz_h;
+
+    who = QMI8658_ReadReg(QMI8658_REG_WHO_AM_I);
+    rev = QMI8658_ReadReg(QMI8658_REG_REVISION_ID);
+    reset_state = QMI8658_ReadReg(QMI8658_REG_RESET_STATE);
+    ctrl1 = QMI8658_ReadReg(QMI8658_REG_CTRL1);
+    ctrl2 = QMI8658_ReadReg(QMI8658_REG_CTRL2);
+    ctrl3 = QMI8658_ReadReg(QMI8658_REG_CTRL3);
+    ctrl5 = QMI8658_ReadReg(QMI8658_REG_CTRL5);
+    ctrl7 = QMI8658_ReadReg(QMI8658_REG_CTRL7);
+    statusint = QMI8658_ReadReg(QMI8658_REG_STATUSINT);
+    status0 = QMI8658_ReadReg(QMI8658_REG_STATUS0);
+    temp_l = QMI8658_ReadReg(QMI8658_REG_TEMP_L);
+    temp_h = QMI8658_ReadReg(QMI8658_REG_TEMP_H);
+    ax_l = QMI8658_ReadReg(QMI8658_REG_AX_L);
+    ax_h = QMI8658_ReadReg(QMI8658_REG_AX_H);
+    ay_l = QMI8658_ReadReg(QMI8658_REG_AY_L);
+    ay_h = QMI8658_ReadReg(QMI8658_REG_AY_H);
+    az_l = QMI8658_ReadReg(QMI8658_REG_AZ_L);
+    az_h = QMI8658_ReadReg(QMI8658_REG_AZ_H);
+    gx_l = QMI8658_ReadReg(QMI8658_REG_GX_L);
+    gx_h = QMI8658_ReadReg(QMI8658_REG_GX_H);
+    gy_l = QMI8658_ReadReg(QMI8658_REG_GY_L);
+    gy_h = QMI8658_ReadReg(QMI8658_REG_GY_H);
+    gz_l = QMI8658_ReadReg(QMI8658_REG_GZ_L);
+    gz_h = QMI8658_ReadReg(QMI8658_REG_GZ_H);
+
+    LOGI("IMU", "dump id=%02X rev=%02X rst=%02X c1=%02X c2=%02X c3=%02X c5=%02X c7=%02X",
+         who, rev, reset_state, ctrl1, ctrl2, ctrl3, ctrl5, ctrl7);
+    LOGI("IMU", "dump st int=%02X s0=%02X temp=%02X %02X",
+         statusint, status0, temp_l, temp_h);
+    LOGI("IMU", "dump acc=%02X %02X %02X %02X %02X %02X",
+         ax_l, ax_h, ay_l, ay_h, az_l, az_h);
+    LOGI("IMU", "dump gyr=%02X %02X %02X %02X %02X %02X",
+         gx_l, gx_h, gy_l, gy_h, gz_l, gz_h);
+}
+
 /**
  * @brief   初始化 QMI8658 IMU
  * @return  0=成功，-1=失败
@@ -494,6 +706,8 @@ s8 QMI8658_Init(void)
     u8 ctrl1_rb, ctrl2_rb, ctrl3_rb, ctrl5_rb, ctrl7_rb;
 
     LOGI("IMU", "========== QMI8658 Init Start ==========");
+    LOGI("IMU", "stable bring-up: soft_reset=%u diag=%u",
+         (u16)QMI8658_SOFT_RESET_ENABLE, (u16)QMI8658_DIAG_ENABLE);
     LOGD("IMU", "primary addr=0x%02X alt=0x%02X",
          QMI8658_I2C_WRITE(QMI8658_I2C_ADDR_PRIMARY),
          QMI8658_I2C_WRITE(QMI8658_I2C_ADDR_ALT));
@@ -543,32 +757,45 @@ s8 QMI8658_Init(void)
 
     /*---------------------------- RESET_STATE 检测 ------------------------*/
     reset_state = QMI8658_ReadReg(QMI8658_REG_RESET_STATE);
-    LOGD("IMU", "reset_state=0x%02X (0x80=ready)", reset_state);
+    LOGI("IMU", "reset_state before=0x%02X", reset_state);
 
+#if QMI8658_SOFT_RESET_ENABLE
     if (reset_state != QMI8658_RESET_STATE_READY) {
-        LOGD("IMU", "need soft reset, current state=0x%02X", reset_state);
-
-        /*---------------------------- 软复位 ----------------------------*/
-        LOGD("IMU", "soft reset write RESET=0xB0 to reg 0x60");
         if (QMI8658_WriteReg(QMI8658_REG_RESET, 0xB0) != 0) {
             LOGE("IMU", "soft reset WR fail");
             return -1;
         }
 
-        LOGD("IMU", "wait %ums for reset complete", QMI8658_RESET_DELAY_MS);
         QMI8658_Delay_ms(QMI8658_RESET_DELAY_MS);
-
         reset_state = QMI8658_ReadReg(QMI8658_REG_RESET_STATE);
-        LOGD("IMU", "after reset reset_state=0x%02X", reset_state);
-
-        if (reset_state == 0xFF) {
-            LOGE("IMU", "reset_state read fail after reset");
-            return -1;
-        }
-        LOGD("IMU", "soft reset done reset_state=0x%02X", reset_state);
+        LOGI("IMU", "reset_state after=0x%02X", reset_state);
     } else {
-        LOGD("IMU", "chip already ready, skip reset");
+        LOGI("IMU", "reset_state ready, skip reset");
     }
+#else
+    LOGI("IMU", "soft reset disabled state=0x%02X", reset_state);
+#endif
+
+    if (reset_state == 0xFF) {
+        LOGE("IMU", "reset_state read fail after reset");
+        return -1;
+    }
+
+    id = QMI8658_ReadID();
+    if (id != QMI8658_CHIP_ID_VALUE) {
+        LOGE("IMU", "WHO_AM_I lost after reset got=0x%02X", id);
+        return -1;
+    }
+
+#if QMI8658_CLEAR_DATAPATH_ENABLE
+    if (QMI8658_ClearDataPath() != 0) {
+        LOGE("IMU", "clear data path fail");
+        return -1;
+    }
+    QMI8658_LogDataPath("after_clear");
+#else
+    LOGI("IMU", "skip ctrl6/8/fifo/ctrl9 clear");
+#endif
 
     /*---------------------------- 配置写入 --------------------------*/
 
@@ -622,7 +849,7 @@ s8 QMI8658_Init(void)
     ctrl5_rb = QMI8658_ReadReg(QMI8658_REG_CTRL5);
     ctrl7_rb = QMI8658_ReadReg(QMI8658_REG_CTRL7);
 
-    LOGD("IMU", "readback CTRL1=0x%02X CTRL2=0x%02X CTRL3=0x%02X CTRL5=0x%02X CTRL7=0x%02X",
+    LOGI("IMU", "readback CTRL1=0x%02X CTRL2=0x%02X CTRL3=0x%02X CTRL5=0x%02X CTRL7=0x%02X",
          ctrl1_rb, ctrl2_rb, ctrl3_rb, ctrl5_rb, ctrl7_rb);
 
     if (ctrl1_rb != QMI8658_CTRL1_INIT) {
@@ -642,16 +869,28 @@ s8 QMI8658_Init(void)
     }
 
     /*---------------------------- 等待数据就绪 --------------------------*/
+#if QMI8658_DIAG_ENABLE
+    QMI8658_LogDataPath("after_enable");
+#endif
+
     LOGD("IMU", "wait sensor data ready...");
     if (QMI8658_Wait_AccReady(QMI8658_READY_TIMEOUT_MS) != 0) {
         LOGW("IMU", "acc not ready in %ums, continue anyway", QMI8658_READY_TIMEOUT_MS);
+#if QMI8658_DIAG_ENABLE
+        QMI8658_LogDataPath("not_ready");
+        QMI8658_LogDataWindow();
+#endif
+    } else {
+#if QMI8658_DIAG_ENABLE
+        QMI8658_LogDataPath("ready");
+#endif
     }
 
     Filter_ResetGyroLowPass();
 
     /*---------------------------- 完成 --------------------------*/
     LOGI("IMU", "========== QMI8658 Init Done ==========");
-    LOGI("IMU", "config: bring-up CTRL2=0x%02X CTRL3=0x%02X CTRL5=0x%02X CTRL7=0x%02X",
+    LOGI("IMU", "config: CTRL2=0x%02X CTRL3=0x%02X CTRL5=0x%02X CTRL7=0x%02X",
          QMI8658_CTRL2_INIT, QMI8658_CTRL3_INIT, QMI8658_CTRL5_INIT, QMI8658_CTRL7_INIT);
     return 0;
 }

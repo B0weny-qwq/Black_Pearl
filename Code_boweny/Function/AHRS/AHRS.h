@@ -14,7 +14,7 @@
  * - 机体系定义：`+X=船尾`，`+Y=船右/右舷`，`+Z=上`
  *
  * @note
- * - 当前默认 IMU 更新周期为 17ms，对应当前 QMI8658 bring-up 配置 `CTRL2/CTRL3=0x07`
+ * - 当前默认 IMU 更新周期为 17ms，对应旧版 QMI8658 bring-up 复测配置 `CTRL2/CTRL3=0x07/0x07`
  * - 若后续修改 QMI8658 陀螺仪量程，必须同步修改 `AHRS_GYRO_LSB_PER_DPS`
  * - 轴向映射统一在本文件宏中配置，便于根据芯片丝印和实测结果快速调整
  *
@@ -42,8 +42,8 @@
  * @brief   陀螺仪灵敏度，单位 LSB/(deg/s)
  *
  * @details
- * 当前 `QMI8658_CTRL3_INIT=0x07`，量程位为 0，对应工程头文件中定义的
- * `QMI8658_GYRO_RANGE_16`，灵敏度为 2048 LSB/(deg/s)。
+ * 当前 `QMI8658_CTRL3_INIT=0x07`，使用旧版实测可出数的 bring-up 配置，
+ * 先按 ±16dps 档位的 2048 LSB/(deg/s) 处理。
  */
 #define AHRS_GYRO_LSB_PER_DPS            2048L
 
