@@ -17,7 +17,9 @@
 #define AHRS_TEST_ONLY  0
 #endif
 
+#ifndef AHRS_LOG_DECIMATION
 #define AHRS_LOG_DECIMATION  32
+#endif
 #define AHRS_YAW_ZERO_STABLE_CD       150
 #define AHRS_YAW_ZERO_STABLE_SAMPLES  6
 

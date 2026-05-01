@@ -58,7 +58,10 @@
 
 #define AHRS_GYRO_BIAS_SAMPLE_COUNT      128U    /**< 陀螺仪静止零偏学习帧数 */
 
-#define AHRS_MAG_ENABLE                  1       /**< 是否启用地磁航向慢修正：1=启用，0=仅保留陀螺积分航向 */
+/* Keep yaw gyro-relative by default until QMC6309 calibration is complete. */
+#ifndef AHRS_MAG_ENABLE
+#define AHRS_MAG_ENABLE                  0       /**< 是否启用地磁航向慢修正：1=启用，0=仅保留陀螺积分航向 */
+#endif
 #define AHRS_MAG_LPF_SHIFT               3U      /**< 地磁数据和航向角低通强度 */
 #define AHRS_MAG_BLEND_SHIFT             5U      /**< 地磁对 yaw 的互补修正强度 */
 #define AHRS_MAG_MIN_NORM                50U     /**< 地磁模长最小有效值，低于该值认为无效 */
