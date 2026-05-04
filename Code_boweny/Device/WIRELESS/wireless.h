@@ -57,5 +57,8 @@ s8 Wireless_GetState(Wireless_State_t *state);
 s8 Wireless_RescanAntenna(void);
 s8 Wireless_SearchSignalPoll(void);
 s8 Wireless_RunMinimalTest(void);
+s8 Wireless_SetChannel(u8 channel);
+s8 Wireless_SetSyncWord(u32 sync_word);
+s8 Wireless_SetSyncRegs(u16 reg36, u16 reg39);
 
 #endif

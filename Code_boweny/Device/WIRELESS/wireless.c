@@ -350,6 +350,7 @@ s8 Wireless_Send(const u8 *buf, u8 len)
 {
     u16 status;
     u16 timeout_cnt;
+    u16 fifo_dbg;
     s8 rc;
 
     if ((buf == 0) || (len == 0U) || (len > LT8920_MAX_PAYLOAD_LEN)) {
@@ -388,7 +389,14 @@ s8 Wireless_Send(const u8 *buf, u8 len)
 
     (void)Wireless_SetRxMode();
     g_wireless_state.last_error = WIRELESS_ERR_TIMEOUT;
-    LOGE(WIRELESS_TAG, "tx timeout len=%u", (u16)len);
+    if (LT8920_ReadStatus(&status) != SUCCESS) {
+        status = 0xFFFFU;
+    }
+    if (LT8920_ReadReg(52U, &fifo_dbg) != SUCCESS) {
+        fifo_dbg = 0xFFFFU;
+    }
+    LOGE(WIRELESS_TAG, "tx timeout len=%u st=0x%04X reg52=0x%04X",
+         (u16)len, status, fifo_dbg);
     return WIRELESS_ERR_TIMEOUT;
 }
 
@@ -579,5 +587,74 @@ s8 Wireless_RunMinimalTest(void)
     LOGI(WIRELESS_TAG,
          "test ok no-whoami reg3=0x%04X reg6=0x%04X reg11=0x%04X reg41=0x%04X",
          reg3, reg6, reg11, reg41);
+    return SUCCESS;
+}
+
+s8 Wireless_SetChannel(u8 channel)
+{
+    s8 rc;
+
+    if (!g_wireless_state.initialized) {
+        return WIRELESS_ERR_STATE;
+    }
+
+    rc = LT8920_SetChannel(channel);
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        return rc;
+    }
+
+    rc = Wireless_SetRxMode();
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        return rc;
+    }
+
+    return SUCCESS;
+}
+
+s8 Wireless_SetSyncWord(u32 sync_word)
+{
+    s8 rc;
+
+    if (!g_wireless_state.initialized) {
+        return WIRELESS_ERR_STATE;
+    }
+
+    rc = LT8920_SetSyncWord(sync_word);
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        return rc;
+    }
+
+    rc = Wireless_SetRxMode();
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        return rc;
+    }
+
+    return SUCCESS;
+}
+
+s8 Wireless_SetSyncRegs(u16 reg36, u16 reg39)
+{
+    s8 rc;
+
+    if (!g_wireless_state.initialized) {
+        return WIRELESS_ERR_STATE;
+    }
+
+    rc = LT8920_SetSyncRegs(reg36, reg39);
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        return rc;
+    }
+
+    rc = Wireless_SetRxMode();
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        return rc;
+    }
+
     return SUCCESS;
 }

@@ -29,7 +29,27 @@
  * 1 = keep only IMU + MAG fusion path running and only print AHRS logs.
  * 0 = normal firmware runtime with GPS, wireless, protocol and sensor tests.
  */
-#define AHRS_TEST_ONLY  1
+#define AHRS_TEST_ONLY  0
+
+/* Legacy LT8920 pairing/runtime protocol switches */
+#define SHIP_PROTOCOL_POLL_ENABLE      1
+#define SHIP_PROTOCOL_COMPAT_ENABLE    0
+
+/* Pairing channel and fixed seed (compile-time constants). */
+#define PAIR_CHANNEL                   0x7F
+#define SHIP_PAIR_SEED0                0x65
+#define SHIP_PAIR_SEED1                0x65
+#define SHIP_PAIR_SEED2                0xA0
+#define SHIP_PAIR_SEED3                0x65
+/* 10ms tick based response window: 6000 = 60s */
+#define SHIP_PAIR_WAIT_RSP_TICKS       6000
+
+/*
+ * Wireless-only minimal test mode:
+ * 1 = disable IMU/MAG/GPS test path and keep only wireless protocol flow.
+ * 0 = normal runtime path.
+ */
+#define WIRELESS_MINIMAL_TEST_ONLY     1
 
 //========================================================================
 //                             外部函数和变量声明

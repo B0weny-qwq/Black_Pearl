@@ -17,14 +17,22 @@
 #define AHRS_TEST_ONLY  0
 #endif
 
+#ifndef WIRELESS_MINIMAL_TEST_ONLY
+#define WIRELESS_MINIMAL_TEST_ONLY 0
+#endif
+
 #define AHRS_LOG_DECIMATION  32
 
 #if !AHRS_TEST_ONLY
-#define MAG_TEST_PERIOD_MS   1000U
-
 static void Wireless_MinimalTestUnit(void)
 {
     s8 rc;
+
+#if WIRELESS_MINIMAL_TEST_ONLY
+    LOGI("SYS", "wireless minimal loop enabled (IMU/MAG/GPS path disabled)");
+#else
+    LOGI("SYS", "full runtime loop enabled (wireless + GPS + IMU/MAG)");
+#endif
 
     /*
      * LT8920 datasheet does not provide a dedicated WHO_AM_I style ID register.
@@ -35,6 +43,9 @@ static void Wireless_MinimalTestUnit(void)
         LOGE("WL", "minimal test fail rc=%d", rc);
     }
 }
+
+#if !WIRELESS_MINIMAL_TEST_ONLY
+#define MAG_TEST_PERIOD_MS   1000U
 
 static u32 MAG_Abs16ToU32(int16 value)
 {
@@ -79,7 +90,6 @@ static void MAG_StandalonePoll(void)
     norm1 = MAG_Abs16ToU32(mx) + MAG_Abs16ToU32(my) + MAG_Abs16ToU32(mz);
     LOGI("MAG", "test raw=%d %d %d norm1=%lu", mx, my, mz, norm1);
 }
-#endif
 
 static int16 AHRS_WrapCdLocal(int32 angle_cd)
 {
@@ -173,7 +183,14 @@ static void IMU_HighRatePoll(void)
 
     if (QMI8658_ReadAll(&ax, &ay, &az, &gx, &gy, &gz) != 0) {
         if (!error_latched) {
-            LOGE("AHRS", "imu read fail");
+            LOGE("AHRS", "imu read fail err=%u(%s) addr=0x%02X",
+                 (u16)QMI8658_GetLastI2cError(),
+                 QMI8658_GetLastI2cErrorName(),
+                 (u16)QMI8658_I2C_Addr);
+            if (QMI8658_GetLastI2cError() == 0) {
+                LOGW("AHRS", "imu read fail with I2C OK, dump regs");
+                QMI8658_DumpRawRegs();
+            }
             error_latched = 1;
         }
         return;
@@ -243,6 +260,8 @@ static void IMU_HighRatePoll(void)
         }
     }
 }
+#endif
+#endif
 
 /*---------------------------------------------------------------------*/
 /* 鍑芥暟: main                                                          */
@@ -261,13 +280,26 @@ void main(void)
     while(1)
     {
 #if !AHRS_TEST_ONLY
+#if !WIRELESS_MINIMAL_TEST_ONLY
         GPS_Poll();
+#endif
         Wireless_Poll();
+#if SHIP_PROTOCOL_POLL_ENABLE
+        ShipProtocol_RunScheduler();
+#endif
+#if SHIP_PROTOCOL_COMPAT_ENABLE
         ShipProtocol_Poll();
+#endif
+#if !WIRELESS_MINIMAL_TEST_ONLY
         Wireless_SearchSignalPoll();
         MAG_StandalonePoll();
 #endif
+#endif
         Task_Pro_Handler_Callback();
+#if !AHRS_TEST_ONLY
+#if !WIRELESS_MINIMAL_TEST_ONLY
         IMU_HighRatePoll();
+#endif
+#endif
     }
 }

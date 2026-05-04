@@ -7,6 +7,7 @@
 #define SHIP_PROTO_TAIL          0xBBU
 #define SHIP_PROTO_MAX_FRAME_LEN 64U
 
+#define SHIP_CMD_PAIR_RSP        0x0FU
 #define SHIP_CMD_PAIR            0x10U
 #define SHIP_CMD_THROTTLE        0x11U
 #define SHIP_CMD_GPS_REPORT      0x12U
@@ -16,5 +17,7 @@
 
 void ShipProtocol_Poll(void);
 s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len);
+void ShipProtocol_RunScheduler(void);
+u8 ShipProtocol_IsPaired(void);
 
 #endif

@@ -236,6 +236,18 @@ s8 LT8920_SetSyncWord(u32 sync_word)
     return LT8920_WriteReg(39U, (u16)(sync_word >> 16));
 }
 
+s8 LT8920_SetSyncRegs(u16 reg36, u16 reg39)
+{
+    s8 rc;
+
+    rc = LT8920_WriteReg(36U, reg36);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+
+    return LT8920_WriteReg(39U, reg39);
+}
+
 s8 LT8920_EnterIdle(void)
 {
     return LT8920_UpdateModeRegister(0x0000U);

@@ -8,12 +8,15 @@
 #define LT8920_DEFAULT_CHANNEL       0U
 #define LT8920_DEFAULT_SYNC_WORD     0xE4E4E0E0UL
 
-#define LT8920_STATUS_PKT_FLAG       0x2000U
-#define LT8920_STATUS_CRC_ERROR      0x0800U
+#define LT8920_STATUS_CRC_ERROR      0x8000U
+#define LT8920_STATUS_SYNC_RECV      0x0080U
+#define LT8920_STATUS_PKT_FLAG       0x0040U
+#define LT8920_STATUS_FIFO_FLAG      0x0020U
 
 s8 LT8920_Init(u8 channel, u32 sync_word);
 s8 LT8920_SetChannel(u8 channel);
 s8 LT8920_SetSyncWord(u32 sync_word);
+s8 LT8920_SetSyncRegs(u16 reg36, u16 reg39);
 s8 LT8920_EnterIdle(void);
 s8 LT8920_EnterRx(void);
 s8 LT8920_EnterTx(void);
