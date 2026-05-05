@@ -37,12 +37,13 @@
 
 /* Pairing channel and fixed seed (compile-time constants). */
 #define PAIR_CHANNEL                   0x7F
+#define SHIP_PAIR_SEED_USE_CHIPID      0
 #define SHIP_PAIR_SEED0                0x65
 #define SHIP_PAIR_SEED1                0x65
 #define SHIP_PAIR_SEED2                0xA0
 #define SHIP_PAIR_SEED3                0x65
-/* 10ms tick based response window: 6000 = 60s */
-#define SHIP_PAIR_WAIT_RSP_TICKS       6000
+/* 10ms tick based response window: 500 = 5s */
+#define SHIP_PAIR_WAIT_RSP_TICKS       500
 
 /*
  * Wireless-only minimal test mode:
@@ -50,6 +51,15 @@
  * 0 = normal runtime path.
  */
 #define WIRELESS_MINIMAL_TEST_ONLY     1
+#define WIRELESS_TX_ONLY_TEST          1
+#define WIRELESS_PAIR_TX_ONLY_TEST     1
+#define WIRELESS_FRONTEND_BYPASS_TEST  0
+#define WIRELESS_CONTINUOUS_TX_TEST    1
+#define WIRELESS_CARRIER_WAVE_TEST     0
+#define WIRELESS_SOFT_SPI_TEST         0
+#define WIRELESS_SOFT_SPI_DELAY_US     0
+#define LT8920_FIFO_DELAY_TEST         0
+#define LT8920_FORCE_TX_ORDER_TEST     0
 
 //========================================================================
 //                             外部函数和变量声明

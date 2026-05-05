@@ -26,7 +26,8 @@
 #define WIRELESS_SCAN_SAMPLE_MS    2U
 #define WIRELESS_SIGNAL_RSSI_MIN   12U
 #define WIRELESS_SEARCH_POLL_DIV   32U
-#define WIRELESS_TX_TIMEOUT_LOOPS  2000U
+#define WIRELESS_TX_TIMEOUT_LOOPS  1000U
+#define WIRELESS_TX_PKT_POLL_US    1000U
 
 typedef struct
 {
@@ -57,6 +58,8 @@ s8 Wireless_GetState(Wireless_State_t *state);
 s8 Wireless_RescanAntenna(void);
 s8 Wireless_SearchSignalPoll(void);
 s8 Wireless_RunMinimalTest(void);
+s8 Wireless_RunTxDiagBurst(u8 log_detail);
+s8 Wireless_RunPairTxOnlyTest(u8 log_detail);
 s8 Wireless_SetChannel(u8 channel);
 s8 Wireless_SetSyncWord(u32 sync_word);
 s8 Wireless_SetSyncRegs(u16 reg36, u16 reg39);

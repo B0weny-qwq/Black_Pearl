@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 工程总览文档
  *
  * @author  boweny
- * @date    2026-05-01
- * @version v1.7.15
+ * @date    2026-05-05
+ * @version v1.7.18
  *
  * @details
  * 本文档基于 2026-04-27 当前工程实际代码重新整理，
@@ -352,7 +352,7 @@ const GPS_State_t *GPS_GetState(void);
 - 架构：`wireless.*` + `lt8920.*` + `wireless_port.*`
 - 射频芯片：单颗 `LT8920`
 - 前端芯片：`KCT8206L`
-- 当前总线：硬件 `SPI4`
+- 当前总线：默认软件 SPI，宏 `WIRELESS_SOFT_SPI_TEST=0` 时可切换硬件 `SPI4`
 - 当前模式：单芯片半双工，默认常驻 RX，发送时切 TX，发完立即回 RX
 - 双天线策略：启动扫描 `ANT1/ANT2` 后固定到较优天线
 - 当前对外接口：
@@ -372,10 +372,22 @@ s8 Wireless_RescanAntenna(void);
 
 - 不复用 `User/System_init.c` 中原示例 `SPI_config()`，避免从机模式和重复初始化冲突
 - 板级抽象集中在 `wireless_port.*`，硬件脚位不散落到业务层
+- 默认软件 SPI 使用 `P3.2=SCLK / P3.3=MISO / P3.4=MOSI / P3.5=CS`，硬件 SPI4 复测时仍使用同一组引脚
+- LT8920 寄存器初始化表按根目录 `LDT89xxconfig` 补齐 `Reg7=0x0030` 与 `Reg50=0x0000`，`Reg50` 只写入不读回校验
+- 默认软件 SPI 关闭额外 bit 延时，按根目录 `SlowSPI_io=0` 快速 GPIO SPI 流程运行；需要放慢时只改 `WIRELESS_SOFT_SPI_DELAY_US`
+- LT8920 复位时序、FIFO 长度字节、TX/RX 入口顺序已按根目录 `Wireless/` 可工作实现对齐
+- TX 发送在进入 TX 后先延时 `100us`，随后以 `1000us` 间隔轮询 `Reg48 PKT`
 - 当前交付的是底层驱动和原始包收发框架，不包含旧 `wirelessProtocal.c` 业务协议兼容层
 - 当前不使用 `PKT` 外部中断脚，全部依赖寄存器轮询
 - 当前无线运行不会修改 UART/I2C/Timer 资源分配
 - `main()` 中已增加一次性最小测试单元，用固定寄存器签名替代不存在的 `WHO_AM_I`
+- 当前配对调度位于 `Code_boweny/Device/WIRELESS/ship_protocol.c`
+- 当前配对请求为 `cmd=0x10`，整帧格式固定为 `AA 06 10 seed0 seed1 seed2 seed3 xor BB`
+- 当前默认配对发射信道为 `0x7F`
+- 当前 `seed[4]` 不是单纯持久化标记，而是当前配对输入；船端会基于它派生工作接收信道、工作发送信道和同步/密钥字节
+- 当前配对成功判定已收紧为：必须在配对响应窗口内收到 `cmd=0x0F`，且 payload 长度为 `4` 并与本轮 `seed[4]` 完全一致
+- 当前单芯片配对时序采用“发一个配对包，切回 RX 给短窗口，最后一包后保留长窗口”的半双工策略；若单轮失败且总超时未耗尽，会自动重新装载 `pair_left` 再重发一轮
+- 当前配对超时日志会追加 `diag sync/pkt/crc/fifo` 汇总，用于判断是否真的看到了空口活动
 
 ### 6.8 MOTOR
 
@@ -531,6 +543,8 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 | 2026-04-26 | v1.4 | 补充 WIRELESS 模块接入、SPI4 资源占用、双天线策略与真实启动/主循环链路 |
 | 2026-04-27 | v1.5 | 新增 MOTOR PWM 驱动模块说明，补充 PWMA CH3/CH4 与 P2.4~P2.7 引脚占用 |
 | 2026-04-27 | v1.6 | 新增 Function/PID 定点 PID 控制器说明，补充 Keil 工程纳入状态与使用边界 |
+| 2026-05-05 | v1.7.18 | 补齐 WIRELESS 寄存器表、默认软件 SPI 快速分支、FIFO/TX 轮询时序与根目录 `Wireless/` 一致 |
+| 2026-05-05 | v1.7.16 | 补充 `ship_protocol.c` 当前单芯片半双工配对流、`seed` 对工作信道/同步字节的派生关系，以及配对响应严格校验与超时诊断说明 |
 | 2026-05-01 | v1.7.15 | QMI8658 默认切到旧 STC I2C 路径复测，并在启动日志标明 `i2c=legacy/ackdiag` |
 | 2026-05-01 | v1.7.14 | QMI8658 I2C 读写改为逐段 ACK 检查，启动日志标明 ACK 失败阶段 |
 | 2026-05-01 | v1.7.13 | AHRS 测试输出改为定点度数，零偏 ready 后再锁定相对 yaw，并放宽陀螺零偏学习阈值 |

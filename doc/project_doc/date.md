@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-05-01
- * @version v1.7.15
+ * @date    2026-05-05
+ * @version v1.7.18
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,66 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-05] - v1.7.18 WIRELESS根目录时序差异补齐
+
+### 优化改进
+- **[LT8920寄存器表补齐]** `g_lt8920_default_regs` 补入根目录 `LDT89xxconfig` 中的 `Reg7=0x0030` 和 `Reg50=0x0000`；`Reg50` 属于 FIFO 口，只写入不纳入读回校验。
+- **[软件SPI快速分支对齐]** 默认 `WIRELESS_SOFT_SPI_DELAY_US` 改为 `0`，并在软件 SPI 位传输中编译掉额外延时调用，使默认 GPIO SPI 更贴近根目录 `SlowSPI_io=0` 的快速流程。
+- **[FIFO额外延时关闭]** 默认 `LT8920_FIFO_DELAY_TEST` 改为 `0`，FIFO 写入不再插入额外 `1us` 间隔。
+- **[TX轮询间隔对齐]** `Wireless_Send()` 发射后仍先延时 `100us`，随后轮询 `Reg48 PKT` 的间隔改为 `1000us`，与根目录 `LT8920_TxData()` 当前寄存器 PKT 轮询路径一致。
+
+### 变更记录
+- **[引脚保持不变]** 本次只补齐寄存器与时序差异，不改变 `SCLK=P3.2`、`MISO=P3.3`、`MOSI=P3.4`、`CS=P3.5`、`RST=P5.0`、`ANT_SEL=P5.1`、`TXEN=P5.4`、`RXEN=P1.3`。
+
+### 开发者备注
+- 根目录 `Wireless` 的板级引脚与 `Code_boweny` 当前硬件不同；本次按 `Code_boweny` 固定引脚不变，只对齐 LT8920 寄存器配置和可工作收发时序。
+
+---
+
+## [2026-05-05] - v1.7.17 WIRELESS初始化层按根目录Wireless对齐
+
+### 优化改进
+- **[LT8920软件SPI默认]** `wireless_port.c` 默认改为软件 SPI，硬件 SPI4 仍可通过 `WIRELESS_SOFT_SPI_TEST=0` 切换；两种后端均固定使用 `P3.2/P3.3/P3.4/P3.5`，未新增测试片选脚。
+- **[软件SPI时序]** 软件 SPI 的 SCLK/MOSI/MISO 顺序按根目录 `Wireless/LT8920/LT8920_SPI.c` 当前有效流程收敛，CS 只由 `P3.5` 控制。
+- **[LT8920收发入口]** 新增芯片层 `LT8920_OpenRx()` 与 `LT8920_StartTxPacket()`，把 `Reg7 idle -> Reg52 clear -> Reg8 -> RX/TX` 等寄存器顺序集中到 `lt8920.c`。
+- **[FIFO语义对齐]** FIFO 写入保持 `Reg50 + len + payload`；FIFO 读取保持 `Reg50|0x80 -> len -> payload`，长度最大按 64 字节钳制后清 RX path。
+
+### 变更记录
+- **[引脚保持不变]** 无线引脚仍为 `SCLK=P3.2`、`MISO=P3.3`、`MOSI=P3.4`、`CS=P3.5`、`RST=P5.0`、`ANT_SEL=P5.1`、`TXEN=P5.4`、`RXEN=P1.3`。
+- **[发送流程对齐]** `Wireless_Send()` 发送前先打开 `TXEN` 并关闭 `RXEN`，再装载 FIFO、进入 TX、延时 `100us`、轮询 `Reg48 PKT`；完成后先让 LT8920 回 idle，再关闭 `TXEN`，必要时回 RX。
+- **[边界保持]** 本次未修改 `Driver/`、`User/STC32G.H` 和无线 public API，也未恢复正常业务运行模式宏。
+
+### 开发者备注
+- 当前默认仍是无线最小 TX 诊断运行配置，只是底层初始化和收发时序已按根目录可工作 `Wireless/` 对齐。
+- 若需要复测硬件 SPI4，只改 `User/Config.h` 中 `WIRELESS_SOFT_SPI_TEST` 为 `0`。
+
+---
+
+## [2026-05-05] - v1.7.16 WIRELESS配对阶段收敛与文档同步
+
+### Bug 修复
+- **[配对误判]** `SHIP_CMD_PAIR_RSP(0x0F)` 成功判定从“窗口内收到合法帧即成功”收紧为“payload 长度必须为 4 且必须与本轮 `seed[4]` 完全一致”。这样可以避免旧包、误包、串扰包把 `paired` 误置位。
+- **[配对重试闭环]** 船端配对调度补齐自动重试：单轮 `pair_left` 发完并等待超时后，只要总超时 `pair_total_timeout_ticks` 尚未耗尽，就会重新装载 `pair_left` 并继续下一轮配对。
+- **[配对信道日志]** 配对日志明确打印真实发射配对信道 `pair_ch=0x7F`，不再把派生工作信道误当作配对发射信道。
+
+### 优化改进
+- **[单芯片半双工配对]** 当前 `ship_protocol.c` 的配对阶段改为更贴近单颗 `LT8920` 的收发节奏：发送一个 `cmd=0x10` 后立刻切回 RX，先给一个短响应窗口，最后一包结束后再保留长窗口，避免长时间停留在单一方向。
+- **[超时诊断]** 配对窗口超时时增加一次性汇总诊断 `diag sync/pkt/crc/fifo`，用于区分“完全没看到空口活动”和“看到了活动但没形成可解析帧”。
+- **[日志降噪]** 删除已经确认无价值的发送寄存器刷屏日志，只保留必要的配对状态与异常日志，避免串口被底层重复寄存器值污染。
+- **[LT8920寄存器写入试验]** 默认寄存器 profile 从 `{reg, u16 value}` 改为 `{reg, high, low}`，初始化时直接按高字节、低字节分别发送，用于排除 16 位拆分或编译器整数处理对 LT8920 配置写入的影响。
+- **[LT8920成功时序对齐]** 按已验证工程的 LT8920 寄存器时序收敛当前单芯片驱动：复位等待改为高 10ms、低 100ms、高 100ms；默认 profile 不提前写 `Reg7`，初始化末尾补 `Reg8/Reg52/Reg7` 和 `Reg0/11/41` 校验；工作同步字 `SetSyncRegs()` 先 idle，再写 `Reg36`、清 `Reg37/38`、写 `Reg39`、清 FIFO；TX/RX 入口均先 idle/清 FIFO/写 `Reg8` 后进入对应模式，TX 轮询保留超时并在失败时强制 idle + 清 FIFO。
+
+### 变更记录
+- **[seed语义收敛]** 当前文档明确：`cmd=0x10` 的 4 字节 `seed` 不是单纯的持久化标签，而是当前配对输入；船端会基于它派生工作 RX/TX 信道与同步/密钥字节。若遥控器期待的 `seed` 不同，即使底层发射已确认成功，也可能完全无法配对。
+- **[当前实测结论]** 已通过底层日志确认船端真实发出了 9 字节配对包 `AA 06 10 seed0 seed1 seed2 seed3 xor BB`。因此当前剩余主要疑点已收敛到“对端是否接受当前 `seed`”以及“对端是否按当前时序/同步回包”，而不是“船端到底有没有发出去”。
+- **[文档同步]** 更新 `Code_boweny/Device/WIRELESS/README.md`、`doc/project_doc/total.md` 和 `ship_protocol.c` 注释，统一当前配对阶段真实行为。
+
+### 开发者备注
+- 当前默认固定 `seed` 仍为 `65 65 A0 65`，除非显式启用 `SHIP_PAIR_SEED_USE_CHIPID`，否则不会从芯片 ID 自动取种子。
+- 若后续仍无法配对，优先看最新超时日志中的 `diag sync/pkt/crc/fifo`，再判断是完全没看到对端、看到同步但没出包，还是 payload 不匹配。
 
 ---
 

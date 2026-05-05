@@ -8,31 +8,68 @@
 
 static u8 g_wireless_port_initialized = 0U;
 
+#ifndef WIRELESS_FRONTEND_BYPASS_TEST
+#define WIRELESS_FRONTEND_BYPASS_TEST 0
+#endif
+
+#ifndef WIRELESS_SOFT_SPI_TEST
+#define WIRELESS_SOFT_SPI_TEST 1
+#endif
+
+#ifndef WIRELESS_SOFT_SPI_DELAY_US
+#define WIRELESS_SOFT_SPI_DELAY_US 5
+#endif
+
+static void WirelessPort_SoftSpiClock(u8 level)
+{
+    P32 = (level != 0U) ? 1 : 0;
+}
+
+static void WirelessPort_SoftSpiMosi(u8 level)
+{
+    P34 = (level != 0U) ? 1 : 0;
+}
+
 s8 WirelessPort_Init(void)
 {
+#if !WIRELESS_SOFT_SPI_TEST
     SPI_InitTypeDef spi_init;
+#endif
 
     EAXSFR();
 
+#if !WIRELESS_FRONTEND_BYPASS_TEST
     P1_MODE_OUT_PP(GPIO_Pin_3);
     P1_PULL_UP_DISABLE(GPIO_Pin_3);
     P1_SPEED_HIGH(GPIO_Pin_3);
+#endif
 
     P3_MODE_OUT_PP(GPIO_Pin_2 | GPIO_Pin_4 | GPIO_Pin_5);
     P3_MODE_IN_HIZ(GPIO_Pin_3);
-    P3_PULL_UP_ENABLE(GPIO_Pin_3);
+    P3_PULL_UP_ENABLE(GPIO_Pin_3 | GPIO_Pin_5);
     P3_SPEED_HIGH(GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5);
 
-    P5_MODE_OUT_PP(GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_4);
-    P5_PULL_UP_DISABLE(GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_4);
-    P5_SPEED_HIGH(GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_4);
+    P5_MODE_OUT_PP(GPIO_Pin_0);
+    P5_PULL_UP_DISABLE(GPIO_Pin_0);
+    P5_SPEED_HIGH(GPIO_Pin_0);
+#if !WIRELESS_FRONTEND_BYPASS_TEST
+    P5_MODE_OUT_PP(GPIO_Pin_1 | GPIO_Pin_4);
+    P5_PULL_UP_DISABLE(GPIO_Pin_1 | GPIO_Pin_4);
+    P5_SPEED_HIGH(GPIO_Pin_1 | GPIO_Pin_4);
+#endif
 
     WirelessPort_SetCs(1U);
     WirelessPort_SetRst(1U);
+#if !WIRELESS_FRONTEND_BYPASS_TEST
     WirelessPort_SetTxEn(0U);
     WirelessPort_SetRxEn(0U);
     WirelessPort_SetAntSel(WIRELESS_PORT_ANT1);
+#endif
 
+#if WIRELESS_SOFT_SPI_TEST
+    WirelessPort_SoftSpiClock(0U);
+    WirelessPort_SoftSpiMosi(0U);
+#else
     SPI_SW(SPI_P35_P34_P33_P32);
 
     spi_init.SPI_Enable = ENABLE;
@@ -44,6 +81,7 @@ s8 WirelessPort_Init(void)
     spi_init.SPI_Speed = SPI_Speed_16;
     SPI_Init(&spi_init);
     NVIC_SPI_Init(DISABLE, Priority_0);
+#endif
 
     g_wireless_port_initialized = 1U;
     return SUCCESS;
@@ -72,6 +110,7 @@ void WirelessPort_SetRst(u8 level)
     P50 = (level != 0U) ? 1 : 0;
 }
 
+#if !WIRELESS_FRONTEND_BYPASS_TEST
 void WirelessPort_SetAntSel(u8 ant_sel)
 {
     P51 = (ant_sel == WIRELESS_PORT_ANT2) ? 1 : 0;
@@ -85,6 +124,34 @@ void WirelessPort_SetRxEn(u8 level)
 void WirelessPort_SetTxEn(u8 level)
 {
     P54 = (level != 0U) ? 1 : 0;
+}
+#else
+void WirelessPort_SetAntSel(u8 ant_sel)
+{
+}
+
+void WirelessPort_SetRxEn(u8 level)
+{
+}
+
+void WirelessPort_SetTxEn(u8 level)
+{
+}
+#endif
+
+u8 WirelessPort_GetAntSel(void)
+{
+    return (P51 != 0U) ? 1U : 0U;
+}
+
+u8 WirelessPort_GetRxEn(void)
+{
+    return (P13 != 0U) ? 1U : 0U;
+}
+
+u8 WirelessPort_GetTxEn(void)
+{
+    return (P54 != 0U) ? 1U : 0U;
 }
 
 void WirelessPort_DelayMs(u16 ms)
@@ -106,9 +173,31 @@ void WirelessPort_DelayUs(u16 us)
 
 u8 WirelessPort_SpiTransfer(u8 value)
 {
+#if WIRELESS_SOFT_SPI_TEST
+    u8 bit_mask;
+    u8 recv;
+
+    recv = 0U;
+    for (bit_mask = 0x80U; bit_mask != 0U; bit_mask >>= 1) {
+        WirelessPort_SoftSpiClock(1U);
+        WirelessPort_SoftSpiMosi((value & bit_mask) ? 1U : 0U);
+#if (WIRELESS_SOFT_SPI_DELAY_US > 0)
+        WirelessPort_DelayUs(WIRELESS_SOFT_SPI_DELAY_US);
+#endif
+        WirelessPort_SoftSpiClock(0U);
+        if (P33 != 0U) {
+            recv |= bit_mask;
+        }
+#if (WIRELESS_SOFT_SPI_DELAY_US > 0)
+        WirelessPort_DelayUs(WIRELESS_SOFT_SPI_DELAY_US);
+#endif
+    }
+    return recv;
+#else
     SPDAT = value;
     while (SPIF == 0) {
     }
     SPI_ClearFlag();
     return SPDAT;
+#endif
 }
