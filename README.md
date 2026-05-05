@@ -1,99 +1,82 @@
 # Black Pearl v1.1
 
-Chinese version: [README.zh-CN.md](README.zh-CN.md)
+Black Pearl v1.1 是一个基于 STC32G MCU 的嵌入式控制工程，使用 Keil MDK / C251 开发。当前固件集成了 GPS、IMU、地磁计、无线通信、电机 PWM 输出、日志、滤波和定点 PID 控制等模块。
 
-Black Pearl v1.1 is an embedded control project based on the STC32G MCU and built with Keil MDK / C251. The current firmware integrates GPS, IMU, magnetometer, wireless communication, motor PWM output, logging, filtering, and fixed-point PID control.
+工程采用分层结构组织：`User/` 负责系统入口、初始化、主循环和任务调度；`Driver/` 保存 STC 官方底层驱动；`App/` 保存官方示例应用；`Code_boweny/` 保存项目自定义模块。
 
-The project is organized around a layered structure: system entry and scheduling in `User/`, official peripheral drivers in `Driver/`, vendor example code in `App/`, and project-specific modules in `Code_boweny/`.
+## 项目概览
 
-## Project Overview
-
-| Item | Description |
-|------|-------------|
+| 项目 | 说明 |
+|------|------|
 | MCU | STC32G |
-| Main clock | 24 MHz |
-| Toolchain | Keil MDK / C251 |
-| Log port | UART1, `P3.0 / P3.1` |
-| GPS port | UART2, `P1.0 / P1.1` |
-| I2C bus | `P1.4 / P1.5` |
-| Wireless chipset | LT8920 + KCT8206L |
-| Motor output | PWMA CH3 / CH4 |
+| 主频 | 24 MHz |
+| 编译环境 | Keil MDK / C251 |
+| 日志串口 | UART1，`P3.0 / P3.1` |
+| GPS 串口 | UART2，`P1.0 / P1.1` |
+| I2C 总线 | `P1.4 / P1.5` |
+| 无线芯片 | LT8920 + KCT8206L |
+| 电机输出 | PWMA CH3 / CH4 |
 
-## Directory Structure
+## 目录结构
 
 ```text
 Black_Pearl_v1.1/
-├── User/                     # System entry, initialization, main loop, task scheduler
-├── Driver/                   # Official STC peripheral driver library
-├── App/                      # Official example application layer
-├── Code_boweny/              # Project-specific modules
+├── User/                     # 系统入口、初始化、主循环、任务调度
+├── Driver/                   # STC 官方底层外设库
+├── App/                      # 官方示例应用层
+├── Code_boweny/              # 项目自定义模块
 │   ├── Function/
-│   │   ├── Log/              # UART1 logging system
-│   │   ├── Filter/           # Q8 fixed-point low-pass filter
-│   │   └── PID/              # Q10 fixed-point PID controller
+│   │   ├── Log/              # UART1 日志系统
+│   │   ├── Filter/           # Q8 定点低通滤波
+│   │   └── PID/              # Q10 定点 PID 控制器
 │   └── Device/
-│       ├── GPS/              # GPS NMEA0183 parser
-│       ├── QMI8658/          # IMU driver
-│       ├── QMC6309/          # Magnetometer driver
-│       ├── WIRELESS/         # LT8920 wireless driver
-│       └── MOTOR/            # Dual motor PWM driver
-├── RVMDK/                    # Keil project files
-└── doc/                      # Project documentation
+│       ├── GPS/              # GPS NMEA0183 解析
+│       ├── QMI8658/          # IMU 驱动
+│       ├── QMC6309/          # 地磁计驱动
+│       ├── WIRELESS/         # LT8920 无线驱动
+│       └── Motor/            # 双电机 PWM 驱动
+├── RVMDK/                    # Keil 工程文件
+└── doc/                      # 项目文档
 ```
 
-## Enabled Modules
+## 已启用模块
 
 ### GPS
 
-The GPS module receives NMEA0183 data through UART2. It currently supports `GGA`, `RMC`, `GSA`, `GSV`, and `VTG` sentences.
+GPS 模块通过 UART2 接收 NMEA0183 数据，支持 `GGA`、`RMC`、`GSA`、`GSV`、`VTG` 语句。解析器使用内部 FIFO 和逐字符状态机，只接收通过 XOR 校验的完整语句，上层通过 `GPS_GetState()` 读取定位状态。
 
-The parser uses an internal FIFO and incremental state machine. Sentences are accepted only after XOR checksum validation, and parsed positioning data is exposed through `GPS_GetState()`.
+### IMU 与地磁计
 
-### IMU and Magnetometer
+工程当前使用 `QMI8658` 作为 IMU，使用 `QMC6309` 作为地磁计。两颗器件共用硬件 I2C 总线 `P1.4 / P1.5`。
 
-The project currently uses:
+### 无线通信
 
-- `QMI8658` as the IMU, polled at high rate in the main loop
-- `QMC6309` as the magnetometer
+无线模块基于 `LT8920 + KCT8206L`，使用 SPI4。当前实现为单芯片半双工通信：默认保持 RX，发送时短暂切到 TX，发送完成后回到 RX；启动时执行双天线扫描，收包状态通过寄存器轮询判断。
 
-Both devices share the hardware I2C bus on `P1.4 / P1.5`.
+### 电机驱动
 
-### Wireless Communication
+电机驱动使用 `PWMA CH3 / CH4` 控制左右双电机。
 
-The wireless module is based on `LT8920 + KCT8206L` and uses SPI4.
+| 电机 | PWM 引脚 |
+|------|----------|
+| 左电机 | `P2.4 / P2.5` |
+| 右电机 | `P2.6 / P2.7` |
 
-Current behavior:
+速度范围为 `-1000` 到 `+1000`，模块内部自动限幅。为避免上电误动作，电机模块默认不在系统启动阶段自动初始化。
 
-- Single-chip half-duplex communication
-- RX by default
-- TX is enabled only during transmission, then the module returns to RX
-- Dual-antenna scan during startup
-- Register polling instead of external interrupt handling
+### PID 控制器
 
-### Motor Driver
-
-The motor driver uses `PWMA CH3 / CH4` for dual motor output.
-
-| Motor | PWM Pins |
-|-------|----------|
-| Left motor | `P2.4 / P2.5` |
-| Right motor | `P2.6 / P2.7` |
-
-The speed range is `-1000` to `+1000`, with internal saturation. The motor module is not initialized automatically during system startup to avoid unexpected motion after power-on.
-
-### PID Controller
-
-The PID module provides a generic positional PID controller using Q10 fixed-point parameters:
+PID 模块提供通用位置式 PID 控制器，参数使用 Q10 定点格式：
 
 ```text
 1024 = 1.0
 ```
 
-The module only calculates control output. It does not directly access PWM, GPIO, sensors, or communication peripherals. It is intended as a base component for future speed, heading, and attitude control loops.
+该模块只计算控制输出，不直接操作 PWM、GPIO、传感器或通信外设，适合作为速度环、航向环和姿态控制环的基础组件。
 
-## Startup Flow
+## 启动流程
 
-The current `SYS_Init()` flow is:
+当前 `SYS_Init()` 主要流程：
 
 ```text
 EAXSFR()
@@ -112,7 +95,7 @@ EAXSFR()
 -> QMI8658_PowerOnSelfTest()
 ```
 
-## Main Loop
+## 主循环
 
 ```c
 Wireless_MinimalTestUnit();
@@ -128,44 +111,42 @@ while (1)
 }
 ```
 
-The main loop currently handles GPS parsing, wireless polling, ship protocol processing, wireless signal search, Timer0-driven tasks, and high-rate IMU sampling.
+主循环负责 GPS 数据解析、无线轮询、船端协议处理、无线信号搜索、Timer0 任务调度和 IMU 高频采样。
 
-## Resource Usage
+## 资源占用
 
-| Resource | Usage |
-|----------|-------|
-| UART1 | Log output |
+| 资源 | 用途 |
+|------|------|
+| UART1 | 日志输出 |
 | UART2 | GPS |
 | I2C | QMI8658 / QMC6309 |
-| SPI4 | LT8920 wireless module |
-| Timer0 | 1 ms system tick |
-| Timer1 | UART1 baud-rate generator |
-| Timer2 | UART2 baud-rate generator |
-| PWMA CH3 | Left motor PWM |
-| PWMA CH4 | Right motor PWM |
+| SPI4 | LT8920 无线模块 |
+| Timer0 | 1 ms 系统节拍 |
+| Timer1 | UART1 波特率发生器 |
+| Timer2 | UART2 波特率发生器 |
+| PWMA CH3 | 左电机 PWM |
+| PWMA CH4 | 右电机 PWM |
 
-## Development Notes
+## 开发注意事项
 
-- `Driver/` contains the official STC driver library and should generally remain unchanged.
-- Floating-point arithmetic should be avoided in firmware modules.
-- `%f` should not be used in log output.
-- UART2 depends on Timer2, so example modules that reuse Timer2 must stay disabled.
-- After the motor module occupies `P2.4` to `P2.7`, these pins should not be reused for SPI, LCM, or general GPIO tasks.
-- The wireless module initializes SPI4 internally and does not use the original SPI example initialization flow.
+- `Driver/` 保存 STC 官方底层库，原则上不修改。
+- 固件模块中应避免使用浮点运算。
+- 日志输出中不要使用 `%f`。
+- UART2 依赖 Timer2，因此会复用 Timer2 的示例模块需要保持关闭。
+- 电机模块占用 `P2.4` 到 `P2.7` 后，这些引脚不应再复用为 SPI、LCM 或普通 GPIO。
+- 无线模块自行初始化 SPI4，不使用原示例中的 SPI 初始化流程。
 
-## Documentation
+## 相关文档
 
-More detailed documentation is available in:
+- `doc/project_doc/total.md`：工程总览
+- `doc/project_doc/date.md`：变更记录
+- `doc/build_doc/README_GPS.md`：GPS 模块说明
+- `doc/build_doc/README_wireless.md`：无线模块说明
+- `Code_boweny/Device/Motor/README.md`：电机驱动说明
+- `Code_boweny/Function/PID/README.md`：PID 控制器说明
 
-- `doc/project_doc/total.md` - project overview
-- `doc/project_doc/date.md` - change log
-- `doc/build_doc/README_GPS.md` - GPS module notes
-- `doc/build_doc/README_wireless.md` - wireless module notes
-- `Code_boweny/Device/MOTOR/README.md` - motor driver notes
-- `Code_boweny/Function/PID/README.md` - PID controller notes
+## 当前版本
 
-## Version
+当前工程版本：`Black Pearl v1.1`
 
-Current project version: `Black Pearl v1.1`
-
-This README is based on the project state documented on 2026-04-27.
+本文档基于 2026-04-27 的工程状态整理。

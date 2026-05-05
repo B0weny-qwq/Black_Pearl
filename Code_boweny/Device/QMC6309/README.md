@@ -1,123 +1,107 @@
-# QMC6309 Driver Notes
+# QMC6309 地磁计驱动说明
 
-## Summary
+## 概述
 
-- Device: QMC6309 3-axis magnetometer
-- Runtime path: `User/System_init.c` -> `Code_boweny/Device/QMC6309/QMC6309.c`
-- Bus: STC32G hardware I2C on `P1.4(SDA) / P1.5(SCL)`
-- Address probe order: primary `0x7C`, alt `0x0C`
-- Current default config: `CONTROL_1=0x1B`, `CONTROL_2=0x10` (10Hz)
+`Code_boweny/Device/QMC6309/` 是 QMC6309 三轴地磁计驱动模块，运行链路为 `User/System_init.c` -> `Code_boweny/Device/QMC6309/QMC6309.c`。
 
-## Current Bring-Up Result
+## 当前配置
 
-The current runtime chain has been verified to work:
+| 项目 | 说明 |
+|------|------|
+| 器件 | QMC6309 三轴地磁计 |
+| 总线 | STC32G 硬件 I2C |
+| 引脚 | `P1.4(SDA) / P1.5(SCL)` |
+| 地址探测顺序 | 主地址 `0x7C`，备用地址 `0x0C` |
+| 芯片 ID | `0x90` |
+| 默认配置 | `CONTROL_1=0x1B`，`CONTROL_2=0x10`，10Hz |
+
+## 当前验证结果
+
+当前运行链路已经验证可用：
 
 - `Probe addr=0x7C write=0xF8: ACK`
 - `CHIP_ID=0x90`
 - `CTRL1=0x1B CTRL2=0x10`
-- XYZ readback returns valid signed data
+- XYZ 读数返回有效有符号数据
 
-## Important Files
+## 重要文件
 
-- `QMC6309.c`: driver implementation
-- `QMC6309.h`: public constants and API
-- `doc/device_doc/QMC6309.md`: device behavior and register notes
-- `doc/project_doc/total.md`: project-level bug record and I2C XSFR notes
+- `QMC6309.c`：驱动实现。
+- `QMC6309.h`：公开常量和 API。
+- `doc/device_doc/QMC6309.md`：器件行为和寄存器说明。
+- `doc/project_doc/total.md`：项目级问题记录和 I2C XSFR 说明。
 
-## Bug Record
+## 问题记录
 
-### 1. XSFR / EAXFR issue
+### XSFR / EAXFR 问题
 
-The STC32G hardware I2C registers are in the extended SFR area:
+STC32G 硬件 I2C 寄存器位于扩展 SFR 区域，例如：
 
 - `I2CCFG`
 - `I2CMSCR`
 - `I2CMSST`
 
-If `EAXFR` is not enabled first, writes to these registers do not actually hit the I2C controller. The observed symptom was:
+如果没有先启用 `EAXFR`，对这些寄存器的写入不会真正到达 I2C 控制器。典型现象是日志停在第一次探测，代码进入 `Start()` 后底层 `Wait()` 永远不完成。
 
-- logs stopped at the first probe attempt
-- the code appeared to enter `Start()`
-- the low-level `Wait()` never completed
+修复方式：在 `SYS_Init()` 开始处调用 `EAXSFR()`。
 
-Fix:
+### P1.4 / P1.5 被 App 初始化覆盖
 
-- call `EAXSFR()` at the start of `SYS_Init()`
+早期 bring-up 失败曾由 `ADtoUART_init()` 将所有 `P1.x` 引脚重新配置为高阻输入导致，覆盖了硬件 I2C 的 `P1.4/P1.5` 引脚模式。
 
-### 2. P1.4 / P1.5 overwritten by App init
+当前状态：
 
-Earlier bring-up failures were once caused by `ADtoUART_init()` reconfiguring all `P1.x` pins to high-impedance input, which overwrote the hardware I2C pin mode for `P1.4/P1.5`.
+- `APP_config()` 不再启用 `ADtoUART_init()`。
+- `SYS_Init()` 仍保留 `APP_config()` 之后的 `Sensor_I2C_prepare()` 作为防御性恢复。
+- 共享 I2C 总线会在 `QMC6309_Init()` 和 `QMI8658_Init()` 前显式恢复。
 
-Current project status:
+### 小整数日志误导
 
-- `APP_config()` no longer enables `ADtoUART_init()`
-- `SYS_Init()` still keeps `Sensor_I2C_prepare()` after `APP_config()` as a defensive restore step
-- the shared I2C bus is therefore recovered explicitly before `QMC6309_Init()` and `QMI8658_Init()`
+早期调试日志中出现类似 `257` 的值，这不是实际 GPIO/I2C 状态，而是日志可变参数中小整数格式化不安全导致。
 
-Fix:
+建议：
 
-- restore `P1.4/P1.5` to open-drain with pull-up after `APP_config()`
-- restore `I2C_SW(I2C_P14_P15)`
-- re-run `I2C_config()`
+- 不要直接用 `%u` 打印 `bit` 状态。
+- 优先输出 `H/L`、`Y/N` 或先扩展为普通整数。
 
-### 3. Misleading small-integer logs
+## 日志策略
 
-Earlier debug logs showed values like `257`, which were not real GPIO/I2C states. That came from unsafe small-integer varargs formatting in the logging path.
+保留的日志：
 
-Fix:
+- 地址探测结果
+- 选中的 I2C 地址
+- ready / chip-id 结果
+- 控制寄存器回读
+- 总线恢复和错误日志
+- 成功 `WriteReg` 的关键数据日志
 
-- avoid logging `bit` states as numeric `%u`
-- use `H/L`, `Y/N`, or widened integer values
+已移除或弱化的日志：
 
-## Current Logging
+- `Main.c` 中临时 `TEST` 日志
+- 一次性 dump/read 自测日志
+- 重复初始化 debug 日志
 
-The driver now keeps the useful logs and removes most redundant startup noise.
+## API
 
-Kept:
+```c
+s8 QMC6309_Init(void);
+s8 QMC6309_ReadXYZ(int16 *x, int16 *y, int16 *z);
+s8 QMC6309_ReadXYZFiltered(int16 *x, int16 *y, int16 *z);
+u8 QMC6309_ReadID(void);
+s8 QMC6309_SetODR(u8 odr);
+s8 QMC6309_Wait_Ready(u16 timeout_ms);
+void QMC6309_DumpRegs(u8 target_addr);
+```
 
-- address probe result
-- selected address
-- ready / chip-id result
-- control register readback
-- bus recovery / error logs
-- successful `WriteReg` data logs
+## 低通滤波接入
 
-Standalone runtime probe:
+原始读取路径保留：
 
-- `User/Main.c` calls `MAG_StandalonePoll()` every 1000ms when `AHRS_TEST_ONLY=0`
-- `AHRS_TEST_ONLY=1` disables the standalone MAG log; AHRS still reads filtered MAG data internally for yaw correction
-- log format: `[MAG] I: test raw=x y z norm1=n`
-- this path reads `QMC6309_ReadXYZ()` directly and does not depend on QMI8658/AHRS readiness
+```text
+QMC6309_ReadXYZ()
+```
 
-Removed:
-
-- temporary `TEST` logs in `Main.c`
-- one-off dump/read self-test logs from `Main.c`
-- some repetitive init debug logs
-
-## APIs
-
-Public APIs:
-
-- `QMC6309_Init()`
-- `QMC6309_ReadXYZ()`
-- `QMC6309_ReadXYZFiltered()`
-- `QMC6309_ReadID()`
-- `QMC6309_SetODR()`
-- `QMC6309_Wait_Ready()`
-- `QMC6309_DumpRegs()`
-
-## Low-Pass Filter Integration
-
-The raw read path is still preserved:
-
-- `QMC6309_ReadXYZ()` returns raw magnetometer data
-
-The new filtered read path is:
-
-- `QMC6309_ReadXYZFiltered()`
-
-Runtime chain:
+滤波读取路径：
 
 ```text
 QMC6309_ReadXYZFiltered()
@@ -125,8 +109,8 @@ QMC6309_ReadXYZFiltered()
   -> Filter_MagLowPass()
 ```
 
-Notes:
+注意：
 
-- the first valid sample is passed through directly
-- invalid raw frames do not update filter state
-- filter state is reset after each successful `QMC6309_Init()`
+- 首帧有效数据直接透传。
+- 无效原始帧不会更新滤波状态。
+- 每次 `QMC6309_Init()` 成功后会复位滤波状态。

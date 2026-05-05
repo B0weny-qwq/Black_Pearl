@@ -1,18 +1,16 @@
 /**
  * @file    Log.h
- * @brief   轻量级 UART1 日志输出模块 — 带标签、分级别的日志功能
+ * @brief   UART1 轻量级日志输出接口。
  * @author  boweny
- * @date    2026-04-22
+ * @date    2026-05-05
  * @version v1.0
  *
  * @details
- * - 基于 UART1 (P3.1=TXD, P3.0=RXD) 的轻量级日志输出
- * - 提供 4 级日志: INFO / WARN / ERROR / DEBUG
- * - 最大支持 127 字符格式化消息 (不含 \r\n)
- * - 使用前必须先初始化 UART1，再调用 log_init()
+ * 基于 UART1 提供带标签、分级别的格式化日志输出。支持 INFO、WARN、
+ * ERROR、DEBUG 四个级别，以及无级别的原始 printf 风格输出。
  *
- * @note    禁止使用浮点数 (%f) 格式化，请先将浮点值转为整数
- * @note    log_init() 必须在 UART1_Init() 之后调用
+ * @note    使用前必须先初始化 UART1，再调用 log_init() 使能日志输出。
+ * @note    STC32G 工程中避免使用 %f，请将浮点量转换为整数后再输出。
  *
  * @see     Code_boweny/Function/Log/Log.c
  */
@@ -23,64 +21,60 @@
 #include "..\..\..\Driver\inc\STC32G_UART.h"
 #include <stdarg.h>
 
-/*---------------------------------- 日志级别宏 ----------------------------------*/
-
-#define LOGI(tag, ...)   log_info(tag, __VA_ARGS__)
-#define LOGW(tag, ...)   log_warn(tag, __VA_ARGS__)
-#define LOGE(tag, ...)   log_error(tag, __VA_ARGS__)
-#define LOGD(tag, ...)   log_debug(tag, __VA_ARGS__)
-
-/*---------------------------------- 函数声明 ----------------------------------*/
+#define LOGI(tag, ...)   log_info(tag, __VA_ARGS__)   /**< 输出 INFO 级别日志。 */
+#define LOGW(tag, ...)   log_warn(tag, __VA_ARGS__)   /**< 输出 WARN 级别日志。 */
+#define LOGE(tag, ...)   log_error(tag, __VA_ARGS__)  /**< 输出 ERROR 级别日志。 */
+#define LOGD(tag, ...)   log_debug(tag, __VA_ARGS__)  /**< 输出 DEBUG 级别日志。 */
 
 /**
- * @brief   初始化日志系统
+ * @brief   初始化日志系统。
  * @return  none
  *
- * @details 将 log_ready 标志置 1，使所有 LOG* 函数生效
- * @note    必须在 UART1_Init() 之后调用
+ * @details
+ * 置位内部日志就绪标志，使 LOGI/LOGW/LOGE/LOGD 和 log_printf 输出生效。
  */
 void log_init(void);
 
 /**
- * @brief      带标签的 INFO 级别日志
- * @param[in]  tag   日志标签 (如 "IMU", "I2C")
- * @param[in]  fmt   格式化字符串
- * @param[in]  ...   可变参数
+ * @brief      输出带标签的 INFO 级别日志。
+ * @param[in]  tag  日志标签字符串，例如 "IMU"。
+ * @param[in]  fmt  printf 风格格式化字符串。
+ * @param[in]  ...  可变参数。
  * @return     none
  */
 void log_info(u8 *tag, u8 *fmt, ...);
 
 /**
- * @brief      带标签的 WARN 级别日志
- * @param[in]  tag   日志标签
- * @param[in]  fmt   格式化字符串
- * @param[in]  ...   可变参数
+ * @brief      输出带标签的 WARN 级别日志。
+ * @param[in]  tag  日志标签字符串。
+ * @param[in]  fmt  printf 风格格式化字符串。
+ * @param[in]  ...  可变参数。
  * @return     none
  */
 void log_warn(u8 *tag, u8 *fmt, ...);
 
 /**
- * @brief      带标签的 ERROR 级别日志
- * @param[in]  tag   日志标签
- * @param[in]  fmt   格式化字符串
- * @param[in]  ...   可变参数
+ * @brief      输出带标签的 ERROR 级别日志。
+ * @param[in]  tag  日志标签字符串。
+ * @param[in]  fmt  printf 风格格式化字符串。
+ * @param[in]  ...  可变参数。
  * @return     none
  */
 void log_error(u8 *tag, u8 *fmt, ...);
 
 /**
- * @brief      带标签的 DEBUG 级别日志
- * @param[in]  tag   日志标签
- * @param[in]  fmt   格式化字符串
- * @param[in]  ...   可变参数
+ * @brief      输出带标签的 DEBUG 级别日志。
+ * @param[in]  tag  日志标签字符串。
+ * @param[in]  fmt  printf 风格格式化字符串。
+ * @param[in]  ...  可变参数。
  * @return     none
  */
 void log_debug(u8 *tag, u8 *fmt, ...);
 
 /**
- * @brief      原始日志输出 (无标签、无级别)
- * @param[in]  fmt   格式化字符串
- * @param[in]  ...   可变参数
+ * @brief      输出无标签、无级别的原始日志。
+ * @param[in]  fmt  printf 风格格式化字符串。
+ * @param[in]  ...  可变参数。
  * @return     none
  */
 void log_printf(u8 *fmt, ...);

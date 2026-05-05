@@ -1,67 +1,171 @@
+/**
+ * @file    wireless.h
+ * @brief   LT8920 无线链路管理层接口。
+ * @author  boweny
+ * @date    2026-05-05
+ * @version v1.0
+ *
+ * @details
+ * 本模块在 LT8920 底层驱动之上提供初始化、收发队列、天线扫描、
+ * 配对测试和链路参数切换接口。业务层通过本文件访问无线链路状态。
+ *
+ * @see     Code_boweny/Device/WIRELESS/wireless.c
+ */
+
 #ifndef __WIRELESS_H__
 #define __WIRELESS_H__
 
 #include "config.h"
 
-#define WIRELESS_OK                SUCCESS
-#define WIRELESS_ERR_PARAM         (-2)
-#define WIRELESS_ERR_STATE         (-3)
-#define WIRELESS_ERR_IO            (-4)
-#define WIRELESS_ERR_TIMEOUT       (-5)
-#define WIRELESS_ERR_EMPTY         (-6)
-#define WIRELESS_ERR_OVERFLOW      (-7)
-#define WIRELESS_ERR_VERIFY        (-8)
+#define WIRELESS_OK                SUCCESS  /**< 无线操作成功。 */
+#define WIRELESS_ERR_PARAM         (-2)     /**< 参数非法或空指针。 */
+#define WIRELESS_ERR_STATE         (-3)     /**< 当前状态不允许执行该操作。 */
+#define WIRELESS_ERR_IO            (-4)     /**< 底层通信或外设读写失败。 */
+#define WIRELESS_ERR_TIMEOUT       (-5)     /**< 等待发送、接收或状态变化超时。 */
+#define WIRELESS_ERR_EMPTY         (-6)     /**< 接收队列或 FIFO 为空。 */
+#define WIRELESS_ERR_OVERFLOW      (-7)     /**< 队列或缓冲区溢出。 */
+#define WIRELESS_ERR_VERIFY        (-8)     /**< 寄存器回读、CRC 或帧校验失败。 */
 
-#define WIRELESS_TAG               "WL"
+#define WIRELESS_TAG               "WL"  /**< 日志输出使用的模块标签。 */
 
-#define WIRELESS_ANT1              0U
-#define WIRELESS_ANT2              1U
+#define WIRELESS_ANT1              0U  /**< 1 号天线。 */
+#define WIRELESS_ANT2              1U  /**< 2 号天线。 */
 
-#define WIRELESS_MODE_IDLE         0U
-#define WIRELESS_MODE_RX           1U
-#define WIRELESS_MODE_TX           2U
+#define WIRELESS_MODE_IDLE         0U  /**< 无线芯片空闲模式。 */
+#define WIRELESS_MODE_RX           1U  /**< 无线芯片接收模式。 */
+#define WIRELESS_MODE_TX           2U  /**< 无线芯片发送模式。 */
 
-#define WIRELESS_RX_QUEUE_DEPTH    4U
-#define WIRELESS_SCAN_SAMPLE_COUNT 16U
-#define WIRELESS_SCAN_SAMPLE_MS    2U
-#define WIRELESS_SIGNAL_RSSI_MIN   12U
-#define WIRELESS_SEARCH_POLL_DIV   32U
-#define WIRELESS_TX_TIMEOUT_LOOPS  1000U
-#define WIRELESS_TX_PKT_POLL_US    1000U
+#define WIRELESS_RX_QUEUE_DEPTH    4U     /**< 接收软件队列深度。 */
+#define WIRELESS_SCAN_SAMPLE_COUNT 16U    /**< 天线扫描时每路采样次数。 */
+#define WIRELESS_SCAN_SAMPLE_MS    2U     /**< 天线扫描单次采样间隔，单位 ms。 */
+#define WIRELESS_SIGNAL_RSSI_MIN   12U    /**< 判定存在有效信号的最小 RSSI。 */
+#define WIRELESS_SEARCH_POLL_DIV   32U    /**< 搜索信号轮询分频系数。 */
+#define WIRELESS_TX_TIMEOUT_LOOPS  1000U  /**< 发送完成轮询最大循环次数。 */
+#define WIRELESS_TX_PKT_POLL_US    1000U  /**< 发送完成轮询间隔，单位 us。 */
 
+/**
+ * @brief   无线链路运行状态快照。
+ */
 typedef struct
 {
-    u8 initialized;
-    u8 ready;
-    u8 mode;
-    u8 antenna;
-    u8 scan_has_signal;
-    s8 last_error;
+    u8 initialized;         /**< 初始化标志，1=已初始化。 */
+    u8 ready;               /**< 链路可用标志，1=底层芯片和参数已就绪。 */
+    u8 mode;                /**< 当前工作模式，取值见 WIRELESS_MODE_*。 */
+    u8 antenna;             /**< 当前使用天线，取值见 WIRELESS_ANT1/WIRELESS_ANT2。 */
+    u8 scan_has_signal;     /**< 最近一次扫描是否检测到有效信号。 */
+    s8 last_error;          /**< 最近一次无线操作错误码。 */
 
-    u16 tx_ok_count;
-    u16 rx_ok_count;
-    u16 crc_error_count;
-    u16 queue_overflow_count;
-    u16 rx_drop_count;
+    u16 tx_ok_count;        /**< 成功发送帧计数。 */
+    u16 rx_ok_count;        /**< 成功接收帧计数。 */
+    u16 crc_error_count;    /**< CRC 或帧校验错误计数。 */
+    u16 queue_overflow_count; /**< 接收软件队列溢出计数。 */
+    u16 rx_drop_count;      /**< 接收丢弃帧计数。 */
 
-    u16 antenna_rssi_ant1;
-    u16 antenna_rssi_ant2;
+    u16 antenna_rssi_ant1;  /**< 1 号天线最近一次扫描 RSSI 累计/评分。 */
+    u16 antenna_rssi_ant2;  /**< 2 号天线最近一次扫描 RSSI 累计/评分。 */
 } Wireless_State_t;
 
+/**
+ * @brief   初始化无线链路。
+ * @return  SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_Init(void);
+
+/**
+ * @brief   关闭无线链路并释放板级端口状态。
+ * @return  SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_Deinit(void);
+
+/**
+ * @brief   轮询无线链路，接收新数据并维护内部状态。
+ * @return  SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_Poll(void);
+
+/**
+ * @brief      发送一帧无线数据。
+ * @param[in]  buf  指向待发送数据缓冲区的指针。
+ * @param[in]  len  待发送数据长度，单位 byte。
+ * @return     SUCCESS=发送完成，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_Send(const u8 *buf, u8 len);
+
+/**
+ * @brief      从无线接收队列读取一帧数据。
+ * @param[out] buf      接收缓冲区指针。
+ * @param[in]  buf_len  接收缓冲区容量，单位 byte。
+ * @param[out] out_len  实际读出的帧长度，单位 byte。
+ * @return     SUCCESS=读取成功，WIRELESS_ERR_EMPTY=无数据，其他 WIRELESS_ERR_* 表示失败。
+ */
 s8 Wireless_Receive(u8 *buf, u8 buf_len, u8 *out_len);
+
+/**
+ * @brief      手动切换无线天线。
+ * @param[in]  ant_sel  目标天线，取值见 WIRELESS_ANT1/WIRELESS_ANT2。
+ * @return     SUCCESS=切换成功，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_SetAntenna(u8 ant_sel);
+
+/**
+ * @brief      获取无线链路状态快照。
+ * @param[out] state  指向状态结构体的输出指针。
+ * @return     SUCCESS=获取成功，WIRELESS_ERR_PARAM=空指针。
+ */
 s8 Wireless_GetState(Wireless_State_t *state);
+
+/**
+ * @brief   重新扫描天线并选择信号较好的通道。
+ * @return  SUCCESS=扫描完成，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_RescanAntenna(void);
+
+/**
+ * @brief   按低频分频节奏搜索无线信号。
+ * @return  SUCCESS=本次轮询完成，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_SearchSignalPoll(void);
+
+/**
+ * @brief   运行最小无线收发自测试流程。
+ * @return  SUCCESS=测试通过，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_RunMinimalTest(void);
+
+/**
+ * @brief      运行发送诊断突发测试。
+ * @param[in]  log_detail  1=输出详细日志，0=只输出关键结果。
+ * @return     SUCCESS=测试完成，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_RunTxDiagBurst(u8 log_detail);
+
+/**
+ * @brief      运行配对发送端单向诊断测试。
+ * @param[in]  log_detail  1=输出详细日志，0=只输出关键结果。
+ * @return     SUCCESS=测试完成，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_RunPairTxOnlyTest(u8 log_detail);
+
+/**
+ * @brief      设置无线工作信道。
+ * @param[in]  channel  LT8920 信道号。
+ * @return     SUCCESS=设置成功，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_SetChannel(u8 channel);
+
+/**
+ * @brief      设置无线同步字。
+ * @param[in]  sync_word  32 位同步字。
+ * @return     SUCCESS=设置成功，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_SetSyncWord(u32 sync_word);
+
+/**
+ * @brief      直接设置 LT8920 同步寄存器值。
+ * @param[in]  reg36  同步字寄存器 36 的值。
+ * @param[in]  reg39  同步字寄存器 39 的值。
+ * @return     SUCCESS=设置成功，WIRELESS_ERR_* 表示失败原因。
+ */
 s8 Wireless_SetSyncRegs(u16 reg36, u16 reg39);
 
 #endif

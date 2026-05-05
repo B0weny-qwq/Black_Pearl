@@ -1,23 +1,22 @@
 /**
  * @file    GPS.h
- * @brief   GPS NMEA0183 解析模块 — UART2 接收与状态读取接口
+ * @brief   GPS/GNSS NMEA0183 解析模块接口。
  * @author  boweny
- * @date    2026-04-24
+ * @date    2026-05-05
  * @version v1.0
  *
  * @details
- * - 基于 UART2 接收 GPS / 北斗 / 多模 GNSS 的 NMEA0183 语句
- * - 使用 Driver 层 UART2 中断缓冲区作为输入源，在模块内完成 FIFO 缓冲与逐字符状态机解析
- * - 支持 GGA / RMC / GSA / GSV / VTG 五类标准语句
- * - 所有位置、速度、航向和精度字段均使用定点整数保存，禁止浮点运算
+ * 基于 UART2 接收 GPS、北斗或多模 GNSS 模块输出的 NMEA0183 语句，
+ * 在模块内部完成 FIFO 缓冲、逐字符状态机解析和状态快照维护。
+ * 支持 GGA、RMC、GSA、GSV、VTG 等常见语句。
  *
  * @hardware
- *   - UART2: RX=P1.0 / TX=P1.1
- *   - 波特率发生器: Timer2（UART2 固定占用）
- *   - 系统时钟: Fosc = 24MHz
+ * - UART2: RX=P1.0 / TX=P1.1
+ * - 波特率发生器: Timer2
+ * - 系统时钟: Fosc = 24MHz
  *
- * @note    本模块不修改 Driver 层 ISR，接收链路为 RX2_Buffer -> GPS FIFO -> NMEA Parser
- * @note    调用顺序: GPS_Init() -> 在主循环中高频调用 GPS_Poll() -> GPS_GetState()
+ * @note    本模块不修改 Driver 层 ISR，接收链路为 RX2_Buffer -> GPS FIFO -> NMEA Parser。
+ * @note    调用顺序：GPS_Init() -> 主循环高频调用 GPS_Poll() -> GPS_GetState()。
  *
  * @see     Code_boweny/Device/GPS/GPS.c
  */
@@ -27,106 +26,99 @@
 
 #include "config.h"
 
-/*---------------------------------- 编译期配置 ----------------------------------*/
+#define GPS_BAUDRATE               115200UL  /**< GPS UART 默认波特率。 */
+#define GPS_RAW_ECHO_ENABLE        0U        /**< 原始 NMEA 字节回显开关，1=开启。 */
+#define GPS_UART_FIFO_SIZE         256U      /**< GPS 模块内部 UART FIFO 大小。 */
+#define GPS_SENTENCE_BUFFER_SIZE   96U       /**< 单条 NMEA 语句缓冲区大小。 */
+#define GPS_MAX_FIELDS             24U       /**< 单条 NMEA 语句最大字段数量。 */
 
-#define GPS_BAUDRATE               115200UL
-#define GPS_RAW_ECHO_ENABLE        0U
-#define GPS_UART_FIFO_SIZE         256U
-#define GPS_SENTENCE_BUFFER_SIZE   96U
-#define GPS_MAX_FIELDS             24U
-
-/*---------------------------------- Talker 定义 ---------------------------------*/
-
-#define GPS_TALKER_UNKNOWN         0U
-#define GPS_TALKER_GP              1U
-#define GPS_TALKER_BD              2U
-#define GPS_TALKER_GN              3U
-
-/*---------------------------------- 状态结构 ------------------------------------*/
-
-typedef struct
-{
-    char  talker[3];
-    u8    talker_id;
-    u8    fix_valid;
-    u8    fix_quality;
-    u8    rmc_status;
-    u8    fix_mode;
-
-    u8    utc_hour;
-    u8    utc_minute;
-    u8    utc_second;
-    u16   utc_millisecond;
-
-    u8    date_day;
-    u8    date_month;
-    u8    date_year;
-
-    int32 lat_deg1e7;
-    int32 lon_deg1e7;
-
-    u32   speed_knots_x100;
-    u32   speed_kmh_x100;
-    u16   course_deg_x100;
-
-    u8    satellites_used;
-    u8    satellites_view;
-    u16   hdop_x100;
-    u16   pdop_x100;
-    u16   vdop_x100;
-    int32 altitude_cm;
-    u8    max_snr;
-
-    u32   update_sequence;
-
-    u16   sentence_ok_count;
-    u16   checksum_error_count;
-    u16   parse_error_count;
-    u16   uart_overflow_count;
-    u16   fifo_overflow_count;
-    u16   sentence_overflow_count;
-} GPS_State_t;
-
-/*---------------------------------- 对外接口 ------------------------------------*/
+#define GPS_TALKER_UNKNOWN         0U  /**< 未识别 talker。 */
+#define GPS_TALKER_GP              1U  /**< GPS talker，语句前缀 GP。 */
+#define GPS_TALKER_BD              2U  /**< 北斗 talker，语句前缀 BD。 */
+#define GPS_TALKER_GN              3U  /**< 多模 GNSS talker，语句前缀 GN。 */
 
 /**
- * @brief   初始化 GPS 模块
- * @return  0=成功，-1=失败
+ * @brief   GPS/GNSS 解析状态快照。
  *
  * @details
- * - 将 UART2 路由切换到 P1.0/P1.1
- * - 初始化 UART2 为 8N1 接收模式，波特率默认使用 GPS_BAUDRATE
- * - 清空模块内部 FIFO、解析状态和 GPS_State_t
+ * 所有位置、速度、航向和精度字段均使用定点整数保存，不使用浮点。
+ */
+typedef struct
+{
+    char  talker[3];              /**< 最近有效语句的 talker 字符串，含结尾 0。 */
+    u8    talker_id;              /**< 最近有效语句的 talker 类型，取值见 GPS_TALKER_*。 */
+    u8    fix_valid;              /**< 定位有效标志，1=定位有效。 */
+    u8    fix_quality;            /**< GGA 定位质量字段。 */
+    u8    rmc_status;             /**< RMC 状态字段，通常 A=有效，V=无效。 */
+    u8    fix_mode;               /**< GSA 定位模式。 */
+
+    u8    utc_hour;               /**< UTC 小时。 */
+    u8    utc_minute;             /**< UTC 分钟。 */
+    u8    utc_second;             /**< UTC 秒。 */
+    u16   utc_millisecond;        /**< UTC 毫秒。 */
+
+    u8    date_day;               /**< UTC 日期：日。 */
+    u8    date_month;             /**< UTC 日期：月。 */
+    u8    date_year;              /**< UTC 日期：年，取 00~99。 */
+
+    int32 lat_deg1e7;             /**< 纬度，单位 deg * 1e7，北纬为正。 */
+    int32 lon_deg1e7;             /**< 经度，单位 deg * 1e7，东经为正。 */
+
+    u32   speed_knots_x100;       /**< 地速，单位 knot * 100。 */
+    u32   speed_kmh_x100;         /**< 地速，单位 km/h * 100。 */
+    u16   course_deg_x100;        /**< 航向角，单位 deg * 100。 */
+
+    u8    satellites_used;        /**< 参与定位的卫星数。 */
+    u8    satellites_view;        /**< 可见卫星数。 */
+    u16   hdop_x100;              /**< 水平精度因子，单位 HDOP * 100。 */
+    u16   pdop_x100;              /**< 三维精度因子，单位 PDOP * 100。 */
+    u16   vdop_x100;              /**< 垂直精度因子，单位 VDOP * 100。 */
+    int32 altitude_cm;            /**< 海拔高度，单位 cm。 */
+    u8    max_snr;                /**< GSV 语句中观测到的最大信噪比。 */
+
+    u32   update_sequence;        /**< 状态更新序号，每解析到有效状态后递增。 */
+
+    u16   sentence_ok_count;       /**< 成功解析的 NMEA 语句计数。 */
+    u16   checksum_error_count;    /**< NMEA 校验失败计数。 */
+    u16   parse_error_count;       /**< 字段解析失败计数。 */
+    u16   uart_overflow_count;     /**< Driver 层 UART 接收溢出计数。 */
+    u16   fifo_overflow_count;     /**< GPS 模块内部 FIFO 溢出计数。 */
+    u16   sentence_overflow_count; /**< 单条语句缓冲区溢出计数。 */
+} GPS_State_t;
+
+/**
+ * @brief   初始化 GPS 模块。
+ * @return  SUCCESS=成功，其他值表示 UART 或模块初始化失败。
+ *
+ * @details
+ * 将 UART2 路由到 P1.0/P1.1，按 GPS_BAUDRATE 初始化 8N1 接收模式，
+ * 并清空内部 FIFO、解析状态和 GPS_State_t 快照。
  */
 s8 GPS_Init(void);
 
 /**
- * @brief   复位 GPS 模块运行状态
+ * @brief   复位 GPS 模块运行状态。
  * @return  none
  *
  * @details
- * 清空 FIFO、语句缓存、解析器状态与 GPS_State_t，
- * 不重新初始化 UART2 外设。
+ * 清空 FIFO、语句缓冲、解析状态与 GPS_State_t，不重新初始化 UART2 外设。
  */
 void GPS_Reset(void);
 
 /**
- * @brief   轮询处理 GPS 接收数据
+ * @brief   轮询处理 GPS 接收数据。
  * @return  none
  *
  * @details
- * 从 Driver 层 RX2_Buffer 拉取增量字节，写入模块 FIFO，
- * 再逐字节驱动 NMEA 状态机解析。
+ * 从 Driver 层 RX2_Buffer 拉取增量字节写入模块 FIFO，再逐字节驱动 NMEA 状态机解析。
  */
 void GPS_Poll(void);
 
 /**
- * @brief      获取当前 GPS 状态快照
- * @return     指向只读状态结构体的指针
+ * @brief   获取当前 GPS 状态快照。
+ * @return  指向模块内部只读 GPS_State_t 的指针。
  *
- * @details
- * 返回模块内部维护的最新状态结构体，
- * 调用者不得修改该结构体内容。
+ * @note    调用者不得修改返回指针指向的数据。
  */
 const GPS_State_t *GPS_GetState(void);
 

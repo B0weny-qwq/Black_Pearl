@@ -1,4 +1,6 @@
-# MOTOR PWM Driver
+# Motor PWM 驱动
+
+`Code_boweny/Device/Motor/` 使用 STC32G 的 PWMA CH3/CH4 控制左右两路直流电机。
 
 ## 硬件映射
 
@@ -9,13 +11,7 @@
 | 右电机 | MRA | `PWM4N_2` | `P2.7` |
 | 右电机 | MRB | `PWM4P_2` | `P2.6` |
 
-其中 `MRA/MLA = N`，`MRB/MLB = P`。驱动按同一 PWM 通道的互补输出使用：
-
-- 左电机使用 `PWMA CH3`
-- 右电机使用 `PWMA CH4`
-- 正速度：P 侧为主动方向
-- 负速度：N 侧为主动方向
-- 速度为 0：关闭对应通道输出，避免互补输出在 0 占空比下残留有效态
+其中 `MRA/MLA` 为 N 输出，`MRB/MLB` 为 P 输出。正速度使用 P 侧作为主动方向，负速度使用 N 侧作为主动方向；速度为 0 时关闭对应通道输出。
 
 ## API
 
@@ -28,7 +24,7 @@ void Motor_StopAll(void);
 int16 Motor_GetSpeed(Motor_Id_t motor);
 ```
 
-速度范围为 `-1000 ~ +1000`。超出范围会自动限幅。
+速度范围为 `-1000 ~ +1000`，超出范围会自动限幅。
 
 ## 使用示例
 
@@ -36,14 +32,14 @@ int16 Motor_GetSpeed(Motor_Id_t motor);
 #include "Motor.h"
 
 Motor_Init();
-Motor_SetBothSpeed(500, 500);    /* 双电机正转 50% */
+Motor_SetBothSpeed(500, 500);     /* 双电机正转 50% */
 Motor_SetSpeed(MOTOR_LEFT, -300); /* 左电机反转 30% */
 Motor_StopAll();
 ```
 
-## 接入注意
+## 接入注意事项
 
-- `Motor_Init()` 会把 `PWM3` 切到 `P2.4/P2.5`，把 `PWM4` 切到 `P2.6/P2.7`。
-- 本模块使用 `PWMA`，不占用 Timer0/Timer1/Timer2，也不改 Driver 层源码。
-- 若后续启用 `APP_PWMA_Output` 或其它使用 `PWMA CH3/CH4` 的示例，会与本模块冲突。
-- 若实测正反方向与船体定义相反，只需要在上层对对应电机速度取反，或调整 `Motor_*SetForwardPolarity()` 的正向极性。
+- `Motor_Init()` 会将 `PWM3` 切到 `P2.4/P2.5`，将 `PWM4` 切到 `P2.6/P2.7`。
+- 本模块使用 `PWMA`，不占用 Timer0/Timer1/Timer2，也不修改 Driver 层源码。
+- 若启用 `APP_PWMA_Output` 或其他使用 `PWMA CH3/CH4` 的示例，会与本模块冲突。
+- 若实测正反方向与船体定义相反，可在上层对对应电机速度取反。
