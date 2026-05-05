@@ -5,7 +5,16 @@
 #include "..\..\Function\Log\Log.h"
 #include "..\..\..\User\Task.h"
 
+#if defined(SHIP_PAIR_SEED_USE_CHIPID) && (SHIP_PAIR_SEED_USE_CHIPID != 0)
+#include "..\..\..\User\STC32G.h"
+#endif
+
 #define SHIP_TAG "SHIP"
+#define SHIP_PAIR_FIX_REV "pairbiz-r2"
+
+#ifndef SHIP_PAIR_SYNC_WORD
+#define SHIP_PAIR_SYNC_WORD            0x03800380UL
+#endif
 
 #ifndef SHIP_PAIR_CHANNEL_DEFAULT
 #ifdef PAIR_CHANNEL
@@ -44,6 +53,18 @@
 #define SHIP_PAIR_SEED3                0x65U
 #endif
 
+#ifndef WIRELESS_MINIMAL_TEST_ONLY
+#define WIRELESS_MINIMAL_TEST_ONLY     0
+#endif
+
+typedef enum
+{
+    SHIP_STATE_BOOT_WAIT = 0,
+    SHIP_STATE_PAIR_SEND,
+    SHIP_STATE_PAIR_WAIT_RSP,
+    SHIP_STATE_WORK_RX
+} ShipState_t;
+
 typedef struct
 {
     u8 lr;
@@ -51,6 +72,9 @@ typedef struct
     u8 key;
     u8 valid;
     u8 paired;
+    u8 work_rx_configured;
+    u8 work_state_logged;
+    ShipState_t state;
     u8 rf_channel[3];
     u8 rf_send_key[2];
     u16 pair_wait_rsp_time;
@@ -58,13 +82,15 @@ typedef struct
     u16 accel_close_ticks;
     u16 wait_ticks;
     u16 pair_left;
+    u16 pair_retry_count;
     u8 work_div;
 } ShipRuntime_t;
 
 static ShipRuntime_t g_ship_rt;
 static u8 g_ship_sync_is_tx = 0U;
-static u8 g_ship_work_log_once = 0U;
-static u8 g_ship_pair_window_timeout_log = 0U;
+
+static s8 ShipProtocol_ApplyPairSync(void);
+static s8 ShipProtocol_ApplyWorkRx(void);
 
 static u8 ShipProtocol_Xor(const u8 *buf, u8 len)
 {
@@ -76,6 +102,34 @@ static u8 ShipProtocol_Xor(const u8 *buf, u8 len)
         val ^= buf[i];
     }
     return val;
+}
+
+/*
+ * Pair seed is the 4-byte payload carried by cmd=0x10:
+ *   AA | 06 | 10 | seed0 | seed1 | seed2 | seed3 | xor | BB
+ *
+ * In the current ship-side implementation this seed is not only a "record"
+ * value. It is the live pairing input used to derive the follow-up work
+ * channel and sync/key bytes. If the peer expects a different seed, pairing
+ * can fail even when RF TX itself is healthy.
+ */
+static void ShipProtocol_GetPairSeed(u8 *seed)
+{
+    if (seed == 0) {
+        return;
+    }
+
+#if defined(SHIP_PAIR_SEED_USE_CHIPID) && (SHIP_PAIR_SEED_USE_CHIPID != 0)
+    seed[0] = CHIPID20;
+    seed[1] = CHIPID21;
+    seed[2] = CHIPID22;
+    seed[3] = CHIPID23;
+#else
+    seed[0] = SHIP_PAIR_SEED0;
+    seed[1] = SHIP_PAIR_SEED1;
+    seed[2] = SHIP_PAIR_SEED2;
+    seed[3] = SHIP_PAIR_SEED3;
+#endif
 }
 
 static u16 ShipProtocol_ReadU16BE(const u8 *buf)
@@ -158,10 +212,10 @@ static void ShipProtocol_ApplyDefaultRf(void)
     u8 seed[4];
     u8 channel;
 
-    seed[0] = SHIP_PAIR_SEED0;
-    seed[1] = SHIP_PAIR_SEED1;
-    seed[2] = SHIP_PAIR_SEED2;
-    seed[3] = SHIP_PAIR_SEED3;
+    /* The work RX/TX channels and sync bytes are derived from the same
+     * 4-byte pair seed. Keep this in sync with the peer's legacy formula.
+     */
+    ShipProtocol_GetPairSeed(seed);
 
     g_ship_rt.rf_send_key[0] =
         (u8)(((u8)((seed[0] << 4) >> 4)) + ((u8)(seed[3] >> 2) + (u8)(seed[3] % 0x03U)));
@@ -176,7 +230,7 @@ static void ShipProtocol_ApplyDefaultRf(void)
     g_ship_rt.rf_channel[2] = (u8)(channel + 0x40U);
 }
 
-static s8 ShipProtocol_ApplySyncRegs(void)
+static s8 ShipProtocol_ApplyWorkRx(void)
 {
     u16 rx36;
     u16 rx39;
@@ -189,9 +243,27 @@ static s8 ShipProtocol_ApplySyncRegs(void)
     if (rc != SUCCESS) {
         return rc;
     }
-    g_ship_sync_is_tx = 0U;
 
-    return Wireless_SetChannel(SHIP_PAIR_CHANNEL_DEFAULT);
+    g_ship_sync_is_tx = 0U;
+    rc = Wireless_SetChannel(g_ship_rt.rf_channel[0]);
+    if (rc == SUCCESS) {
+        g_ship_rt.work_rx_configured = 1U;
+    }
+    return rc;
+}
+
+static s8 ShipProtocol_ApplyPairSync(void)
+{
+    s8 rc;
+
+    rc = Wireless_SetSyncWord(SHIP_PAIR_SYNC_WORD);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+
+    g_ship_sync_is_tx = 0U;
+    g_ship_rt.work_rx_configured = 0U;
+    return SUCCESS;
 }
 
 static s8 ShipProtocol_EnsureSyncTx(void)
@@ -210,6 +282,7 @@ static s8 ShipProtocol_EnsureSyncTx(void)
     }
 
     g_ship_sync_is_tx = 1U;
+    g_ship_rt.work_rx_configured = 0U;
     return SUCCESS;
 }
 
@@ -229,30 +302,44 @@ static s8 ShipProtocol_EnsureSyncRx(void)
     }
 
     g_ship_sync_is_tx = 0U;
+    g_ship_rt.work_rx_configured = 0U;
     return SUCCESS;
 }
 
-static void ShipProtocol_TryPairSend(void)
+static s8 ShipProtocol_TryPairSend(u16 left_after_send)
 {
     u8 pair_data[4];
     s8 rc;
 
-    pair_data[0] = SHIP_PAIR_SEED0;
-    pair_data[1] = SHIP_PAIR_SEED1;
-    pair_data[2] = SHIP_PAIR_SEED2;
-    pair_data[3] = SHIP_PAIR_SEED3;
+    /* cmd=0x10 payload is always the current 4-byte pair seed. */
+    ShipProtocol_GetPairSeed(pair_data);
+
+    rc = ShipProtocol_ApplyPairSync();
+    if (rc != SUCCESS) {
+        LOGE(SHIP_TAG, "apply pair sync fail rc=%d", rc);
+        return rc;
+    }
 
     rc = ShipProtocol_SendFrame(SHIP_PAIR_CHANNEL_DEFAULT, SHIP_CMD_PAIR, pair_data, 4U);
     if (rc == SUCCESS) {
-        LOGI(SHIP_TAG, "pair req tx pair_ch=0x%02X work_ch=%u key=%u/%u left=%u",
-             (u16)SHIP_PAIR_CHANNEL_DEFAULT,
-             (u16)g_ship_rt.rf_channel[0],
-             (u16)g_ship_rt.rf_send_key[0],
-             (u16)g_ship_rt.rf_send_key[1],
-             (u16)g_ship_rt.pair_left);
+        if (left_after_send == (SHIP_PAIR_SEND_TIMES - 1U)) {
+            LOGI(SHIP_TAG,
+                 "pair req start retry=%u pair_ch=0x%02X seed=%02X%02X%02X%02X work_rx=%u key=%u/%u",
+                 (u16)g_ship_rt.pair_retry_count,
+                 (u16)SHIP_PAIR_CHANNEL_DEFAULT,
+                 (u16)pair_data[0], (u16)pair_data[1],
+                 (u16)pair_data[2], (u16)pair_data[3],
+                 (u16)g_ship_rt.rf_channel[0],
+                 (u16)g_ship_rt.rf_send_key[0],
+                 (u16)g_ship_rt.rf_send_key[1]);
+        } else if (left_after_send == 0U) {
+            LOGI(SHIP_TAG, "pair req burst done, wait rsp");
+        }
     } else {
         LOGE(SHIP_TAG, "pair req tx fail rc=%d", rc);
     }
+
+    return rc;
 }
 
 static void ShipProtocol_SendGpsOnce(void)
@@ -325,44 +412,33 @@ static void ShipProtocol_SendGpsOnce(void)
 
 static void ShipProtocol_HandlePairRsp(const u8 *payload, u8 payload_len)
 {
-    payload = payload;
-    payload_len = payload_len;
-
-    if (g_ship_rt.pair_wait_rsp_time != 0U) {
-        g_ship_rt.pair_wait_rsp_time = 0U;
-        g_ship_rt.paired = 1U;
-        g_ship_pair_window_timeout_log = 0U;
-        LOGI(SHIP_TAG, "pair rsp accepted, paired=1");
-    } else {
+    if (g_ship_rt.state != SHIP_STATE_PAIR_WAIT_RSP) {
         LOGW(SHIP_TAG, "pair rsp ignored(outside window)");
-    }
-}
-
-static void ShipProtocol_HandlePair(const u8 *payload, u8 payload_len)
-{
-    u8 channel;
-
-    if (payload_len < 4U) {
-        LOGW(SHIP_TAG, "pair short len=%u", (u16)payload_len);
         return;
     }
 
-    g_ship_rt.rf_send_key[0] =
-        (u8)(((u8)((payload[0] << 4) >> 4)) + ((u8)(payload[3] >> 2) + (u8)(payload[3] % 0x03U)));
-    g_ship_rt.rf_send_key[1] =
-        (u8)(((u8)((payload[1] << 4) >> 4)) + ((u8)(payload[2] >> 3) + (u8)(payload[0] % 0x06U)));
+    g_ship_rt.pair_wait_rsp_time = 0U;
+    g_ship_rt.paired = 1U;
+    g_ship_rt.state = SHIP_STATE_WORK_RX;
 
-    channel = (u8)(((u8)(((payload[3] + 0x06U) % 0x40U) +
-                         ((payload[2] >> 3) * 0x08U) +
-                         (((payload[1] | payload[0]) % 0x08U) / 2U))) % 0x40U);
-    g_ship_rt.rf_channel[0] = channel;
-    g_ship_rt.rf_channel[1] = channel;
-    g_ship_rt.rf_channel[2] = (u8)(channel + 0x40U);
-
-    LOGI(SHIP_TAG,
-         "cmd=0x10 pair chip=%02X %02X %02X %02X key=%u/%u ch=%u",
-         (u16)payload[0], (u16)payload[1], (u16)payload[2], (u16)payload[3],
-         (u16)g_ship_rt.rf_send_key[0], (u16)g_ship_rt.rf_send_key[1], (u16)channel);
+    if ((payload != 0) && (payload_len == 4U)) {
+        LOGI(SHIP_TAG,
+             "pair success paired=1 work_rx=%u work_tx=%u key=%u/%u rsp=%02X%02X%02X%02X",
+             (u16)g_ship_rt.rf_channel[0],
+             (u16)g_ship_rt.rf_channel[2],
+             (u16)g_ship_rt.rf_send_key[0],
+             (u16)g_ship_rt.rf_send_key[1],
+             (u16)payload[0], (u16)payload[1],
+             (u16)payload[2], (u16)payload[3]);
+    } else {
+        LOGI(SHIP_TAG,
+             "pair success paired=1 work_rx=%u work_tx=%u key=%u/%u rsp_len=%u",
+             (u16)g_ship_rt.rf_channel[0],
+             (u16)g_ship_rt.rf_channel[2],
+             (u16)g_ship_rt.rf_send_key[0],
+             (u16)g_ship_rt.rf_send_key[1],
+             (u16)payload_len);
+    }
 }
 
 static void ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
@@ -379,8 +455,11 @@ static void ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
     g_ship_rt.accel_timeout_ticks = 0U;
     g_ship_rt.accel_close_ticks = 300U;
 
-    LOGI(SHIP_TAG, "cmd=0x11 lr=%u ud=%u key=0x%02X",
-         (u16)g_ship_rt.lr, (u16)g_ship_rt.ud, (u16)g_ship_rt.key);
+    LOGI(SHIP_TAG, "rc lr=%u ud=%u key=0x%02X paired=%u",
+         (u16)g_ship_rt.lr,
+         (u16)g_ship_rt.ud,
+         (u16)g_ship_rt.key,
+         (u16)g_ship_rt.paired);
 }
 
 static void ShipProtocol_HandleGpsReport(const u8 *payload, u8 payload_len)
@@ -402,7 +481,6 @@ static void ShipProtocol_Dispatch(u8 cmd, const u8 *payload, u8 payload_len)
         ShipProtocol_HandlePairRsp(payload, payload_len);
         break;
     case SHIP_CMD_PAIR:
-        ShipProtocol_HandlePair(payload, payload_len);
         break;
     case SHIP_CMD_THROTTLE:
         ShipProtocol_HandleThrottle(payload, payload_len);
@@ -497,9 +575,134 @@ static void ShipProtocol_PollRxFrames(void)
         frame_len = 0U;
         rc = Wireless_Receive(frame, SHIP_PROTO_MAX_FRAME_LEN, &frame_len);
         if (rc == SUCCESS) {
-            (void)ShipProtocol_ParseFrame(frame, frame_len);
+            rc = ShipProtocol_ParseFrame(frame, frame_len);
+            if (rc != SUCCESS) {
+                LOGW(SHIP_TAG, "parse frame fail rc=%d len=%u", rc, (u16)frame_len);
+            }
         }
     } while (rc == SUCCESS);
+}
+
+static void ShipProtocol_InitRuntime(void)
+{
+    u8 seed[4];
+
+    ShipProtocol_ApplyDefaultRf();
+    ShipProtocol_GetPairSeed(seed);
+
+    g_ship_rt.lr = 0U;
+    g_ship_rt.ud = 0U;
+    g_ship_rt.key = 0U;
+    g_ship_rt.valid = 0U;
+    g_ship_rt.paired = 0U;
+    g_ship_rt.work_rx_configured = 0U;
+    g_ship_rt.work_state_logged = 0U;
+    g_ship_rt.state = SHIP_STATE_BOOT_WAIT;
+    g_ship_rt.pair_wait_rsp_time = 0U;
+    g_ship_rt.accel_timeout_ticks = 0U;
+    g_ship_rt.accel_close_ticks = 0U;
+    g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
+    g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
+    g_ship_rt.pair_retry_count = 0U;
+    g_ship_rt.work_div = 0U;
+    g_ship_sync_is_tx = 0U;
+
+    LOGI(SHIP_TAG,
+         "scheduler init rev=%s wait=%u pair_send=%u pair_ch=0x%02X seed=%02X%02X%02X%02X",
+         SHIP_PAIR_FIX_REV,
+         (u16)g_ship_rt.wait_ticks,
+         (u16)g_ship_rt.pair_left,
+         (u16)SHIP_PAIR_CHANNEL_DEFAULT,
+         (u16)seed[0], (u16)seed[1], (u16)seed[2], (u16)seed[3]);
+}
+
+static void ShipProtocol_StepPairWaitRsp(void)
+{
+    if (g_ship_rt.pair_wait_rsp_time > 0U) {
+        g_ship_rt.pair_wait_rsp_time--;
+        if ((g_ship_rt.pair_wait_rsp_time == 0U) && (g_ship_rt.paired == 0U)) {
+            g_ship_rt.pair_retry_count++;
+            LOGW(SHIP_TAG, "pair rsp window timeout, retry=%u",
+                 (u16)g_ship_rt.pair_retry_count);
+            g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
+            g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
+            g_ship_rt.state = SHIP_STATE_PAIR_SEND;
+        }
+    } else if (g_ship_rt.paired == 0U) {
+        g_ship_rt.pair_retry_count++;
+        g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
+        g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
+        g_ship_rt.state = SHIP_STATE_PAIR_SEND;
+    }
+}
+
+static void ShipProtocol_StepPairSend(void)
+{
+    s8 rc;
+    u16 left_after_send;
+
+    if (g_ship_rt.wait_ticks > 0U) {
+        g_ship_rt.wait_ticks--;
+        return;
+    }
+
+    if (g_ship_rt.pair_left > 0U) {
+        g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
+        left_after_send = (u16)(g_ship_rt.pair_left - 1U);
+        rc = ShipProtocol_TryPairSend(left_after_send);
+        if (rc != SUCCESS) {
+            return;
+        }
+        g_ship_rt.pair_left = left_after_send;
+
+        if (g_ship_rt.pair_left == 0U) {
+            rc = ShipProtocol_ApplyWorkRx();
+            if (rc != SUCCESS) {
+                LOGE(SHIP_TAG, "enter pair rsp listen fail rc=%d", rc);
+                g_ship_rt.pair_retry_count++;
+                g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
+                g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
+                return;
+            }
+            g_ship_rt.pair_wait_rsp_time = SHIP_PAIR_WAIT_RSP_TICKS;
+            g_ship_rt.state = SHIP_STATE_PAIR_WAIT_RSP;
+        }
+    }
+}
+
+static void ShipProtocol_StepWorkRx(void)
+{
+    s8 rc;
+
+    if (g_ship_rt.work_rx_configured == 0U) {
+        rc = ShipProtocol_ApplyWorkRx();
+        if (rc != SUCCESS) {
+            LOGE(SHIP_TAG, "enter work rx fail rc=%d", rc);
+            return;
+        }
+    }
+
+    if (g_ship_rt.work_state_logged == 0U) {
+        g_ship_rt.work_state_logged = 1U;
+        LOGI(SHIP_TAG, "enter work-state rx_ch=%u tx_ch=%u tx_div>%u",
+             (u16)g_ship_rt.rf_channel[0],
+             (u16)g_ship_rt.rf_channel[2],
+             (u16)SHIP_WORK_TX_DIV_THRESHOLD);
+    }
+
+#if !WIRELESS_MINIMAL_TEST_ONLY
+    g_ship_rt.work_div++;
+    if (g_ship_rt.work_div > SHIP_WORK_TX_DIV_THRESHOLD) {
+        g_ship_rt.work_div = 0U;
+        ShipProtocol_SendGpsOnce();
+        g_ship_rt.work_rx_configured = 0U;
+    } else if (g_ship_rt.work_rx_configured == 0U) {
+        rc = ShipProtocol_ApplyWorkRx();
+        if (rc != SUCCESS) {
+            LOGE(SHIP_TAG, "restore work rx fail rc=%d", rc);
+        }
+    }
+#endif
 }
 
 void ShipProtocol_RunScheduler(void)
@@ -507,26 +710,11 @@ void ShipProtocol_RunScheduler(void)
     static u8 initialized = 0U;
     static u32 last_tick_ms = 0U;
     u32 now_ms;
-    s8 rc;
 
     if (!initialized) {
-        ShipProtocol_ApplyDefaultRf();
-        g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
-        g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
-        g_ship_rt.work_div = 0U;
-        g_ship_rt.pair_wait_rsp_time = 0U;
-        g_ship_rt.paired = 0U;
-        g_ship_rt.valid = 0U;
-        g_ship_work_log_once = 0U;
-        g_ship_pair_window_timeout_log = 0U;
+        ShipProtocol_InitRuntime();
         initialized = 1U;
         last_tick_ms = Task_GetTickMs();
-        LOGI(SHIP_TAG,
-             "scheduler init wait=%u pair_send=%u pair_ch=0x%02X seed=%02X%02X%02X%02X",
-             (u16)g_ship_rt.wait_ticks,
-             (u16)g_ship_rt.pair_left,
-             (u16)SHIP_PAIR_CHANNEL_DEFAULT,
-             (u16)SHIP_PAIR_SEED0, (u16)SHIP_PAIR_SEED1, (u16)SHIP_PAIR_SEED2, (u16)SHIP_PAIR_SEED3);
     }
 
     now_ms = Task_GetTickMs();
@@ -544,62 +732,28 @@ void ShipProtocol_RunScheduler(void)
     if (g_ship_rt.accel_close_ticks > 0U) {
         g_ship_rt.accel_close_ticks--;
     }
-    if (g_ship_rt.pair_wait_rsp_time > 0U) {
-        g_ship_rt.pair_wait_rsp_time--;
-        if ((g_ship_rt.pair_wait_rsp_time == 0U) && (g_ship_rt.paired == 0U) &&
-            (g_ship_pair_window_timeout_log == 0U)) {
-            g_ship_pair_window_timeout_log = 1U;
-            LOGW(SHIP_TAG, "pair rsp window timeout, continue work-state");
-        }
-    }
 
-    if (g_ship_rt.wait_ticks > 0U) {
+    if ((g_ship_rt.state == SHIP_STATE_BOOT_WAIT) && (g_ship_rt.wait_ticks > 0U)) {
         g_ship_rt.wait_ticks--;
         return;
     }
-
-    if (g_ship_rt.pair_left > 0U) {
-        g_ship_rt.pair_left--;
-        g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
-        ShipProtocol_TryPairSend();
-
-        if (g_ship_rt.pair_left == 0U) {
-            rc = ShipProtocol_ApplySyncRegs();
-            if (rc != SUCCESS) {
-                LOGE(SHIP_TAG, "apply sync fail rc=%d", rc);
-            }
-            g_ship_rt.pair_wait_rsp_time = SHIP_PAIR_WAIT_RSP_TICKS;
-            LOGI(SHIP_TAG,
-                 "pair sync applied rx36=0x%02X%02X rx39=0x%02X%02X wait_rsp=%u",
-                 (u16)g_ship_rt.rf_send_key[0], (u16)g_ship_rt.rf_send_key[0],
-                 (u16)g_ship_rt.rf_send_key[1], (u16)g_ship_rt.rf_send_key[1],
-                 (u16)g_ship_rt.pair_wait_rsp_time);
-        }
-        return;
+    if (g_ship_rt.state == SHIP_STATE_BOOT_WAIT) {
+        g_ship_rt.state = SHIP_STATE_PAIR_SEND;
     }
 
-    if (g_ship_work_log_once == 0U) {
-        g_ship_work_log_once = 1U;
-        LOGI(SHIP_TAG, "enter work-state rx_ch=%u tx_ch=%u tx_div>%u",
-             (u16)g_ship_rt.rf_channel[0],
-             (u16)g_ship_rt.rf_channel[2],
-             (u16)SHIP_WORK_TX_DIV_THRESHOLD);
-    }
-
-    g_ship_rt.work_div++;
-    if (g_ship_rt.work_div > SHIP_WORK_TX_DIV_THRESHOLD) {
-        g_ship_rt.work_div = 0U;
-        ShipProtocol_SendGpsOnce();
-    } else {
-        rc = ShipProtocol_EnsureSyncRx();
-        if (rc != SUCCESS) {
-            LOGE(SHIP_TAG, "set rx sync fail rc=%d", rc);
-            return;
-        }
-        rc = Wireless_SetChannel(g_ship_rt.rf_channel[0]);
-        if (rc != SUCCESS) {
-            LOGE(SHIP_TAG, "set work rx ch fail rc=%d", rc);
-        }
+    switch (g_ship_rt.state) {
+    case SHIP_STATE_PAIR_SEND:
+        ShipProtocol_StepPairSend();
+        break;
+    case SHIP_STATE_PAIR_WAIT_RSP:
+        ShipProtocol_StepPairWaitRsp();
+        break;
+    case SHIP_STATE_WORK_RX:
+        ShipProtocol_StepWorkRx();
+        break;
+    default:
+        g_ship_rt.state = SHIP_STATE_PAIR_SEND;
+        break;
     }
 }
 

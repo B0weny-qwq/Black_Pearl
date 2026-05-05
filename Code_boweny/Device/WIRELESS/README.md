@@ -12,7 +12,7 @@
 - 硬件相关逻辑集中在 `wireless_port.*`。
 - 关键步骤通过 `LOGI/LOGE` 输出。
 
-当前版本交付的是底层驱动和原始收发框架，并包含船端配对调度逻辑；它不是旧工程 `wirelessProtocal.c` 的完整兼容层。
+当前默认运行目标是无线最小业务流程：上电完成 LT8920 自检后，发送配对请求、等待遥控器配对响应，配对成功后在工作信道接收并打印每一帧遥控器 `lr/ud/key` 值。当前不启用电机控制、GPS/IMU/MAG 业务路径。
 
 ## 当前硬件接线
 
@@ -103,23 +103,24 @@ s8 Wireless_RunMinimalTest(void);
 
 ## 当前系统接入点
 
+默认配置为 `AHRS_TEST_ONLY=0`、`WIRELESS_MINIMAL_TEST_ONLY=1`、`SHIP_PROTOCOL_POLL_ENABLE=1`：
+
 ```text
 SYS_Init()
   -> APP_config()
   -> log_init()
-  -> GPS_Init()
   -> Wireless_Init()
+  -> GPS_Init()              [skipped when WIRELESS_MINIMAL_TEST_ONLY=1]
 
 main()
   -> Wireless_MinimalTestUnit()
   -> while(1)
-       GPS_Poll()
        Wireless_Poll()
-       ShipProtocol_Poll()
-       Wireless_SearchSignalPoll()
+       ShipProtocol_RunScheduler()
        Task_Pro_Handler_Callback()
-       IMU_HighRatePoll()
 ```
+
+最小业务模式不会进入 `Wireless_RunPairTxOnlyTest()` 持续单向发包诊断，也不会调用 `ShipProtocol_Poll()` 兼容轮询分支。
 
 ## 配对流程说明
 
@@ -132,9 +133,22 @@ AA | 06 | 10 | seed0 | seed1 | seed2 | seed3 | xor | BB
 ```
 
 - 默认配对发射信道为 `0x7F`。
+- 默认固定 seed 为 `65 65 A0 65`，由 `SHIP_PAIR_SEED0..3` 宏定义控制。
 - `seed[4]` 会派生工作接收信道、工作发送信道和同步/密钥字节。
-- 当前硬件为单颗 LT8920 半双工，配对阶段采用“发一个包、切回接收、再发下一个包”的节奏。
-- 只有在配对等待窗口内收到 payload 长度为 4 且 seed 完全一致的 `PAIR_RSP`，才认为配对成功。
+- 当前内部状态机为 `BOOT_WAIT -> PAIR_SEND -> PAIR_WAIT_RSP -> WORK_RX`。
+- 当前硬件为单颗 LT8920 半双工，配对阶段每约 `300ms` 发送一次配对包，共发送 10 次后进入约 `5s` 响应窗口。
+- 当前按旧遥控器兼容逻辑处理：配对等待窗口内收到合法 `PAIR_RSP(0x0F)` 即认为配对成功；若响应 payload 长度为 4，只打印 payload 供调试，不再强制要求它等于 seed。
+- 配对请求发送失败不会消耗 10 次发送计数；只有成功发送满 10 次并成功切入工作 RX 后才进入响应窗口。
+- 配对成功后保持工作 RX 监听；每收到一帧 `THROTTLE(0x11)` 打印 `rc lr=<0-255> ud=<0-255> key=0xXX paired=1`，当前不调用电机控制。
+
+关键日志示例：
+
+```text
+[SHIP] I: pair req start retry=0 pair_ch=0x7F seed=6565A065 work_rx=... key=.../...
+[SHIP] I: pair success paired=1 work_rx=... work_tx=... key=.../... rsp_len=...
+[SHIP] I: enter work-state rx_ch=... tx_ch=... tx_div>80
+[SHIP] I: rc lr=100 ud=142 key=0xA0 paired=1
+```
 
 ## 当前资源占用
 
@@ -149,14 +163,15 @@ AA | 06 | 10 | seed0 | seed1 | seed2 | seed3 | xor | BB
 
 ## 注意事项
 
-1. 当前实现不保证兼容旧遥控端完整协议，只保证底层驱动和原始包收发可用。
+1. 当前默认只完成遥控器配对、工作信道监听和遥控值打印，不启用电机、GPS、IMU、MAG 业务。
 2. `P1.3` 会覆盖系统默认的 `P1.0~P1.3` 高阻配置，这是预期行为。
 3. `P5.4` 不可再用于 `MCLKO/SS_3/PWM6_2`。
 4. `P5.0/P5.1` 不可再用于比较器输入。
 5. 无线运行时会切换到 SPI 第 4 组，因此不要并行启用旧 `APP_SPI_PS` 示例。
 6. 当前未使用 `PKT` 外部中断脚，全部依赖寄存器轮询。
 7. `seed` 会直接影响工作信道和同步字，不应当作无关占位值。
-8. 若后续拿到旧协议源码，建议在本目录上层新增协议层文件，不要把业务逻辑塞进 `lt8920.c`。
+8. 业务协议层应通过 `wireless.h` 管理层访问无线链路，不直接 include `lt8920.h` 或读取 LT8920 寄存器。
+9. 若后续拿到旧协议源码，建议在本目录上层新增协议层文件，不要把业务逻辑塞进 `lt8920.c`。
 
 ## 相关文件
 
@@ -174,4 +189,5 @@ AA | 06 | 10 | seed0 | seed1 | seed2 | seed3 | xor | BB
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-06 | v1.1 | 切回无线最小业务流程：固定 seed 配对、兼容 `PAIR_RSP(0x0F)`、工作态打印每帧 `0x11` 遥控值，删除正常路径刷屏日志，并补齐中文 Doxygen 头文件注释 |
 | 2026-04-26 | v1.0 | 新建 WIRELESS 模块，完成 LT8920 + KCT8206L 板级抽象、SPI4 接入、半双工收发框架和双天线启动扫描 |

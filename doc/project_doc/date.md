@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-05-05
- * @version v1.7.18
+ * @date    2026-05-06
+ * @version v1.7.19
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,30 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-06] - v1.7.19 WIRELESS最小业务配对接收
+
+### 变更记录
+- **[运行模式切换]** `WIRELESS_MINIMAL_TEST_ONLY=1` 现在运行无线最小业务链路：`Wireless_Poll()` + `ShipProtocol_RunScheduler()`，不再进入持续 `Wireless_RunPairTxOnlyTest()` 单向发包诊断。
+- **[诊断宏关闭]** `WIRELESS_TX_ONLY_TEST`、`WIRELESS_PAIR_TX_ONLY_TEST`、`WIRELESS_CONTINUOUS_TX_TEST` 默认改为 `0`；固定配对 seed 保持 `65 65 A0 65`。
+- **[配对兼容]** 船端按旧参考逻辑发送 10 次 `PAIR_REQ(0x10)` 后打开响应窗口；窗口内收到合法 `PAIR_RSP(0x0F)` 即认为配对成功，不再强制要求响应 payload 等于 seed。
+- **[状态机收敛]** `ship_protocol.c` 内部切为 `BOOT_WAIT -> PAIR_SEND -> PAIR_WAIT_RSP -> WORK_RX` 状态流；解析 `PAIR_RSP` 时只更新协议状态，RF 工作 RX 配置由调度器统一维护。
+- **[遥控值输出]** 收到 `THROTTLE(0x11)` 时每帧打印 `rc lr=... ud=... key=0x.. paired=1`，本轮只打印遥控器值，不调用电机控制。
+
+### 优化改进
+- **[日志降噪]** 删除正常路径中的 `mode->rx`、`mode->tx`、`tx done R3/R7/R48/R52`、`rx pkt len`、`rx frame len`、周期性 `status paired` 等刷屏日志；保留初始化、配对成功、进入工作态和错误日志。
+- **[接收窗口保护]** 配对响应窗口和无线最小工作态只在进入时配置 RX 信道/同步字；配对发送失败不会消耗 10 次配对包计数，避免没发够就误入响应窗口。
+- **[边界收敛]** 最后一包配对请求后，只有成功切入工作 RX 才开启 `PAIR_WAIT_RSP`；若 RF 配置失败，会回到下一轮配对发送，避免打开无效响应窗口。
+- **[协议层边界]** `PAIR_RSP` 解析函数不再直接重配 RF，只负责置 `paired/state`；工作 RX 由调度器统一应用，降低队列解析过程中清 FIFO 的风险。
+- **[API边界审核]** `ship_protocol.c` 只依赖 `wireless.h` 管理层 API，不直接 include `lt8920.h` 或读取芯片寄存器；`wireless.h`、`lt8920.h` 对外函数签名保持不变。
+- **[头文件注释]** `Code_boweny/Device/WIRELESS/` 下 `wireless.h`、`lt8920.h`、`wireless_port.h`、`ship_protocol.h` 已统一为中文 Doxygen 风格注释。
+
+### 开发者备注
+- 本次未修改 `Driver/`、`wireless.h` 或 `lt8920.h` 对外 API。
+- 当前目标是验证遥控器配对与接收值打印；GPS/IMU/MAG 和电机控制仍保持跳过或不调用。
+- Keil Rebuild 已通过：`0 Error(s), 10 Warning(s)`；当前 10 个 warning 来自既有 System_init/QMI8658/GPS/wireless_port 非本次无线业务主路径。
 
 ---
 

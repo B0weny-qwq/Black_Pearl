@@ -44,43 +44,6 @@ static void Wireless_MinimalTestUnit(void)
     }
 }
 
-#if WIRELESS_MINIMAL_TEST_ONLY
-static void Wireless_MinimalTxLoop(void)
-{
-#if !WIRELESS_CONTINUOUS_TX_TEST
-    static u8 timing_started = 0U;
-    static u32 last_tx_ms = 0U;
-#endif
-    static u8 log_div = 0U;
-#if !WIRELESS_CONTINUOUS_TX_TEST
-    u32 now_ms;
-#endif
-    s8 rc;
-
-#if !WIRELESS_CONTINUOUS_TX_TEST
-    now_ms = Task_GetTickMs();
-    if (!timing_started) {
-        timing_started = 1U;
-        last_tx_ms = now_ms;
-    } else if ((now_ms - last_tx_ms) < 10U) {
-        return;
-    } else {
-        last_tx_ms = now_ms;
-    }
-#endif
-
-    log_div++;
-    if (log_div >= 100U) {
-        log_div = 0U;
-    }
-
-    rc = Wireless_RunPairTxOnlyTest((log_div == 0U) ? 1U : 0U);
-    if (rc != SUCCESS) {
-        LOGE("WL", "pair txonly loop fail rc=%d", rc);
-    }
-}
-#endif
-
 #if !WIRELESS_MINIMAL_TEST_ONLY
 #define MAG_TEST_PERIOD_MS   1000U
 
@@ -324,7 +287,10 @@ void main(void)
         Wireless_Poll();
 #endif
 #if WIRELESS_MINIMAL_TEST_ONLY
-        Wireless_MinimalTxLoop();
+        Wireless_Poll();
+#if SHIP_PROTOCOL_POLL_ENABLE
+        ShipProtocol_RunScheduler();
+#endif
 #else
 #if SHIP_PROTOCOL_POLL_ENABLE
         ShipProtocol_RunScheduler();

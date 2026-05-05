@@ -2,12 +2,18 @@
  * @file    wireless.h
  * @brief   LT8920 无线链路管理层接口。
  * @author  boweny
- * @date    2026-05-05
- * @version v1.0
+ * @date    2026-05-06
+ * @version v1.1
  *
  * @details
- * 本模块在 LT8920 底层驱动之上提供初始化、收发队列、天线扫描、
- * 配对测试和链路参数切换接口。业务层通过本文件访问无线链路状态。
+ * 本模块在 LT8920 芯片层之上提供初始化、收发队列、天线扫描、
+ * 链路参数切换和 bring-up 诊断接口。业务层通常只需要调用
+ * Wireless_Init()、Wireless_Poll()、Wireless_Send()、Wireless_Receive()
+ * 以及必要的信道/同步字切换接口。
+ *
+ * @note
+ * Wireless_RunTxDiagBurst() 与 Wireless_RunPairTxOnlyTest() 是硬件 bring-up
+ * 诊断接口，不属于当前遥控器配对最小业务主路径。
  *
  * @see     Code_boweny/Device/WIRELESS/wireless.c
  */
@@ -128,6 +134,11 @@ s8 Wireless_SearchSignalPoll(void);
 
 /**
  * @brief   运行最小无线收发自测试流程。
+ *
+ * @details
+ * 用于上电后一次性验证 LT8920 SPI/寄存器读写链路。该函数会恢复默认
+ * 同步字和默认信道；在 WIRELESS_MINIMAL_TEST_ONLY=1 时不会进入短发包探测。
+ *
  * @return  SUCCESS=测试通过，WIRELESS_ERR_* 表示失败原因。
  */
 s8 Wireless_RunMinimalTest(void);
@@ -136,6 +147,9 @@ s8 Wireless_RunMinimalTest(void);
  * @brief      运行发送诊断突发测试。
  * @param[in]  log_detail  1=输出详细日志，0=只输出关键结果。
  * @return     SUCCESS=测试完成，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 仅用于硬件发射链路诊断；正常业务主循环不应周期调用该接口。
  */
 s8 Wireless_RunTxDiagBurst(u8 log_detail);
 
@@ -143,6 +157,10 @@ s8 Wireless_RunTxDiagBurst(u8 log_detail);
  * @brief      运行配对发送端单向诊断测试。
  * @param[in]  log_detail  1=输出详细日志，0=只输出关键结果。
  * @return     SUCCESS=测试完成，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 仅用于验证 PAIR_REQ(0x10) 单向发射，不接收遥控器响应；当前最小业务
+ * 配对流程由 ShipProtocol_RunScheduler() 负责。
  */
 s8 Wireless_RunPairTxOnlyTest(u8 log_detail);
 
@@ -150,6 +168,10 @@ s8 Wireless_RunPairTxOnlyTest(u8 log_detail);
  * @brief      设置无线工作信道。
  * @param[in]  channel  LT8920 信道号。
  * @return     SUCCESS=设置成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 调用后会重新打开 RX，底层可能清空 LT8920 RX FIFO；应只在协议状态切换
+ * 或发包前后等明确时机调用。
  */
 s8 Wireless_SetChannel(u8 channel);
 
@@ -157,6 +179,9 @@ s8 Wireless_SetChannel(u8 channel);
  * @brief      设置无线同步字。
  * @param[in]  sync_word  32 位同步字。
  * @return     SUCCESS=设置成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 调用后会重新打开 RX，底层可能清空 LT8920 RX FIFO。
  */
 s8 Wireless_SetSyncWord(u32 sync_word);
 
@@ -165,6 +190,10 @@ s8 Wireless_SetSyncWord(u32 sync_word);
  * @param[in]  reg36  同步字寄存器 36 的值。
  * @param[in]  reg39  同步字寄存器 39 的值。
  * @return     SUCCESS=设置成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 该接口用于兼容旧协议派生同步字，调用后会重新打开 RX，底层可能清空
+ * LT8920 RX FIFO。
  */
 s8 Wireless_SetSyncRegs(u16 reg36, u16 reg39);
 

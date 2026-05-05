@@ -2,12 +2,17 @@
  * @file    lt8920.h
  * @brief   LT8920 2.4GHz 无线收发芯片驱动接口。
  * @author  boweny
- * @date    2026-05-05
- * @version v1.0
+ * @date    2026-05-06
+ * @version v1.1
  *
  * @details
  * 提供 LT8920 初始化、信道/同步字配置、收发模式切换、FIFO 操作、
  * 状态读取和诊断信息读取接口。底层 SPI 与 GPIO 由 wireless_port 模块适配。
+ *
+ * @note
+ * 本文件属于芯片层接口，正常业务优先通过 wireless.h 管理层访问无线链路。
+ * 直接调用本层模式切换、同步字或 FIFO 接口时，要注意这些接口可能使芯片
+ * 进入 idle/RX/TX，并清空 TX/RX FIFO。
  *
  * @see     Code_boweny/Device/WIRELESS/lt8920.c
  */
@@ -30,8 +35,8 @@
 #define Packet_Length                12U          /**< 兼容旧测试流程的固定包长。 */
 #define Tx_Interval_mS               10U          /**< 兼容旧测试流程的发送间隔，单位 ms。 */
 #define Work_Type                    0U           /**< 兼容旧测试流程的工作类型标志。 */
-#define SyncPairWord                 0xE4E4E0E0UL /**< 配对流程使用的同步字。 */
-#define SyncTransferWord             0x6E6EFCFCUL /**< 数据传输流程使用的同步字。 */
+#define SyncPairWord                 0xE4E4E0E0UL /**< 兼容旧参考工程保留的配对同步字宏。 */
+#define SyncTransferWord             0x6E6EFCFCUL /**< 兼容旧参考工程保留的数据同步字宏。 */
 
 #define LT8920_STATUS_CRC_ERROR      0x8000U  /**< 状态寄存器 CRC 错误标志。 */
 #define LT8920_STATUS_SYNC_RECV      0x0080U  /**< 状态寄存器同步字接收标志。 */
@@ -50,6 +55,9 @@ s8 LT8920_Init(u8 channel, u32 sync_word);
  * @brief      设置 LT8920 工作信道。
  * @param[in]  channel  目标信道号。
  * @return     SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 该函数只写芯片信道并进入 idle，不负责恢复无线管理层状态。
  */
 s8 LT8920_SetChannel(u8 channel);
 
@@ -57,6 +65,9 @@ s8 LT8920_SetChannel(u8 channel);
  * @brief      设置 LT8920 32 位同步字。
  * @param[in]  sync_word  32 位同步字。
  * @return     SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 写入同步字前会进入 idle，完成后会清 RX FIFO。
  */
 s8 LT8920_SetSyncWord(u32 sync_word);
 
@@ -65,6 +76,9 @@ s8 LT8920_SetSyncWord(u32 sync_word);
  * @param[in]  reg36  同步字寄存器 36 的值。
  * @param[in]  reg39  同步字寄存器 39 的值。
  * @return     SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 写入同步寄存器前会进入 idle，完成后会清 RX FIFO。
  */
 s8 LT8920_SetSyncRegs(u16 reg36, u16 reg39);
 
@@ -95,6 +109,9 @@ s8 LT8920_EnterCarrierWave(void);
 /**
  * @brief   清空接收状态并打开接收窗口。
  * @return  SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 该函数会进入 idle、清 RX FIFO，然后重新进入 RX。
  */
 s8 LT8920_OpenRx(void);
 
@@ -129,6 +146,9 @@ s8 LT8920_ClearTxFifo(void);
 /**
  * @brief   清空接收 FIFO。
  * @return  SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 清 FIFO 会丢弃尚未读取的接收数据。
  */
 s8 LT8920_ClearRxFifo(void);
 
@@ -154,6 +174,9 @@ s8 LT8920_ForceTxPacket(const u8 *buf, u8 len);
  * @param[in]  buf_len  接收缓冲区容量，单位 byte。
  * @param[out] out_len  实际读取长度，单位 byte。
  * @return     SUCCESS=成功，WIRELESS_ERR_EMPTY=无包，其他 WIRELESS_ERR_* 表示失败。
+ *
+ * @note
+ * 读取完成或遇到 CRC/长度异常后会复位 RX 路径。
  */
 s8 LT8920_ReadPacket(u8 *buf, u8 buf_len, u8 *out_len);
 
@@ -170,7 +193,7 @@ s8 LT8920_ReadReg(u8 reg, u16 *value);
  * @param[out] reg       失败寄存器地址输出指针，可为 NULL。
  * @param[out] expected  期望值输出指针，可为 NULL。
  * @param[out] actual    实际值输出指针，可为 NULL。
- * @return     none
+ * @return     无。
  */
 void LT8920_GetVerifyFailure(u8 *reg, u16 *expected, u16 *actual);
 
