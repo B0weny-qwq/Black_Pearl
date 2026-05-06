@@ -1,3 +1,19 @@
+/**
+ * @file    wireless_port.c
+ * @brief   无线模块板级端口适配实现。
+ * @author  boweny
+ * @date    2026-05-06
+ * @version v1.1
+ *
+ * @details
+ * 本文件集中管理 LT8920/KCT8206L 所需 GPIO、SPI、复位、天线选择、
+ * RXEN/TXEN 和延时接口。芯片层只通过本文件访问硬件引脚，避免
+ * 业务协议代码直接操作 `Pxx` 端口。
+ *
+ * @note
+ * 默认引脚以当前 Black Pearl v1.1 硬件为准：SCLK=P3.2、MISO=P3.3、
+ * MOSI=P3.4、CS=P3.5、RST=P5.0、ANT_SEL=P5.1、RXEN=P1.3、TXEN=P5.4。
+ */
 #include "wireless_port.h"
 
 #include "..\..\..\Driver\inc\STC32G_Delay.h"

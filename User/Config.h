@@ -46,9 +46,28 @@
 #define SHIP_PAIR_WAIT_RSP_TICKS       500
 
 /*
- * Wireless-only minimal test mode:
- * 1 = disable IMU/MAG/GPS test path and keep only wireless protocol flow.
- * 0 = normal runtime path.
+ * 遥控器油门 PWM 输出总开关：
+ * 0 = 当前测试模式，只打印 lr/ud/key，绝不驱动 Motor PWM。
+ * 1 = 允许把 cmd=0x11 的油门数据输出到 Motor_SetBothSpeed()。
+ */
+#define SHIP_THROTTLE_PWM_ENABLE       0
+
+/*
+ * P0.0 / ADC_CH8 battery sampling print parameters.
+ * SHIP_ADC_REF_MV is the ADC reference voltage in mV.
+ * If the battery is divided before P0.0, set:
+ *   battery_mv = adc_mv * SHIP_BAT_DIV_NUM / SHIP_BAT_DIV_DEN
+ * Keep 1/1 when P0.0 is connected directly to the measured voltage.
+ */
+#define SHIP_ADC_REF_MV                3300UL
+#define SHIP_BAT_DIV_NUM               1UL
+#define SHIP_BAT_DIV_DEN               1UL
+#define SHIP_ADC_LOG_ENABLE            1
+
+/*
+ * 无线最小业务测试模式：
+ * 1 = 关闭 IMU/MAG/GPS 测试路径，只保留无线配对、接收和回包流程。
+ * 0 = 启用正常运行路径。
  */
 #define WIRELESS_MINIMAL_TEST_ONLY     1
 #define WIRELESS_TX_ONLY_TEST          0

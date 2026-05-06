@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-06
- * @version v1.7.19
+ * @version v1.7.28
  *
  * @details
  * 本文档基于 2026-04-27 当前工程实际代码重新整理，
@@ -16,7 +16,7 @@
  * @see     date.md
  */
 
-# Black Pearl v1.1 - STC32G 工程总览
+# Black Pearl v1.1 工程总览
 
 > 本文档已按当前工程真实状态更新，不再沿用旧版“计划中的运行流”。
 > 若代码与旧描述冲突，以本文档和源码现状为准。
@@ -85,6 +85,7 @@ EAXSFR()
 -> GPIO_config()
 -> Switch_config()
 -> Timer_config()
+-> ADC_config()
 -> UART_config()
 -> I2C_config()
 -> EA = 1
@@ -115,13 +116,30 @@ while (1)
 当前串口重点输出：
 
 ```text
+[SHIP] I: pair ok, enter work channel rx_ch=13 tx_ch=13
 [SHIP] I: pair success paired=1 work_rx=... work_tx=... key=.../...
 [SHIP] I: rc lr=100 ud=142 key=0xA0 paired=1
+[SHIP] I: throttle=142 steering=100 key=0xA0
+[SHIP] I: pwm disabled by SHIP_THROTTLE_PWM_ENABLE=0
+[SHIP] I: adc p0.0 raw=2048 adc_mv=1650 bat_mv=1650 power=0x80
 ```
 
-`rc` 日志表示每一次收到的遥控器值，`lr/ud/key` 分别来自 `cmd=0x11` payload 的 3 个字节。本模式只打印遥控器值，不调用 `Motor_SetBothSpeed()`。
+当前无线测试验收项有两个硬性输出：收到有效 `PAIR_RSP(0x0F)` 后必须打印 `pair ok, enter work channel rx_ch=... tx_ch=...`；收到遥控器 `cmd=0x11` 后必须打印 `rc lr=... ud=... key=... paired=...` 和 `throttle=... steering=... key=...`。`lr/ud/key` 分别来自 `cmd=0x11` 载荷的 3 个字节。
 
-无线最小业务模式下，`Wireless_MinimalTestUnit()` 只执行一次 LT8920 固定寄存器签名自检；之后不进入 TX-only 诊断循环，而是由 `ShipProtocol_RunScheduler()` 发送 10 次 `PAIR_REQ(0x10)` 并等待 `PAIR_RSP(0x0F)`。当前固定 seed 为 `65 65 A0 65`，配对响应窗口内收到合法 `0x0F` 即视为配对成功。
+真实 PWM 油门输出由 `User/Config.h` 中 `SHIP_THROTTLE_PWM_ENABLE` 控制，默认值为 `0`。默认测试固件只打印遥控器值，不调用 `Motor_SetBothSpeed()`；每帧遥控数据会额外打印 `pwm disabled by SHIP_THROTTLE_PWM_ENABLE=0`，用于确认没有输出真实 PWM。只有显式改为 `1` 后，协议层才会初始化 `Motor` 并把 `ud` 油门轴映射到左右电机同速 PWM 输出。
+
+无线最小业务模式下，`Wireless_MinimalTestUnit()` 只执行一次 LT8920 固定寄存器签名自检；之后不进入单向发送诊断循环，而是由 `ShipProtocol_RunScheduler()` 发送 10 次 `PAIR_REQ(0x10)`。第 10 次发送完成后按老版 `RF_Encrypt_Config()` 等效流程只写 `reg36/reg39` 并停在配对信道空闲态，同时打开 `PAIR_RSP(0x0F)` 有效窗口；继续等待 30 个调度节拍后才打开工作接收。窗口内收到合法 `0x0F` 即打印配对成功。当前固定 seed 为 `65 65 A0 65`，按老版公式派生 `work_ch=13`、`key=32/30`。
+收到任意合法协议帧后，船体会立即回发一次 `0x12` 状态包，对齐老版 `WirelessProtocal_Resolve_Handle()` 末尾固定调用 `RF_Send_Gps_Data()` 的行为。`0x12` 载荷固定 15 字节，不新增字段；power 字段仍为老版位置的 1 字节，当前来自 `P0.0 / ADC_CH8` 的 12 位采样值右移 4 位。串口额外打印 ADC 原始值、ADC 输入端毫伏值、按分压参数还原的电池毫伏值，以及实际发送的 power 字节。
+
+当前接收时序已按 `Wireless_other/LT8920/LT8920_SPI.c` 对齐：工作同步只写 `reg36=key0/key0`、`reg39=key1/key1`，保留 `reg37=0x0380`、`reg38=0x5A5A`，不清 FIFO，不自动打开接收；工作接收打开顺序为 `reg7 idle -> reg52 clear -> reg8=0x6C90 -> reg7 RX`。无有效包时每 10 个调度节拍重新打开接收，对应老版 `Rx_TimeOUT > 10` 逻辑。`rxdbg` 会打印 `reg36/reg37/reg38/reg39`，用于现场确认同步寄存器是否与老版一致。
+
+当前发送时序也按老版 `LT8920_TxData()` 对齐：协议发送不再通过会自动开接收的 `Wireless_SetChannel()` 预设信道，而是走 `Wireless_SendOnChannel()`，执行 `reg7 idle(channel) -> reg52 clear -> FIFO -> reg7 TX -> reg7 idle(channel)`。发送前端保持老版 `RXEN=1`，发送时只拉高 `TXEN=1`，发送结束拉低 `TXEN=0`；后续是否进入接收由业务状态机显式决定。
+
+公开头文件约束已同步：
+
+- `wireless.h`：`Wireless_Receive()` 返回一次 LT8920 射频载荷，不承诺等于完整旧协议帧。
+- `ship_protocol.h`：本层是 `Wireless_other/wirelessProtocal.c` 移植兼容层，必须保持旧遥控器包格式、seed 派生、工作接收和固定 `0x12` 回包节奏。
+- `ShipProtocol_ParseFrame()` 只接收已经截出的完整 `AA..BB` 协议帧；主路径由 `ShipProtocol_RunScheduler()` 内部按旧版逐字节截帧。
 
 正常完整运行模式为 `AHRS_TEST_ONLY=0` 且 `WIRELESS_MINIMAL_TEST_ONLY=0`，`User/Main.c` 将接入 GPS、无线协议轮询、任务处理、MAG 独立测试和 AHRS 姿态融合：
 
@@ -146,13 +164,13 @@ while (1)
 
 - `Wireless_MinimalTestUnit()` 在系统启动后执行一次，读取 LT8920 固定寄存器签名，确认无线 SPI 链路可读
 - `GPS_Poll()` 高优先级处理 UART2 字节流，避免 GPS 串口堆积
-- `Wireless_Poll()` 高频轮询 LT8920 状态，维持常驻 RX 和发包后自动回 RX
+- `Wireless_Poll()` 高频轮询 LT8920 状态，维持常驻接收和发包后自动回到接收
 - `ShipProtocol_RunScheduler()` 执行配对、工作信道监听和协议收包调度
 - `ShipProtocol_Poll()` 仅在兼容开关启用时消费无线收包
-- `Wireless_SearchSignalPoll()` 执行无线搜索/信号扫描相关轮询
+- `Wireless_SearchSignalPoll()` 执行无线搜索和信号扫描相关轮询
 - `Task_Pro_Handler_Callback()` 消费 Timer0 标记任务，当前用于驱动 `P3.6` LED 闪烁
 - `MAG_StandalonePoll()` 每 1000ms 独立读取一次 QMC6309 原始三轴地磁数据，用于 IMU 不 ready 时单独验证磁力计；`AHRS_TEST_ONLY=1` 时不调用
-- `IMU_HighRatePoll()` 按 Timer0 1ms tick 节拍读取 QMI8658 6 轴数据，调用 AHRS 完成姿态融合，并低频读取 QMC6309 修正航向
+- `IMU_HighRatePoll()` 按 Timer0 1ms 调度节拍读取 QMI8658 6 轴数据，调用 AHRS 完成姿态融合，并低频读取 QMC6309 修正航向
 - `DisplayScan()` 当前仍未接入主循环
 - `Task.c` 当前已作为 LED 闪烁调度器参与运行
 
@@ -168,6 +186,7 @@ while (1)
 | `Switch_config()` | 启用 | 功能脚切换，UART2 已改为 `P1.0/P1.1` |
 | `Timer_config()` | 启用 | 仅启用 Timer0 1ms 中断 |
 | `UART_config()` | 启用 | 只初始化 UART1，用于 LOG |
+| `ADC_config()` | 启用 | 打开 STC32G ADC，当前 `P0.0 / ADC_CH8` 用于无线状态回传和串口 ADC 打印 |
 | `I2C_config()` | 启用 | 初始化硬件 I2C |
 | `Wireless_Init()` | 启用 | `AHRS_TEST_ONLY=0` 时初始化 LT8920、SPI4 和双天线扫描 |
 | `APP_config()` | 启用 | 当前保留 `Lamp_init()`，配置 `P3.6` LED |
@@ -215,6 +234,7 @@ while (1)
 | Timer1 | UART1 波特率发生器 | - | 给 LOG 使用 |
 | Timer2 | UART2 波特率发生器 | - | 已专门留给 GPS |
 | P3.6 | 单灯闪烁 | `P3.6` | `Lamp_init()` 配置，`Sample_Lamp()` 250ms 翻转 |
+| P0.0 | ADC 采样输入 | `P0.0 / ADC_CH8` | 已用于无线 `0x12` 状态包 power 字节回传；电压估算由 `SHIP_ADC_REF_MV`、`SHIP_BAT_DIV_NUM`、`SHIP_BAT_DIV_DEN` 控制 |
 | P5.0 | 无线复位 | `P5.0` | LT8920 `RST` |
 | P5.1 | 天线选择 | `P5.1` | `ANT_SEL` |
 | P5.4 | 发射使能 | `P5.4` | `TXEN` |
@@ -243,6 +263,7 @@ MOTOR 模块在 `Motor_Init()` 内部独立执行：
 - `Switch_config()` 仍保留默认 `SPI_P22_P23_P24_P25`
 - 无线模块在 `WirelessPort_Init()` 中会运行时切换为 `SPI_P35_P34_P33_P32`
 - 当前已启用模块中，没有其它运行链路依赖 SPI 第 2 组或第 4 组
+- `P0.0` 当前已切为 ADC 输入并关闭数字输入，用于采样后经无线状态包回传
 - MOTOR 当前不在 `SYS_Init()` 中自动调用，避免上电后电机误动作；需要运动控制时由上层显式调用 `Motor_Init()`
 
 ---
@@ -358,7 +379,7 @@ const GPS_State_t *GPS_GetState(void);
 - 射频芯片：单颗 `LT8920`
 - 前端芯片：`KCT8206L`
 - 当前总线：默认软件 SPI，宏 `WIRELESS_SOFT_SPI_TEST=0` 时可切换硬件 `SPI4`
-- 当前模式：单芯片半双工，默认常驻 RX，发送时切 TX，发完立即回 RX
+- 当前模式：单芯片半双工，默认常驻接收，发送时切换到发送，发完立即回到接收
 - 双天线策略：启动扫描 `ANT1/ANT2` 后固定到较优天线
 - 当前对外接口：
 
@@ -389,17 +410,23 @@ s8 Wireless_RescanAntenna(void);
 - 当前配对调度位于 `Code_boweny/Device/WIRELESS/ship_protocol.c`
 - 当前配对请求为 `cmd=0x10`，整帧格式固定为 `AA 06 10 seed0 seed1 seed2 seed3 xor BB`
 - 当前默认配对发射信道为 `0x7F`，固定 seed 为 `65 65 A0 65`
-- 当前 `seed[4]` 不是单纯持久化标记，而是当前配对输入；船端会基于它派生工作接收信道、工作发送信道和同步/密钥字节
-- 当前配对成功判定按旧遥控器兼容逻辑执行：配对响应窗口内收到合法 `cmd=0x0F` 即置 `paired=1`；若响应 payload 长度为 4，会在成功日志中打印该 payload 供调试
-- 当前单芯片配对状态机为 `BOOT_WAIT -> PAIR_SEND -> PAIR_WAIT_RSP -> WORK_RX`：每约 `300ms` 成功发送一次 `cmd=0x10`，累计 10 次后进入约 `5s` 响应窗口；窗口超时后自动重启下一轮配对
-- 当前配对请求发送失败不会消耗 10 次配对包计数；最后一包后若无法切入工作 RX，也不会提前打开响应窗口
-- 当前配对超时只输出业务级 `retry` 计数；协议层不直接读取 LT8920 状态寄存器，避免业务层越过 `wireless.h` 访问芯片层 API
-- 当前配对成功后不再在解析 `PAIR_RSP` 时直接重配 RF；解析层只更新协议状态，RF 工作 RX 由调度器统一维护，减少队列处理期间清 FIFO 的风险
-- 当前 `cmd=0x11` 遥控器值每帧打印 `rc lr=... ud=... key=0x.. paired=1`；本模式不调用电机控制
+- 当前 `seed[4]` 不是单纯持久化标记，而是当前配对输入；船端会基于它派生工作信道和同步/密钥字节
+- 当前收包解析按旧 `WirelessProtocal_Receive_Handle()` 对齐：在单个射频载荷内逐字节寻找 `0xAA`，第二字节作为长度字段，收满后校验 `xor` 和 `0xBB`；射频载荷超过 30 字节时按旧逻辑截为 10 字节处理
+- 当前 `ship_protocol.h` / `wireless.h` 已补充 Doxygen 边界说明：射频载荷与旧协议帧不是同一概念，协议层是移植兼容层，不允许随意新增载荷字段
+- 当前配对成功判定按旧遥控器兼容逻辑执行：配对响应窗口内收到合法 `cmd=0x0F` 即置 `paired=1`；若响应载荷长度为 4，会在成功日志中打印该载荷供调试
+- 当前单芯片配对状态机为 `BOOT_WAIT -> PAIR_SEND -> WORK_RX`：每约 `300ms` 成功发送一次 `cmd=0x10`，累计 10 次后只写工作同步寄存器并停在配对信道空闲态，同时保留约 `5s` 的 `PAIR_RSP(0x0F)` 有效窗口；等待 30 个调度节拍后才打开工作接收，窗口超时不重启配对
+- 当前配对请求发送失败不会消耗 10 次配对包计数；最后一包后若无法切入工作接收，也不会提前打开响应窗口
+- 当前配对发送失败只输出业务级 `retry` 计数；协议层不直接读取 LT8920 状态寄存器，避免业务层越过 `wireless.h` 访问芯片层 API
+- 当前配对成功后不再在解析 `PAIR_RSP` 时直接重配射频参数；解析层只更新协议状态，工作接收由调度器统一维护，减少队列处理期间清 FIFO 的风险
+- 当前工作同步寄存器对齐老版 `RF_Encrypt_Config()`：只写 `reg36=key0/key0` 和 `reg39=key1/key1`，不再把 `reg37/reg38` 清零，保持默认 `0x0380/0x5A5A`，且不清 FIFO、不自动打开接收
+- 当前协议发送路径对齐老版 `LT8920_TxData()`：指定信道发送后保持空闲态，不在配对包发送前后自动打开接收
+- 当前工作接收对齐老版 `RF_Receive()` 空闲处理：未收到 PKT 时累计空闲计数，超过 10 个调度节拍后重新执行 `LT8920_OpenRx()` 等效流程
+- 当前 `cmd=0x11` 遥控器值每帧打印 `rc lr=... ud=... key=0x.. paired=1` 和 `throttle=... steering=... key=...`；默认 `SHIP_THROTTLE_PWM_ENABLE=0`，不调用电机控制，只输出 `pwm disabled...` 安全确认日志
+- 当前每个通过校验的协议帧都会回发一次 `cmd=0x12`，包括旧版未显式处理的 `cmd=0x10/0x12/unknown`，以保持老业务固定回包节奏
 - 当前无线正常路径已删除 `mode->rx/mode->tx/tx done/rx pkt/rx frame/status` 等刷屏日志，只保留关键状态与错误日志
-- 当前无线业务层只依赖 `wireless.h` 管理层入口；`lt8920.h` 芯片层 API 仍公开给无线管理层和 bring-up 诊断使用，但不作为业务主路径入口
+- 当前无线业务层只依赖 `wireless.h` 管理层入口；`lt8920.h` 芯片层 API 仍公开给无线管理层和底层联调用途使用，但不作为业务主路径入口
 - 当前 `Code_boweny/Device/WIRELESS/` 下 4 个公开头文件均已补齐中文 Doxygen 风格文件头、宏/结构体字段说明和公开函数注释
-- 当前 Keil Rebuild 结果为 `0 Error(s), 10 Warning(s)`；告警来自既有 System_init/QMI8658/GPS/wireless_port 未引用或表达式告警，不在本次无线业务主路径文件中
+- 当前 Keil Build 结果为 `0 Error(s), 1 Warning(s)`；唯一告警为既有 `System_init.c` 中 `Sensor_I2C_prepare` 未引用静态函数。
 
 ### 6.8 MOTOR
 
@@ -549,13 +576,18 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-06 | v1.7.28 | 文档说明全部收敛为中文表述，统一“射频载荷、空闲态、调度节拍、底层联调”等术语；同步保持当前无线移植、ADC 回传和调试日志要求不变。 |
+| 2026-05-06 | v1.7.27 | 明确无线遥控器接收测试验收项：配对成功必须打印进入工作通道，收到 `cmd=0x11` 必须打印油门/转向/按键；新增 `SHIP_THROTTLE_PWM_ENABLE` 宏门控，默认关闭真实 PWM 输出，只做日志调试。 |
+| 2026-05-06 | v1.7.26 | 按 `Wireless_other/README.md` 逐项复核无线移植：修正 seed key 截断位置，默认 `65 65 A0 65` 派生为 `work_ch=13,key=32/30`；第 10 次配对包后只写 `reg36/reg39` 并停在配对信道空闲态，等待 30 个调度节拍后再打开工作接收；同步寄存器写入不再清 FIFO。 |
+| 2026-05-06 | v1.7.25 | 复核并修正配对发送时序：协议发送走 `Wireless_SendOnChannel()`，按旧版 `LT8920_TxData()` 在指定信道发送后保持空闲态；发送前端保持 `RXEN=1`，只脉冲 `TXEN`；工作 key 配置改为先在空闲态写寄存器，再显式打开工作接收。 |
+| 2026-05-06 | v1.7.24 | 对齐 `Wireless_other` 工作接收时序和同步寄存器保持策略：`SetSyncRegs()` 只写 reg36/reg39，保留 reg37/reg38 默认值；工作接收空闲时每 10 个调度节拍重开接收窗口，并在 `rxdbg` 打印同步寄存器。 |
 | 2026-04-22 | v1.0 | 初版工程总览建立 |
 | 2026-04-23 | v1.1 | 补充 QMC6309 / QMI8658 / Filter 相关说明 |
 | 2026-04-24 | v1.3 | 按当前工程真实状态重写总览，补充 GPS 模块、UART2 路由、Timer2 资源调整和当前主循环事实 |
 | 2026-04-26 | v1.4 | 补充 WIRELESS 模块接入、SPI4 资源占用、双天线策略与真实启动/主循环链路 |
 | 2026-04-27 | v1.5 | 新增 MOTOR PWM 驱动模块说明，补充 PWMA CH3/CH4 与 P2.4~P2.7 引脚占用 |
 | 2026-04-27 | v1.6 | 新增 Function/PID 定点 PID 控制器说明，补充 Keil 工程纳入状态与使用边界 |
-| 2026-05-06 | v1.7.19 | 切回 WIRELESS 最小业务配对接收流程，关闭 TX-only 诊断，以显式状态机完成配对响应窗口和工作态遥控值打印 |
+| 2026-05-06 | v1.7.19 | 切回 WIRELESS 最小业务配对接收流程，关闭单向发送诊断，以显式状态机完成配对响应窗口和工作态遥控值打印 |
 | 2026-05-05 | v1.7.18 | 补齐 WIRELESS 寄存器表、默认软件 SPI 快速分支、FIFO/TX 轮询时序与根目录 `Wireless/` 一致 |
 | 2026-05-05 | v1.7.16 | 补充 `ship_protocol.c` 当前单芯片半双工配对流、`seed` 对工作信道/同步字节的派生关系，以及配对响应校验与超时诊断说明 |
 | 2026-05-01 | v1.7.15 | QMI8658 默认切到旧 STC I2C 路径复测，并在启动日志标明 `i2c=legacy/ackdiag` |
@@ -566,7 +598,7 @@ STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=
 | 2026-05-01 | v1.7.10 | QMI8658 初始化改为按 `WHO_AM_I=0x05` 选择 `0x6B/0x6A` 地址 |
 | 2026-05-01 | v1.7.9 | AHRS 测试模式保留 ERROR 诊断，并移除泛化 `imu not ready` 刷屏 |
 | 2026-05-01 | v1.7.8 | 新增 AHRS 角度-only 串口测试模式，只保留 `rpy_cd/flags` 输出 |
-| 2026-04-27 | v1.7 | 新增 Function/AHRS 定点姿态融合说明，补充 1ms tick、轴向映射、IMU/MAG 融合链路与使用边界 |
+| 2026-04-27 | v1.7 | 新增 Function/AHRS 定点姿态融合说明，补充 1ms 调度节拍、轴向映射、IMU/MAG 融合链路与使用边界 |
 
 ---
 

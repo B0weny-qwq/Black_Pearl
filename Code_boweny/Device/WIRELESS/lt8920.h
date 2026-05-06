@@ -78,7 +78,8 @@ s8 LT8920_SetSyncWord(u32 sync_word);
  * @return     SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
  *
  * @note
- * 写入同步寄存器前会进入 idle，完成后会清 RX FIFO。
+ * 对齐 `Wireless_other` 的 `RF_Encrypt_Config()`：只改 reg36/reg39，
+ * 不改 reg37/reg38，不清 FIFO，也不自动打开 RX。
  */
 s8 LT8920_SetSyncRegs(u16 reg36, u16 reg39);
 
@@ -114,6 +115,17 @@ s8 LT8920_EnterCarrierWave(void);
  * 该函数会进入 idle、清 RX FIFO，然后重新进入 RX。
  */
 s8 LT8920_OpenRx(void);
+
+/**
+ * @brief      按旧版 `LT8920_OpenRx(FreqChannel, role)` 顺序打开指定信道 RX。
+ * @param[in]  channel  接收信道，范围 0x00~0x7F。
+ * @return     SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 该接口先更新内部信道，再执行 `reg7 idle -> reg52 clear -> reg8 -> reg7 RX`，
+ * 用于对齐 `Wireless_other` 工作接收入口。
+ */
+s8 LT8920_OpenRxOnChannel(u8 channel);
 
 /**
  * @brief      写入并启动发送一帧数据。

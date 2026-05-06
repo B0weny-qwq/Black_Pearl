@@ -15,6 +15,7 @@ Black Pearl v1.1 是一个基于 STC32G MCU 的嵌入式控制工程，使用 Ke
 | GPS 串口 | UART2，`P1.0 / P1.1` |
 | I2C 总线 | `P1.4 / P1.5` |
 | 无线芯片 | LT8920 + KCT8206L |
+| ADC 采样 | `P0.0 / ADC_CH8` |
 | 电机输出 | PWMA CH3 / CH4 |
 
 ## 目录结构
@@ -51,7 +52,9 @@ GPS 模块通过 UART2 接收 NMEA0183 数据，支持 `GGA`、`RMC`、`GSA`、`
 
 ### 无线通信
 
-无线模块基于 `LT8920 + KCT8206L`，使用 SPI4。当前实现为单芯片半双工通信：默认保持 RX，发送时短暂切到 TX，发送完成后回到 RX；启动时执行双天线扫描，收包状态通过寄存器轮询判断。
+无线模块基于 `LT8920 + KCT8206L`，使用 SPI4。当前实现为单芯片半双工通信；协议主路径按 `Wireless_other` 移植，不把遥控器协议改成新格式。
+
+当前无线业务按 `Wireless_other` 移植兼容：10 次 `PAIR_REQ(0x10)` 后先停在配对信道 idle，只写老版使用的 `reg36/reg39` 并保留 `reg37/reg38` 默认值；默认 seed `65 65 A0 65` 派生为 `work_ch=13`、`key=32/30`。等待 30 个调度 tick 后再打开工作 RX，RX 空闲时按旧版 `Rx_TimeOUT > 10` 周期性重开接收窗口。
 
 ### 电机驱动
 
@@ -83,13 +86,14 @@ EAXSFR()
 -> GPIO_config()
 -> Switch_config()
 -> Timer_config()
+-> ADC_config()
 -> UART_config()
 -> I2C_config()
 -> EA = 1
 -> APP_config()
 -> log_init()
--> GPS_Init()
 -> Wireless_Init()
+-> GPS_Init()              [skipped when WIRELESS_MINIMAL_TEST_ONLY=1]
 -> Sensor_I2C_prepare()
 -> QMC6309_Init()
 -> QMI8658_PowerOnSelfTest()
@@ -102,9 +106,10 @@ Wireless_MinimalTestUnit();
 
 while (1)
 {
+    /* GPS/IMU/MAG are skipped when WIRELESS_MINIMAL_TEST_ONLY=1. */
     GPS_Poll();
     Wireless_Poll();
-    ShipProtocol_Poll();
+    ShipProtocol_RunScheduler();
     Wireless_SearchSignalPoll();
     Task_Pro_Handler_Callback();
     IMU_HighRatePoll();
@@ -121,6 +126,7 @@ while (1)
 | UART2 | GPS |
 | I2C | QMI8658 / QMC6309 |
 | SPI4 | LT8920 无线模块 |
+| P0.0 / ADC_CH8 | 船体模拟量采样，经无线 `0x12` 原 power 字节回传，并打印 raw/电压估算值 |
 | Timer0 | 1 ms 系统节拍 |
 | Timer1 | UART1 波特率发生器 |
 | Timer2 | UART2 波特率发生器 |
@@ -130,6 +136,8 @@ while (1)
 ## 开发注意事项
 
 - `Driver/` 保存 STC 官方底层库，原则上不修改。
+- P0.0 电池电压估算由 `SHIP_ADC_REF_MV`、`SHIP_BAT_DIV_NUM`、`SHIP_BAT_DIV_DEN` 配置；无线帧仍只发送老版 1 字节 power 字段。
+- 无线业务是 `Wireless_other` 移植兼容，不是新协议重构；`Wireless_Receive()` 返回 RF payload，旧业务截帧和固定 `0x12` 回包在 `ship_protocol.c` 内完成。
 - 固件模块中应避免使用浮点运算。
 - 日志输出中不要使用 `%f`。
 - UART2 依赖 Timer2，因此会复用 Timer2 的示例模块需要保持关闭。
@@ -149,4 +157,4 @@ while (1)
 
 当前工程版本：`Black Pearl v1.1`
 
-本文档基于 2026-04-27 的工程状态整理。
+本文档基于 2026-05-06 的工程状态整理。

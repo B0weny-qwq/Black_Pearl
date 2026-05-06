@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-06
- * @version v1.7.19
+ * @version v1.7.28
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -16,7 +16,7 @@
  * @see     total.md
  */
 
-# Black Pearl v1.1 - 开发日志 (date.md)
+# Black Pearl v1.1 开发日志
 
 > 本文件是项目的**变更记录和 Bug 追踪文档**。
 > 每一次代码修改、Bug 发现与修复、功能增删都必须记录在此。
@@ -50,6 +50,146 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-06] - v1.7.28 文档中文化收敛
+
+### 优化改进
+- **[总览文档]** 更新 `doc/project_doc/total.md`，将正文中的“载荷、空闲态、调度节拍、射频、底层联调”等说明统一改写为中文表述，保留代码标识符、宏名和串口原始日志不变。
+- **[开发日志]** 更新 `doc/project_doc/date.md`，补记本次文档中文化收敛记录，确保版本追溯时可以区分“代码行为变更”和“文档措辞整理”。
+- **[无线说明]** 更新 `Code_boweny/Device/WIRELESS/README.md`，把接线说明、流程说明和注意事项中的英文叙述统一替换为中文术语。
+
+### 开发者备注
+- 本次仅整理文档表述，不修改无线业务逻辑、不修改寄存器时序，也不改变当前测试日志内容。
+
+---
+
+## [2026-05-06] - v1.7.27 无线遥控器接收测试日志与PWM门控
+
+### 新增功能
+- **[PWM安全门控]** 新增 `SHIP_THROTTLE_PWM_ENABLE` 宏，默认 `0`。默认测试模式下 `cmd=0x11` 只打印 `lr/ud/key`，不调用 `Motor_SetBothSpeed()`，避免遥控器联调时误输出真实 PWM。
+- **[测试确认日志]** 收到 `cmd=0x11` 时，在原有 `rc lr=... ud=... key=... paired=...` 和 `throttle=... steering=... key=...` 后追加 `pwm disabled by SHIP_THROTTLE_PWM_ENABLE=0`，用于现场确认当前没有驱动电机。
+
+### 优化改进
+- **[中文 Doxygen]** 检查 `Code_boweny/Device/WIRELESS/` 下 `.c/.h` 文件，补齐中文 Doxygen 文件头；`ship_protocol.c`、`lt8920.c`、`wireless.c`、`wireless_port.c` 已明确各自职责和移植边界。
+- **[测试验收文档]** 更新 `Code_boweny/Device/WIRELESS/README.md` 和 `total.md`，明确当前必须打印两类信息：配对成功后进入工作通道；收到遥控器油门/转向/按键数据。
+
+### 开发者备注
+- 真实 PWM 输出只能在手动把 `SHIP_THROTTLE_PWM_ENABLE` 改为 `1` 后启用；默认固件仍是无线配对和遥控器收包调试，不是运动控制固件。
+
+---
+
+## [2026-05-06] - v1.7.26 wireless-other配对寄存器与时序再对齐
+
+### Bug 修复
+- **[seed key 派生错误]** 当前 `ShipProtocol_ApplyDefaultRf()` 把 `(seed[0] << 4) >> 4` 的结果最后才转 `u8`，导致 seed `65 65 A0 65` 派生出 `key=128/126`。老版是先把左移结果截断为 8 位再右移，现已修正为 `key=32/30`，对应 `reg36=0x2020`、`reg39=0x1E1E`。
+- **[配对后 RX 时序偏差]** 当前第 10 次 `PAIR_REQ` 后会立即打开工作 RX；老版只执行 `RF_Encrypt_Config(SEND/REC)` 并保留 `lt8920_waitTimes=30`，后续才由 `RF_Receive(work_ch)` 打开 RX。现已改为第 10 包后只写 `reg36/reg39` 并停在配对信道 idle，等待 30 个调度 tick 后再打开工作 RX。
+- **[同步寄存器写入多余清 FIFO]** 当前 `LT8920_SetSyncRegs()` 末尾清 RX FIFO；老版 `RF_Encrypt_Config()` 不写 `reg52`。现已改为只写 `reg7 idle -> reg36 -> reg39`，不清 FIFO、不自动打开 RX。
+
+### 优化改进
+- **[RX入口寄存器顺序]** 新增 `LT8920_OpenRxOnChannel()`，工作 RX 打开时直接执行 `reg7 idle(work_ch) -> reg52 clear -> reg8=0x6C90 -> reg7 RX`，减少切信道过程中的额外 RX 动作。
+- **[诊断日志]** 首次配对发送打印完整 9 字节请求帧；第 10 包后打印 `pair-sync-idle` 寄存器快照，现场应看到 `reg7=0x007F`、`reg36=0x2020`、`reg39=0x1E1E`。
+
+### 开发者备注
+- 这是移植修正，不是协议重构；遥控器程序不可变，后续所有改动继续以 `Wireless_other/README.md` 的包格式、寄存器写入顺序和调度节拍为准。
+
+---
+
+## [2026-05-06] - v1.7.25 配对TX时序按LT8920_TxData对齐
+
+### Bug 修复
+- **[配对TX时序偏差]** `ShipProtocol_SendFrame()` 原先通过 `Wireless_SetChannel()` 设信道，该接口会先打开 RX；`Wireless_Send()` 发完又自动打开 RX。老版 `Wireless_Send()->LT8920_TxData()` 是 `reg7 idle(channel) -> reg52 clear -> FIFO -> reg7 TX -> reg7 idle(channel)`，配对包发送前后都不会自动开 RX。已新增 `Wireless_SendOnChannel()` 并切换协议发送路径，保证配对 `0x10` 真正按旧版 TX 时序发出。
+- **[前端使能偏差]** 老版初始化后 `RX_EN_H` 常开，TX 时只拉高 `TX_EN_H`，发送结束只拉低 `TX_EN_L`。当前 TX 前端已改为保持 `RXEN=1` 并拉高 `TXEN=1`，不再 TX 时强制关闭 RXEN。
+- **[加密配置时序偏差]** 老版 `RF_Encrypt_Config()` 只写 `reg36/reg39` 并停在 idle，真正打开工作 RX 是后续 `RF_Receive(work_ch)`。当前新增 `Wireless_SetSyncRegsIdle()`，`ShipProtocol_ApplyWorkRx()` 先 idle 写 key，再显式切工作信道 RX。
+
+### 优化改进
+- **[诊断日志]** 临时保留 `tx ok len=...`、`rx event ...`、`rx pkt len=...` 和 `work-rx reopen cnt=...`，用于下一轮确认配对包是否发出、是否看到遥控器回包边沿。
+
+### 开发者备注
+- 本次 review 结论：上一版工作 RX 寄存器值已经正确，但配对 TX 路径不严格等同老版；本轮修正的是“配对包发出去”的 TX 时序。
+- Keil Build 已通过：`0 Error(s), 0 Warning(s)`。
+
+---
+
+## [2026-05-06] - v1.7.24 RX时序与同步寄存器按Wireless_other对齐
+
+### Bug 修复
+- **[同步寄存器偏差]** 当前 `LT8920_SetSyncRegs()` 原先会把 `reg37/reg38` 清为 `0x0000`，但老版 `RF_Encrypt_Config()` 只写 `reg36=key0/key0` 和 `reg39=key1/key1`。已改为只写 `reg36/reg39`，保留 `reg37=0x0380`、`reg38=0x5A5A`，避免工作信道 RX 同步条件与不可修改的遥控器不一致。
+- **[RX空闲时序]** 工作态无有效包时增加 10 tick 周期性重开 RX，对齐老版 `RF_Receive()` 中 `Rx_TimeOUT > 10` 后重新 `LT8920_OpenRx()` 的行为。
+- **[空闲计时下溢]** 进入工作 RX 时初始化 `last_proto_rx_ms`，避免启动初期打印 `work-rx idle 4294967269ms` 这类 tick 下溢值。
+
+### 优化改进
+- **[RX诊断]** `rxdbg` 增加 `reg36/reg37/reg38/reg39` 打印，现场可直接确认同步寄存器是否为 `key0/key0, 0380, 5A5A, key1/key1`。
+- **[文档同步]** 更新 `README.md`、`Code_boweny/Device/WIRELESS/README.md`、`doc/project_doc/total.md`，明确当前 RX 时序是移植对齐，不是协议重构。
+
+### 开发者备注
+- Keil Build 已通过：`0 Error(s), 1 Warning(s)`；唯一告警为既有 `System_init.c(168): warning C174: 'Sensor_I2C_prepare': unreferenced 'static' function`。
+
+---
+
+## [2026-05-06] - v1.7.23 头文件Doxygen与移植边界文档同步
+
+### 优化改进
+- **[Doxygen注释]** `ship_protocol.h` 补充 `Wireless_other/wirelessProtocal.c` 移植背景、旧版帧格式、流式截帧、10 次配对后进入工作 RX、任意合法帧固定回 `0x12` 等约束。
+- **[接口边界]** `wireless.h` 补充 `Wireless_Receive()` 返回 LT8920 RF payload，不等同于旧业务协议帧；旧协议截帧由 `ShipProtocol_RunScheduler()` 内部完成。
+- **[文档同步]** 更新 `README.md`、`Code_boweny/Device/WIRELESS/README.md`、`doc/project_doc/total.md`，明确当前是移植兼容而不是协议重构。
+
+### 开发者备注
+- 后续修改无线业务时必须先对照 `Wireless_other`，不要把 RF payload 直接当完整 `AA..BB` 协议帧，也不要向 `0x12` payload 新增字段。
+- Keil Build 已通过：`0 Error(s), 1 Warning(s)`；唯一告警为既有 `System_init.c` 中 `Sensor_I2C_prepare` 未引用静态函数。
+
+---
+
+## [2026-05-06] - v1.7.22 wireless-other收包与回包业务对齐
+
+### Bug 修复
+- **[收包解析]** `ship_protocol.c` 原先要求 `Wireless_Receive()` 返回的数据必须从 `0xAA` 开始且长度刚好等于完整协议帧；现改为对齐旧 `WirelessProtocal_Receive_Handle()`，在单个 RF payload 内逐字节寻找 `0xAA`、按长度字段收帧、校验 `xor` 和 `0xBB` 后分发。
+- **[回包节奏]** 原先只对已识别命令回发 `0x12`；现对齐旧 `WirelessProtocal_Resolve_Handle()`，任意通过校验的协议帧分发结束后都回发一次 `0x12`。
+
+### 优化改进
+- **[旧业务对齐]** `cmd=0x12` 入站帧按旧版不做业务处理，仅保持合法帧后的 `0x12` 回包，不再额外解析或打印对端 `0x12` 内容。
+- **[兼容边界]** RF payload 长度超过旧版 `WIRELESS_PROTOCAL_MAX_LEN(30)` 时按旧逻辑截为 10 字节处理，避免新解析器行为比旧版更宽。
+
+### 开发者备注
+- `0x13/0x14/0x15` 老版依赖 `autoDrive_Set_ReturnPosition()`、`autoDrive_Set_FishPosition()`、`autoDrive_Set_Switch()`；当前工程没有这些模块实现，本轮未伪造业务动作，只保留接收日志和固定 `0x12` 回包。
+- Keil Build 已通过：`0 Error(s), 0 Warning(s)`。
+
+---
+
+## [2026-05-06] - v1.7.21 ADC打印与0x12格式收敛
+
+### 新增功能
+- **[ADC打印]** `ship_protocol.c` 在每次发送 `0x12` 状态包前打印 `P0.0 / ADC_CH8` 的 `raw/adc_mv/bat_mv/power`，便于现场直接观察采样值和实际进入无线帧的 1 字节 power 值。
+- **[电压估算]** `User/Config.h` 新增 `SHIP_ADC_REF_MV`、`SHIP_BAT_DIV_NUM`、`SHIP_BAT_DIV_DEN`，用于按实际分压比例把 ADC 输入端电压估算回电池端电压；默认 `1/1`，不假设硬件分压。
+
+### 优化改进
+- **[数据格式]** `0x12` payload 固定检查为 15 字节，power 仍占用老版原位置的 1 字节，不向遥控器新增字段。
+- **[配对流程]** 第 10 次 `PAIR_REQ(0x10)` 发送完成后按老版业务直接进入工作 RX，同时保留 `PAIR_RSP(0x0F)` 有效窗口用于打印配对成功，不再超时重启配对。
+- **[初始化]** 修正 `SYS_Init()` 中 `ADC_config()` 缩进，保留 P0.0 高阻输入和关闭数字输入配置。
+
+### 开发者备注
+- `Wireless_other` 只包含 `Power_ADC_Get_Level()` 调用点，不包含该函数实现和电量阈值；当前串口已打印 raw 和 power，后续若补齐老版阈值，可只替换 power 字节生成函数，不改无线帧格式。
+
+---
+
+## [2026-05-06] - v1.7.20 P0.0 ADC采样无线回传与文档同步
+
+### 新增功能
+- **[ADC回传]** 恢复 `ADC_config()` 初始化链路，当前 `P0.0` 已作为模拟输入启用，并通过无线 `0x12` 状态包的 power 字段回传。
+
+### 优化改进
+- **[引脚配置]** `GPIO_config()` 中将 `P0.0` 设为高阻输入并关闭数字输入，减少数字输入路径对 ADC 采样的干扰。
+- **[协议复用]** `ship_protocol.c` 新增本地 ADC 读取封装，直接读取 `ADC_CH8`，将 12 位采样值右移 4 位压缩为 1 字节后装入旧版 `0x12` 包结构，不改协议长度。
+- **[注释同步]** `ship_protocol.c` 中新增 P0.0 ADC 回传函数的中文 Doxygen 注释，说明通道映射、压缩方式和异常返回值。
+
+### 变更记录
+- **[无线状态包]** `0x12` 包中的 power 字段由固定 `0` 改为 `P0.0 / ADC_CH8` 实时采样值。
+- **[文档同步]** 更新 `README.md`、`Code_boweny/Device/WIRELESS/README.md`、`doc/project_doc/total.md`，补充 P0.0 ADC 占用、回传路径和串口观察点。
+
+### 开发者备注
+- 当前 power 字段仍为 1 字节，传输的是压缩后的 ADC 原始量；电压值只走串口日志，不进入无线 payload。
+- 若后续启用 `UART3_SW_P00_P01` 的实际业务，需要先处理它与 `P0.0` ADC 采样的引脚复用冲突。
 
 ---
 

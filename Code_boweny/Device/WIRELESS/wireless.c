@@ -1,3 +1,19 @@
+/**
+ * @file    wireless.c
+ * @brief   LT8920 无线链路管理层实现。
+ * @author  boweny
+ * @date    2026-05-06
+ * @version v1.1
+ *
+ * @details
+ * 本文件在 LT8920 芯片层之上维护初始化、天线选择、收发状态、
+ * 接收队列、发送入口和调试接口。旧遥控器业务需要的指定信道发送、
+ * 同步寄存器 idle 写入、工作 RX 打开等流程在这里封装给协议层使用。
+ *
+ * @note
+ * `Wireless_Receive()` 返回的是 LT8920 RF payload，不等同于完整
+ * `AA | len | cmd | payload | xor | BB` 业务协议帧。
+ */
 #include "wireless.h"
 
 #include "lt8920.h"
@@ -29,6 +45,14 @@ static u8 g_wireless_rx_count = 0U;
 
 #ifndef WIRELESS_CARRIER_WAVE_TEST
 #define WIRELESS_CARRIER_WAVE_TEST 0
+#endif
+
+#ifndef WIRELESS_RX_TRACE_ENABLE
+#define WIRELESS_RX_TRACE_ENABLE 1
+#endif
+
+#ifndef WIRELESS_TX_TRACE_ENABLE
+#define WIRELESS_TX_TRACE_ENABLE 1
 #endif
 
 #ifndef PAIR_CHANNEL
@@ -160,10 +184,28 @@ static s8 Wireless_SetRxMode(void)
     return rc;
 }
 
+static s8 Wireless_SetRxModeOnChannel(u8 channel)
+{
+    s8 rc;
+
+#if !WIRELESS_FRONTEND_BYPASS_TEST
+    WirelessPort_SetTxEn(0U);
+    WirelessPort_SetRxEn(1U);
+    WirelessPort_DelayUs(5U);
+#endif
+
+    rc = LT8920_OpenRxOnChannel(channel);
+    if (rc == SUCCESS) {
+        g_wireless_state.mode = WIRELESS_MODE_RX;
+    }
+    return rc;
+}
+
 static void Wireless_EnableTxFrontend(void)
 {
 #if !WIRELESS_FRONTEND_BYPASS_TEST
-    WirelessPort_SetRxEn(0U);
+    /* Legacy LT8920_TxData() keeps RX_EN high and only pulses TX_EN. */
+    WirelessPort_SetRxEn(1U);
     WirelessPort_SetTxEn(1U);
     WirelessPort_DelayUs(5U);
 #endif
@@ -364,6 +406,10 @@ s8 Wireless_Poll(void)
         return SUCCESS;
     }
 
+#if WIRELESS_RX_TRACE_ENABLE
+    LOGI(WIRELESS_TAG, "rx event st=0x%04X mode=%u", status, (u16)g_wireless_state.mode);
+#endif
+
     if (g_wireless_state.mode == WIRELESS_MODE_TX) {
         g_wireless_state.tx_ok_count++;
         rc = Wireless_SetRxMode();
@@ -391,6 +437,19 @@ s8 Wireless_Poll(void)
     rc = LT8920_ReadPacket(packet_buf, LT8920_MAX_PAYLOAD_LEN, &packet_len);
     if (rc == SUCCESS) {
         g_wireless_state.rx_ok_count++;
+#if WIRELESS_RX_TRACE_ENABLE
+        LOGI(WIRELESS_TAG,
+             "rx pkt len=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
+             (u16)packet_len,
+             (u16)((packet_len > 0U) ? packet_buf[0] : 0U),
+             (u16)((packet_len > 1U) ? packet_buf[1] : 0U),
+             (u16)((packet_len > 2U) ? packet_buf[2] : 0U),
+             (u16)((packet_len > 3U) ? packet_buf[3] : 0U),
+             (u16)((packet_len > 4U) ? packet_buf[4] : 0U),
+             (u16)((packet_len > 5U) ? packet_buf[5] : 0U),
+             (u16)((packet_len > 6U) ? packet_buf[6] : 0U),
+             (u16)((packet_len > 7U) ? packet_buf[7] : 0U));
+#endif
         rc = Wireless_QueuePush(packet_buf, packet_len);
         if (rc != SUCCESS) {
             g_wireless_state.rx_drop_count++;
@@ -406,7 +465,7 @@ s8 Wireless_Poll(void)
     return SUCCESS;
 }
 
-s8 Wireless_Send(const u8 *buf, u8 len)
+static s8 Wireless_SendInternal(const u8 *buf, u8 len, u8 restore_rx)
 {
     u16 status;
     u16 timeout_cnt;
@@ -474,7 +533,12 @@ s8 Wireless_Send(const u8 *buf, u8 len)
 #endif
             g_wireless_state.mode = WIRELESS_MODE_IDLE;
 #if !WIRELESS_TX_ONLY_TEST
-            (void)Wireless_SetRxMode();
+            if (restore_rx != 0U) {
+                (void)Wireless_SetRxMode();
+            }
+#endif
+#if WIRELESS_TX_TRACE_ENABLE
+            LOGI(WIRELESS_TAG, "tx ok len=%u st=0x%04X", (u16)len, status);
 #endif
             return SUCCESS;
         }
@@ -484,7 +548,9 @@ s8 Wireless_Send(const u8 *buf, u8 len)
     (void)Wireless_SetIdleMode();
     (void)LT8920_ClearTxFifo();
 #if !WIRELESS_TX_ONLY_TEST
-    (void)Wireless_SetRxMode();
+    if (restore_rx != 0U) {
+        (void)Wireless_SetRxMode();
+    }
 #endif
     g_wireless_state.last_error = WIRELESS_ERR_TIMEOUT;
     if (LT8920_ReadStatus(&status) != SUCCESS) {
@@ -496,6 +562,29 @@ s8 Wireless_Send(const u8 *buf, u8 len)
     LOGE(WIRELESS_TAG, "tx timeout len=%u st=0x%04X reg52=0x%04X",
          (u16)len, status, fifo_dbg);
     return WIRELESS_ERR_TIMEOUT;
+}
+
+s8 Wireless_Send(const u8 *buf, u8 len)
+{
+    return Wireless_SendInternal(buf, len, 1U);
+}
+
+s8 Wireless_SendOnChannel(u8 channel, const u8 *buf, u8 len)
+{
+    s8 rc;
+
+    if ((!g_wireless_state.initialized) || (!g_wireless_state.ready)) {
+        return WIRELESS_ERR_STATE;
+    }
+
+    rc = LT8920_SetChannel(channel);
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        return rc;
+    }
+    g_wireless_state.mode = WIRELESS_MODE_IDLE;
+
+    return Wireless_SendInternal(buf, len, 0U);
 }
 
 s8 Wireless_Receive(u8 *buf, u8 buf_len, u8 *out_len)
@@ -963,8 +1052,8 @@ s8 Wireless_RunMinimalTest(void)
         LOGE(WIRELESS_TAG, "test read reg39 fail rc=%d", rc);
         return rc;
     }
-    if ((reg36 != 0x1357U) || (reg37 != 0x0000U) ||
-        (reg38 != 0x0000U) || (reg39 != 0x2468U)) {
+    if ((reg36 != 0x1357U) || (reg37 != 0x0380U) ||
+        (reg38 != 0x5A5AU) || (reg39 != 0x2468U)) {
         LOGE(WIRELESS_TAG,
              "test verify sync fail r36=0x%04X r37=0x%04X r38=0x%04X r39=0x%04X",
              reg36, reg37, reg38, reg39);
@@ -1027,13 +1116,7 @@ s8 Wireless_SetChannel(u8 channel)
         return WIRELESS_ERR_STATE;
     }
 
-    rc = LT8920_SetChannel(channel);
-    if (rc != SUCCESS) {
-        g_wireless_state.last_error = rc;
-        return rc;
-    }
-
-    rc = Wireless_SetRxMode();
+    rc = Wireless_SetRxModeOnChannel(channel);
     if (rc != SUCCESS) {
         g_wireless_state.last_error = rc;
         return rc;
@@ -1085,5 +1168,97 @@ s8 Wireless_SetSyncRegs(u16 reg36, u16 reg39)
         return rc;
     }
 
+    return SUCCESS;
+}
+
+s8 Wireless_SetSyncRegsIdle(u16 reg36, u16 reg39)
+{
+    s8 rc;
+
+    if (!g_wireless_state.initialized) {
+        return WIRELESS_ERR_STATE;
+    }
+
+    rc = LT8920_SetSyncRegs(reg36, reg39);
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        return rc;
+    }
+
+    g_wireless_state.mode = WIRELESS_MODE_IDLE;
+    return SUCCESS;
+}
+
+s8 Wireless_GetRxDebug(Wireless_RxDebug_t *dbg)
+{
+    s8 rc;
+    u16 reg7;
+    u16 reg8;
+    u16 reg36;
+    u16 reg37;
+    u16 reg38;
+    u16 reg39;
+    u16 reg48;
+    u16 reg52;
+    u8 rssi;
+
+    if (dbg == 0) {
+        return WIRELESS_ERR_PARAM;
+    }
+    if (!g_wireless_state.initialized) {
+        return WIRELESS_ERR_STATE;
+    }
+
+    rc = LT8920_ReadReg(7U, &reg7);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    rc = LT8920_ReadReg(8U, &reg8);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    rc = LT8920_ReadReg(36U, &reg36);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    rc = LT8920_ReadReg(37U, &reg37);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    rc = LT8920_ReadReg(38U, &reg38);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    rc = LT8920_ReadReg(39U, &reg39);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    rc = LT8920_ReadStatus(&reg48);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    rc = LT8920_ReadReg(52U, &reg52);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    rc = LT8920_ReadRawRssi(&rssi);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+
+    dbg->reg7 = reg7;
+    dbg->reg8 = reg8;
+    dbg->reg36 = reg36;
+    dbg->reg37 = reg37;
+    dbg->reg38 = reg38;
+    dbg->reg39 = reg39;
+    dbg->reg48 = reg48;
+    dbg->reg52 = reg52;
+    dbg->rssi = rssi;
+    dbg->rx_en = WirelessPort_GetRxEn();
+    dbg->tx_en = WirelessPort_GetTxEn();
+    dbg->mode = g_wireless_state.mode;
+    dbg->rx_mode_bit = (u8)(((reg7 & 0x0080U) != 0U) ? 1U : 0U);
+    dbg->channel = (u8)(reg7 & 0x007FU);
     return SUCCESS;
 }

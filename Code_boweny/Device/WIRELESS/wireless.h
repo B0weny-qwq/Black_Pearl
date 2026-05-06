@@ -11,6 +11,11 @@
  * Wireless_Init()、Wireless_Poll()、Wireless_Send()、Wireless_Receive()
  * 以及必要的信道/同步字切换接口。
  *
+ * Wireless_Receive() 返回的是 LT8920 RF payload，即发送端写入 FIFO 的
+ * 业务字节序列，不负责按 `AA | len | cmd | payload | xor | BB` 做协议截帧。
+ * 旧遥控器兼容协议的逐字节找帧和业务分发由 ShipProtocol_RunScheduler()
+ * 内部完成。
+ *
  * @note
  * Wireless_RunTxDiagBurst() 与 Wireless_RunPairTxOnlyTest() 是硬件 bring-up
  * 诊断接口，不属于当前遥控器配对最小业务主路径。
@@ -72,6 +77,27 @@ typedef struct
 } Wireless_State_t;
 
 /**
+ * @brief   无线接收路径调试快照。
+ */
+typedef struct
+{
+    u16 reg7;        /**< LT8920 reg7（模式位+信道位）。 */
+    u16 reg8;        /**< LT8920 reg8（收发相关配置）。 */
+    u16 reg36;       /**< LT8920 reg36（老版同步字低段/key0 key0）。 */
+    u16 reg37;       /**< LT8920 reg37（老版保留默认同步段）。 */
+    u16 reg38;       /**< LT8920 reg38（老版保留默认同步段）。 */
+    u16 reg39;       /**< LT8920 reg39（老版同步字高段/key1 key1）。 */
+    u16 reg48;       /**< LT8920 reg48（PKT/CRC 等状态位）。 */
+    u16 reg52;       /**< LT8920 reg52（FIFO 状态/计数）。 */
+    u8 rssi;         /**< LT8920 原始 RSSI 读数。 */
+    u8 rx_en;        /**< 前端 RXEN 引脚状态。 */
+    u8 tx_en;        /**< 前端 TXEN 引脚状态。 */
+    u8 mode;         /**< 无线管理层当前模式，见 WIRELESS_MODE_*。 */
+    u8 rx_mode_bit;  /**< reg7 的 RX 模式位，1=RX，0=非RX。 */
+    u8 channel;      /**< reg7 低 7 位信道值。 */
+} Wireless_RxDebug_t;
+
+/**
  * @brief   初始化无线链路。
  * @return  SUCCESS=成功，WIRELESS_ERR_* 表示失败原因。
  */
@@ -98,11 +124,28 @@ s8 Wireless_Poll(void);
 s8 Wireless_Send(const u8 *buf, u8 len);
 
 /**
+ * @brief      按旧版 `LT8920_TxData()` 时序在指定信道发送一帧。
+ * @param[in]  channel  发送信道。
+ * @param[in]  buf      待发送 RF payload。
+ * @param[in]  len      payload 长度，单位 byte。
+ * @return     SUCCESS=发送完成，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 该接口用于 `Wireless_other` 业务移植：先把 reg7 写到指定信道 idle，
+ * 再清 TX FIFO、写 FIFO、进入 TX，发送结束后保持 idle，不自动打开 RX。
+ */
+s8 Wireless_SendOnChannel(u8 channel, const u8 *buf, u8 len);
+
+/**
  * @brief      从无线接收队列读取一帧数据。
  * @param[out] buf      接收缓冲区指针。
  * @param[in]  buf_len  接收缓冲区容量，单位 byte。
  * @param[out] out_len  实际读出的帧长度，单位 byte。
  * @return     SUCCESS=读取成功，WIRELESS_ERR_EMPTY=无数据，其他 WIRELESS_ERR_* 表示失败。
+ *
+ * @note
+ * 这里的“一帧”指一次 LT8920 RF payload，不等同于旧业务协议帧。
+ * 业务层必须允许 payload 内存在前导噪声或多余字节，并由协议层按长度字段截帧。
  */
 s8 Wireless_Receive(u8 *buf, u8 buf_len, u8 *out_len);
 
@@ -192,9 +235,28 @@ s8 Wireless_SetSyncWord(u32 sync_word);
  * @return     SUCCESS=设置成功，WIRELESS_ERR_* 表示失败原因。
  *
  * @note
- * 该接口用于兼容旧协议派生同步字，调用后会重新打开 RX，底层可能清空
- * LT8920 RX FIFO。
+ * 该接口用于兼容 `Wireless_other` 中由 seed 派生的同步字，只更新 reg36/reg39，
+ * 保持 reg37/reg38 为老版默认值；调用后会重新打开 RX，底层可能清空 LT8920 RX FIFO。
  */
 s8 Wireless_SetSyncRegs(u16 reg36, u16 reg39);
+
+/**
+ * @brief      按旧版 `RF_Encrypt_Config()` 时序只写同步寄存器并停在 idle。
+ * @param[in]  reg36  同步字寄存器 36 的值。
+ * @param[in]  reg39  同步字寄存器 39 的值。
+ * @return     SUCCESS=设置成功，WIRELESS_ERR_* 表示失败原因。
+ *
+ * @note
+ * 该接口只改 reg36/reg39，不清 FIFO，并保持 idle，不自动打开 RX；业务层随后应显式
+ * 切到工作信道 RX，对齐旧版 `RF_Receive(work_ch)`。
+ */
+s8 Wireless_SetSyncRegsIdle(u16 reg36, u16 reg39);
+
+/**
+ * @brief      读取当前接收路径调试快照。
+ * @param[out] dbg  调试快照输出指针。
+ * @return     SUCCESS=读取成功，WIRELESS_ERR_* 表示失败原因。
+ */
+s8 Wireless_GetRxDebug(Wireless_RxDebug_t *dbg);
 
 #endif

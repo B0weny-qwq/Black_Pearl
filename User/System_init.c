@@ -40,7 +40,9 @@ u8 g_qmi8658_ready = 0;
 //========================================================================
 void	GPIO_config(void)
 {
-	P0_MODE_IO_PU(GPIO_Pin_All);		//P0 设置为准双向�?
+	P0_MODE_IO_PU(GPIO_Pin_All);
+	P0_MODE_IN_HIZ(GPIO_Pin_0);		//P0.0 used for ADC sampling
+	P0_DIGIT_IN_DISABLE(GPIO_Pin_0);	//Disable digital input on P0.0 for ADC
 	P1_MODE_IN_HIZ(GPIO_Pin_LOW);		//P1.0~P1.3 设置为高阻输�?
 	P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);		//P1.4,P1.5 设置为漏极开�?
 	P2_MODE_IO_PU(GPIO_Pin_All);		//P2 设置为准双向�?
@@ -323,7 +325,7 @@ void	SYS_Init(void)
 	GPIO_config();
 	Switch_config();
 	Timer_config();
-//	ADC_config();
+	ADC_config();
 	UART_config();
 //	Exti_config();
 	I2C_config();
@@ -363,6 +365,7 @@ void	SYS_Init(void)
 	g_qmi8658_ready = 0;
 #endif
 }
+
 
 
 

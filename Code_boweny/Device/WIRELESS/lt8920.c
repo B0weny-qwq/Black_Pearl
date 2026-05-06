@@ -1,3 +1,19 @@
+/**
+ * @file    lt8920.c
+ * @brief   LT8920 2.4GHz 无线收发芯片寄存器与 FIFO 驱动实现。
+ * @author  boweny
+ * @date    2026-05-06
+ * @version v1.1
+ *
+ * @details
+ * 本文件负责 LT8920 默认寄存器表加载、寄存器读写、FIFO 读写、
+ * TX/RX 模式切换和调试状态读取。当前寄存器配置和收发入口顺序按
+ * `Wireless_other/LT8920/LT8920_SPI.c` 对齐，用于旧遥控器业务移植。
+ *
+ * @note
+ * 本层不解析业务协议，不决定配对状态；业务调度由 `ship_protocol.c`
+ * 完成。修改寄存器顺序前必须先对照 `Wireless_other`。
+ */
 #include "lt8920.h"
 
 #include "wireless.h"
@@ -325,21 +341,15 @@ s8 LT8920_SetSyncRegs(u16 reg36, u16 reg39)
         return rc;
     }
 
-    rc = LT8920_WriteReg(37U, 0x0000U);
-    if (rc != SUCCESS) {
-        return rc;
-    }
-    rc = LT8920_WriteReg(38U, 0x0000U);
-    if (rc != SUCCESS) {
-        return rc;
-    }
-
+    /* 旧版 RF_Encrypt_Config() 只重写 reg36/reg39。
+     * reg37/reg38 必须保持配对默认值，才能兼容不可修改的遥控器。
+     */
     rc = LT8920_WriteReg(39U, reg39);
     if (rc != SUCCESS) {
         return rc;
     }
 
-    return LT8920_ClearRxFifo();
+    return SUCCESS;
 }
 
 s8 LT8920_EnterIdle(void)
@@ -389,6 +399,16 @@ s8 LT8920_OpenRx(void)
     }
 
     return LT8920_UpdateModeRegister(0x0080U);
+}
+
+s8 LT8920_OpenRxOnChannel(u8 channel)
+{
+    if (channel > 0x7FU) {
+        return WIRELESS_ERR_PARAM;
+    }
+
+    g_lt8920_channel = (u8)(channel & 0x7FU);
+    return LT8920_OpenRx();
 }
 
 s8 LT8920_EnterCarrierWave(void)

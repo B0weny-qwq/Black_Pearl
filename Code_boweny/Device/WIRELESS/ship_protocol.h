@@ -7,15 +7,33 @@
  *
  * @details
  * 定义船端无线帧格式的帧头、帧尾、命令字和对外调度函数。
- * 协议层负责解析配对、遥控器油门/转向、GPS 上报、返航和目标点等
- * 业务命令。当前无线最小业务只启用配对和遥控值打印，不驱动电机。
+ * 本模块是旧版 `Wireless_other/wirelessProtocal.c` 的船端业务移植层，
+ * 目标是保持旧遥控器不可修改时的数据格式和调度行为一致，而不是重新设计协议。
+ *
+ * 旧业务帧格式固定为：
+ * `AA | len | cmd | payload... | xor | BB`，其中 `len = 2 + payload_len`，
+ * `xor` 为从 `len` 到 payload 末尾所有字节异或。无线底层返回的是 LT8920
+ * RF payload，不保证刚好是一帧协议数据；调度器内部按旧版逻辑逐字节寻找
+ * `0xAA`、按长度字段收帧并校验后分发。
+ *
+ * 当前已对齐的旧业务：
+ * - 发送 10 次 `PAIR_REQ(0x10)` 后先按 `RF_Encrypt_Config()` 只写同步寄存器，
+ *   等待旧版 30 tick 节拍后再切到工作 RX。
+ * - `PAIR_RSP(0x0F)` 仅在有效窗口内置配对成功并打印。
+ * - 任意合法协议帧分发结束后立即回发一次 `GPS_REPORT(0x12)`。
+ * - `GPS_REPORT(0x12)` payload 保持老版 15 字节，不新增字段。
  *
  * @note
  * 当前主路径应调用 ShipProtocol_RunScheduler()，由调度器统一消费无线接收
  * 队列并维护配对状态。ShipProtocol_Poll() 仅保留为兼容入口，不应与调度器
  * 在同一主循环中同时启用，以免重复消费无线接收队列。
  *
+ * @warning
+ * 遥控器程序不可修改，后续修改本模块时必须优先对齐 `Wireless_other`
+ * 的包格式、通道/同步字派生和回包节奏；不要随意新增 payload 字段。
+ *
  * @see     Code_boweny/Device/WIRELESS/ship_protocol.c
+ * @see     Wireless_other/wirelessProtocal.c
  */
 
 #ifndef __SHIP_PROTOCOL_H__
@@ -23,17 +41,17 @@
 
 #include "config.h"
 
-#define SHIP_PROTO_HEAD          0xAAU  /**< 船端协议帧头字节。 */
-#define SHIP_PROTO_TAIL          0xBBU  /**< 船端协议帧尾字节。 */
-#define SHIP_PROTO_MAX_FRAME_LEN 64U    /**< 单帧最大长度，单位 byte。 */
+#define SHIP_PROTO_HEAD          0xAAU  /**< 旧版协议帧头字节。 */
+#define SHIP_PROTO_TAIL          0xBBU  /**< 旧版协议帧尾字节。 */
+#define SHIP_PROTO_MAX_FRAME_LEN 64U    /**< 本地接收缓冲区最大长度，单位 byte。 */
 
-#define SHIP_CMD_PAIR_RSP        0x0FU  /**< 配对响应命令。 */
-#define SHIP_CMD_PAIR            0x10U  /**< 配对请求命令。 */
-#define SHIP_CMD_THROTTLE        0x11U  /**< 油门/转向控制命令。 */
-#define SHIP_CMD_GPS_REPORT      0x12U  /**< GPS 状态上报命令。 */
-#define SHIP_CMD_RETURN_HOME     0x13U  /**< 一键返航命令。 */
-#define SHIP_CMD_GOTO_POINT      0x14U  /**< 目标点导航命令。 */
-#define SHIP_CMD_RETURN_SWITCH   0x15U  /**< 返航开关命令。 */
+#define SHIP_CMD_PAIR_RSP        0x0FU  /**< 旧遥控器配对响应命令。 */
+#define SHIP_CMD_PAIR            0x10U  /**< 船端配对请求命令，payload 固定 4 字节 seed。 */
+#define SHIP_CMD_THROTTLE        0x11U  /**< 遥控器油门/转向/按键命令，payload 为 lr/ud/key。 */
+#define SHIP_CMD_GPS_REPORT      0x12U  /**< 船端 GPS/状态回传命令，payload 固定 15 字节。 */
+#define SHIP_CMD_RETURN_HOME     0x13U  /**< 遥控器设置返航点命令。 */
+#define SHIP_CMD_GOTO_POINT      0x14U  /**< 遥控器设置目标点命令。 */
+#define SHIP_CMD_RETURN_SWITCH   0x15U  /**< 遥控器自动返航开关命令。 */
 
 /**
  * @brief   轮询无线接收数据并尝试解析协议帧。
@@ -41,14 +59,19 @@
  *
  * @note
  * 兼容入口。当前最小业务模式下由 ShipProtocol_RunScheduler() 负责收包和调度。
+ * 不要在同一主循环里同时调用两个入口。
  */
 void ShipProtocol_Poll(void);
 
 /**
- * @brief      解析一帧完整船端协议数据。
- * @param[in]  frame      指向协议帧缓冲区的指针。
- * @param[in]  frame_len  协议帧长度，单位 byte。
+ * @brief      解析一帧已经完整截出的旧版协议数据。
+ * @param[in]  frame      指向完整协议帧的指针，必须以 `0xAA` 开始、`0xBB` 结束。
+ * @param[in]  frame_len  完整协议帧长度，单位 byte。
  * @return     SUCCESS=解析并处理成功，WIRELESS_ERR_* 表示参数、校验或业务处理失败。
+ *
+ * @note
+ * 正常主路径不直接把 RF payload 传给本函数；调度器内部会先按旧版
+ * `WirelessProtocal_Receive_Handle()` 行为逐字节截帧。
  */
 s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len);
 
@@ -57,9 +80,15 @@ s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len);
  * @return  无。
  *
  * @details
- * 用于执行固定 seed 配对、配对响应窗口、工作信道监听和协议帧解析。
- * 当前最小业务配对成功后，每收到一帧 SHIP_CMD_THROTTLE(0x11) 都会打印
- * lr/ud/key，不调用电机控制。
+ * 用于执行固定 seed 配对、配对响应窗口、工作信道监听和旧版协议流式解析。
+ * 每收到一帧合法协议数据都会按旧版业务回发一次 `SHIP_CMD_GPS_REPORT(0x12)`；
+ * 收到 `SHIP_CMD_THROTTLE(0x11)` 时额外打印 lr/ud/key。
+ * 当前测试要求下，`SHIP_THROTTLE_PWM_ENABLE` 默认关闭，遥控器油门数据只打印，
+ * 不会直接输出到真实电机 PWM。
+ *
+ * @warning
+ * 当前工程缺少旧版 autoDrive / Power_ADC_Get_Level() 完整实现，相关业务只做
+ * 日志和状态包回传，不伪造自动驾驶动作。
  */
 void ShipProtocol_RunScheduler(void);
 
