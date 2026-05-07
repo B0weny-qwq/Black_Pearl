@@ -1037,25 +1037,34 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
     g_ship_rt.key = payload[2];
     g_ship_rt.valid = 1U;
     now_ms = Task_GetTickMs();
+    g_ship_rt.last_throttle_rx_ms = now_ms;
     g_ship_rt.last_proto_rx_ms = now_ms;
     g_ship_rt.rx_idle_warned = 0U;
+    g_ship_rt.throttle_recover_done = 0U;
     log_this_sample = ShipProtocol_ShouldLogManualSample(payload[0], payload[1], payload[2], now_ms);
+    if (g_ship_rt.throttle_online == 0U) {
+        g_ship_rt.throttle_online = 1U;
+        LOGI(SHIP_TAG, "remote link online by cmd=0x11");
+    }
 
     if (log_this_sample != 0U) {
-        LOGI(SHIP_TAG, "rc dbg cmd=0x11 lr=%u ud=%u key=0x%02X(%s) paired=%u",
+        LOGI(SHIP_TAG, "rc cmd=0x11 lr=%u ud=%u key=0x%02X(%s) paired=%u",
              (u16)g_ship_rt.lr,
              (u16)g_ship_rt.ud,
              (u16)g_ship_rt.key,
              ShipProtocol_KeyName(g_ship_rt.key),
              (u16)g_ship_rt.paired);
-        LOGI(SHIP_TAG, "throttle dbg raw=%u steering_raw=%u throttle_val=%d steering_val=%d key=0x%02X(%s)",
+        LOGI(SHIP_TAG, "throttle_raw=%u steering_raw=%u throttle_val=%d steering_val=%d key=0x%02X(%s)",
              (u16)g_ship_rt.ud,
              (u16)g_ship_rt.lr,
              (int16)g_ship_rt.ud - (int16)SHIP_AXIS_CENTER,
              (int16)g_ship_rt.lr - (int16)SHIP_AXIS_CENTER,
              (u16)g_ship_rt.key,
              ShipProtocol_KeyName(g_ship_rt.key));
-        LOGI(SHIP_TAG, "cmd=0x11 ignored for manual control");
+    }
+    ShipProtocol_HandleKey(g_ship_rt.ud, g_ship_rt.key);
+    if (g_ship_rt.pulse_active == 0U) {
+        ShipProtocol_ApplyManualControl(g_ship_rt.lr, g_ship_rt.ud, log_this_sample);
     }
     return log_this_sample;
 }
@@ -1449,6 +1458,29 @@ void ShipProtocol_RunScheduler(void)
             g_ship_rt.rx_idle_warned = 1U;
             LOGW(SHIP_TAG, "work-rx idle %lums, no valid frame", (u32)(now_ms - g_ship_rt.last_proto_rx_ms));
             ShipProtocol_LogRxDebug("rx-idle");
+        }
+
+        if ((g_ship_rt.throttle_online != 0U) &&
+            (g_ship_rt.last_throttle_rx_ms != 0UL) &&
+            ((now_ms - g_ship_rt.last_throttle_rx_ms) >= SHIP_THROTTLE_TIMEOUT_MS)) {
+            g_ship_rt.throttle_online = 0U;
+            LOGW(SHIP_TAG, "remote link timeout by cmd=0x11, dt=%lums",
+                 (u32)(now_ms - g_ship_rt.last_throttle_rx_ms));
+            ShipProtocol_StopMotion("remote timeout", 1U);
+            ShipProtocol_LogRxDebug("throttle-timeout");
+        }
+
+        if ((g_ship_rt.paired != 0U) &&
+            (g_ship_rt.throttle_recover_done == 0U) &&
+            (g_ship_rt.last_throttle_rx_ms != 0UL) &&
+            ((now_ms - g_ship_rt.last_throttle_rx_ms) >= SHIP_THROTTLE_RECOVER_MS)) {
+            g_ship_rt.throttle_recover_done = 1U;
+            ShipProtocol_ApplyDefaultRf();
+            g_ship_rt.work_rx_reopen_ticks = 0U;
+            LOGW(SHIP_TAG,
+                 "legacy remote recovery after %lums silence, re-open work-rx",
+                 (u32)(now_ms - g_ship_rt.last_throttle_rx_ms));
+            ShipProtocol_ReopenWorkRx("legacy remote recovery", 1U, 1U);
         }
 
     }

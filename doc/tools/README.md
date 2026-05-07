@@ -64,8 +64,9 @@ Web Serial 不能在普通 `file://` 本地文件上下文里访问串口。
 - `[SHIP] I: remote link online by cmd=0x11`
 - `[SHIP] W: remote link timeout by cmd=0x11 ...`
 - `[SHIP] I: rc cmd=0x11 ...`
-- `[SHIP] I: throttle dbg raw=...`
-- `[SHIP] I: cmd=0x11 ignored for manual control`
+- `[SHIP] I: throttle_raw=...`
+- `[SHIP] I: manual parse cmd=0x11 ...`
+- `[SHIP] I: manual motion=...`
 - `[SHIP] I: tx cmd=0x12 ...`
 - `[SHIP] I: gps state fix=... sat=... lon=... lat=... angle=... seq=...`
 - `[SHIP] I: adc p0.0 ...`
@@ -77,5 +78,5 @@ Web Serial 不能在普通 `file://` 本地文件上下文里访问串口。
 - 当前页面重点是给现场联调用，不是全协议抓包器。
 - 当前语义里：
   - “已配对”只表示工作信道和配对状态已建立。
-  - `0x11` 当前只作为兼容/调试日志使用，不再表示“遥控在线”，也不再驱动手动控制。
+  - `0x11` 表示遥控在线与手动控制输入。
 - 如果后续串口日志格式继续变化，只需要扩展页面里的正则解析规则，不需要改协议。
