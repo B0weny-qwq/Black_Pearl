@@ -799,6 +799,28 @@ static s8 ShipProtocol_TryPairSend(u16 left_after_send)
     return rc;
 }
 
+static s8 ShipProtocol_ArmPairRspWindow(u8 log_rxdbg)
+{
+    s8 rc;
+
+    rc = ShipProtocol_ApplyWorkSyncIdle(log_rxdbg);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+
+    g_ship_rt.pair_wait_rsp_time = SHIP_PAIR_WAIT_RSP_TICKS;
+    g_ship_rt.pair_wait_start_ms = Task_GetTickMs();
+    g_ship_rt.last_proto_rx_ms = g_ship_rt.pair_wait_start_ms;
+    g_ship_rt.pair_rsp_timeout_logged = 0U;
+
+    rc = ShipProtocol_ApplyWorkRx(log_rxdbg);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+
+    return SUCCESS;
+}
+
 static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
 {
     u8 payload[15];
@@ -907,7 +929,13 @@ static void ShipProtocol_HandlePairRsp(const u8 *payload, u8 payload_len)
 
     ShipProtocol_LogPayloadBrief("pair rsp rx", SHIP_CMD_PAIR_RSP, payload, payload_len);
     g_ship_rt.pair_wait_rsp_time = 0U;
+    g_ship_rt.pair_wait_start_ms = 0UL;
     g_ship_rt.paired = 1U;
+    g_ship_rt.pair_left = 0U;
+    g_ship_rt.wait_ticks = 0U;
+    g_ship_rt.state = SHIP_STATE_WORK_RX;
+    g_ship_rt.work_rx_configured = 1U;
+    g_ship_rt.work_state_logged = 0U;
     LOGI(SHIP_TAG, "pair ok, enter work channel rx_ch=%u tx_ch=%u",
          (u16)g_ship_rt.rf_channel[0],
          (u16)g_ship_rt.rf_channel[0]);
@@ -1226,6 +1254,12 @@ static void ShipProtocol_StepPairSend(void)
     s8 rc;
     u16 left_after_send;
 
+    if (g_ship_rt.paired != 0U) {
+        g_ship_rt.pair_left = 0U;
+        g_ship_rt.state = SHIP_STATE_WORK_RX;
+        return;
+    }
+
     if (g_ship_rt.pair_left > 0U) {
         g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
         left_after_send = (u16)(g_ship_rt.pair_left - 1U);
@@ -1235,21 +1269,23 @@ static void ShipProtocol_StepPairSend(void)
         }
         g_ship_rt.pair_left = left_after_send;
 
+        rc = ShipProtocol_ArmPairRspWindow((u8)((g_ship_rt.pair_left == 0U) ? 1U : 0U));
+        if (rc != SUCCESS) {
+            LOGE(SHIP_TAG, "pair rsp window arm fail rc=%d", rc);
+            g_ship_rt.pair_retry_count++;
+            g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
+            g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
+            g_ship_rt.pair_wait_rsp_time = 0U;
+            g_ship_rt.pair_wait_start_ms = 0UL;
+            return;
+        }
+
         if (g_ship_rt.pair_left == 0U) {
-            rc = ShipProtocol_ApplyWorkSyncIdle(1U);
-            if (rc != SUCCESS) {
-                LOGE(SHIP_TAG, "pair sync idle fail rc=%d", rc);
-                g_ship_rt.pair_retry_count++;
-                g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
-                g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
-                return;
-            }
-            g_ship_rt.pair_wait_rsp_time = SHIP_PAIR_WAIT_RSP_TICKS;
-            g_ship_rt.pair_wait_start_ms = Task_GetTickMs();
-            g_ship_rt.last_proto_rx_ms = g_ship_rt.pair_wait_start_ms;
-            g_ship_rt.pair_rsp_timeout_logged = 0U;
             g_ship_rt.state = SHIP_STATE_WORK_RX;
-            LOGI(SHIP_TAG, "pair sync idle done, wait %u ticks then work-rx",
+            LOGI(SHIP_TAG, "pair req burst done, enter rsp wait on work-rx");
+        } else {
+            LOGI(SHIP_TAG, "pair req sent, open rsp window seq_left=%u wait=%u",
+                 (u16)g_ship_rt.pair_left,
                  (u16)g_ship_rt.wait_ticks);
         }
     }

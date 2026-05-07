@@ -570,6 +570,8 @@
       reader: null,
       reading: false,
       lineBuffer: "",
+      remoteSeenAt: 0,
+      remoteTimeoutMs: 1800,
       lineCount: 0,
       eventCount: 0,
       manualCount: 0,
@@ -692,6 +694,35 @@
       } else {
         el.statusChip.style.background = "var(--panel-soft)";
         el.statusChip.style.color = "var(--accent-deep)";
+      }
+    }
+
+    function markRemoteOnline(detailText) {
+      state.remoteSeenAt = Date.now();
+      state.last.rcValue = "在线";
+      state.last.remoteInfo = detailText || "在线，已开始收到 0x11";
+      updateCards();
+    }
+
+    function markRemoteOffline(reasonText) {
+      state.last.rcValue = "离线";
+      state.last.remoteInfo = reasonText || "离线，0x11 超时";
+      updateCards();
+    }
+
+    function refreshRemoteTimeout() {
+      if (state.remoteSeenAt === 0) {
+        return;
+      }
+
+      if ((Date.now() - state.remoteSeenAt) >= state.remoteTimeoutMs) {
+        state.remoteSeenAt = 0;
+        if (state.last.rcValue !== "离线") {
+          state.last.rcMeta = `页面超时 ${state.remoteTimeoutMs}ms`;
+          state.last.warnInfo = `页面按老版链路判定遥控超时`;
+          markRemoteOffline(`离线，页面超时 ${state.remoteTimeoutMs}ms`);
+          pushTimeline(`页面按老版超时语义判定遥控离线，dt=${state.remoteTimeoutMs}ms`);
+        }
       }
     }
 
@@ -887,18 +918,17 @@
 
       const remoteOnline = line.match(/\[SHIP\] I: remote link online by cmd=0x11/);
       if (remoteOnline) {
-        state.last.rcValue = "在线";
-        state.last.remoteInfo = "在线，已开始收到 0x11";
+        markRemoteOnline("在线，已开始收到 0x11");
         pushTimeline("遥控链路上线，开始收到 0x11");
         important = true;
       }
 
       const timeout = line.match(/\[SHIP\] W: remote link timeout by cmd=0x11, dt=(\d+)ms/);
       if (timeout) {
-        state.last.rcValue = "离线";
         state.last.rcMeta = `超时 ${timeout[1]}ms`;
-        state.last.remoteInfo = `离线，0x11 超时 ${timeout[1]}ms`;
         state.last.warnInfo = `遥控超时 ${timeout[1]}ms`;
+        state.remoteSeenAt = 0;
+        markRemoteOffline(`离线，0x11 超时 ${timeout[1]}ms`);
         pushTimeline(`遥控超时 ${timeout[1]}ms`);
         important = true;
       }
@@ -906,9 +936,8 @@
       const rc = line.match(/\[SHIP\] I: rc cmd=0x11 lr=(\d+) ud=(\d+) key=(0x[0-9A-Fa-f]{2})\(([^)]+)\) paired=(\d+)/);
       if (rc) {
         state.manualCount += 1;
-        state.last.rcValue = "在线";
         state.last.rcMeta = `lr=${rc[1]} ud=${rc[2]} key=${rc[3]}(${rc[4]}) paired=${rc[5]}`;
-        state.last.remoteInfo = `在线，最近 0x11：lr=${rc[1]} ud=${rc[2]} key=${rc[4]}`;
+        markRemoteOnline(`在线，最近 0x11：lr=${rc[1]} ud=${rc[2]} key=${rc[4]}`);
         pushTimeline(`收到 0x11：lr=${rc[1]} ud=${rc[2]} key=${rc[4]} paired=${rc[5]}`);
         important = true;
       }
@@ -1186,6 +1215,7 @@
     function boot() {
       bindEvents();
       updateCards();
+      window.setInterval(refreshRemoteTimeout, 250);
 
       if (!("serial" in navigator)) {
         el.pickPortBtn.disabled = true;
