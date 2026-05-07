@@ -11,6 +11,10 @@
 #include "..\..\..\Driver\inc\STC32G_GPIO.h"
 #include "..\..\..\Driver\inc\STC32G_NVIC.h"
 
+#ifndef MOTOR_PWM_EDGE_MARGIN
+#define MOTOR_PWM_EDGE_MARGIN  40U
+#endif
+
 static PWMx_Duty g_motor_pwm_duty;
 static int16 g_left_speed = 0;
 static int16 g_right_speed = 0;
@@ -32,10 +36,10 @@ static u16 Motor_SpeedToDuty(int16 speed)
     duty = (int32)(MOTOR_PWM_PERIOD / 2U);
     duty += ((int32)speed * (int32)(MOTOR_PWM_PERIOD / 2U)) / (int32)MOTOR_SPEED_MAX;
 
-    if (duty < 0) {
-        duty = 0;
-    } else if (duty > (int32)MOTOR_PWM_PERIOD) {
-        duty = (int32)MOTOR_PWM_PERIOD;
+    if (duty < (int32)MOTOR_PWM_EDGE_MARGIN) {
+        duty = (int32)MOTOR_PWM_EDGE_MARGIN;
+    } else if (duty > (int32)(MOTOR_PWM_PERIOD - MOTOR_PWM_EDGE_MARGIN)) {
+        duty = (int32)(MOTOR_PWM_PERIOD - MOTOR_PWM_EDGE_MARGIN);
     }
 
     return (u16)duty;
