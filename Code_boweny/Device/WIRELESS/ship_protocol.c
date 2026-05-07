@@ -341,7 +341,9 @@ static void ShipProtocol_StartPulse(ShipMotion_t motion)
     g_ship_rt.pulse_motion = motion;
     g_ship_rt.pulse_expire_ms = Task_GetTickMs() + SHIP_PULSE_DURATION_MS;
     ShipProtocol_ApplyMotion(motion, SHIP_PULSE_SPEED, 1U);
-    LOGI(SHIP_TAG, "key pulse motion=%u dur=%ums", (u16)motion, (u16)SHIP_PULSE_DURATION_MS);
+    LOGI(SHIP_TAG, "key pulse motion=%s dur=%ums",
+         ShipProtocol_MotionName(motion),
+         (u16)SHIP_PULSE_DURATION_MS);
 }
 
 static void ShipProtocol_ServicePulse(u32 now_ms)
@@ -358,9 +360,9 @@ static void ShipProtocol_LogLightPending(void)
 {
     if (g_ship_rt.light_toggle_pending == 0U) {
         g_ship_rt.light_toggle_pending = 1U;
-        LOGW(SHIP_TAG, "key A received but ship light pin is not confirmed on v1.1");
+        LOGW(SHIP_TAG, "key action=A light-unbound");
     } else {
-        LOGI(SHIP_TAG, "key A received again, still waiting for ship light pin confirmation");
+        LOGI(SHIP_TAG, "key action=A light-unbound repeat");
     }
 }
 
@@ -429,16 +431,18 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
         ShipProtocol_LogLightPending();
         break;
     case SHIP_KEY_B_UNUSED:
-        LOGI(SHIP_TAG, "key B ignored to keep legacy no-op behavior");
+        LOGI(SHIP_TAG, "key action=B noop");
         break;
     case SHIP_KEY_C_PULSE_FORWARD:
+        LOGI(SHIP_TAG, "key action=C pulse-forward %ums", (u16)SHIP_PULSE_DURATION_MS);
         ShipProtocol_StartPulse(SHIP_MOTION_FORWARD);
         break;
     case SHIP_KEY_D_PULSE_BACKWARD:
+        LOGI(SHIP_TAG, "key action=D pulse-backward %ums", (u16)SHIP_PULSE_DURATION_MS);
         ShipProtocol_StartPulse(SHIP_MOTION_BACKWARD);
         break;
     case SHIP_KEY_E_RESERVED:
-        LOGI(SHIP_TAG, "key E reserved, autodrive side effects disabled tonight");
+        LOGI(SHIP_TAG, "key action=E reserved");
         break;
     case SHIP_KEY_NULL:
     default:
@@ -547,14 +551,20 @@ static u16 ShipProtocol_ReadU16BE(const u8 *buf)
     return (u16)(((u16)buf[0] << 8) | buf[1]);
 }
 
-static u16 ShipProtocol_ToCoord1(u32 abs_deg1e7)
+static void ShipProtocol_ToLegacyNmeaCoord(u32 abs_deg1e7, u16 *coord1, u16 *coord2)
 {
-    return (u16)(abs_deg1e7 / 10000000UL);
-}
+    u32 degrees;
+    u32 minutes_scaled1e4;
 
-static u16 ShipProtocol_ToCoord2(u32 abs_deg1e7)
-{
-    return (u16)(((abs_deg1e7 % 10000000UL) * 10000UL) / 10000000UL);
+    degrees = abs_deg1e7 / 10000000UL;
+    minutes_scaled1e4 = (((abs_deg1e7 % 10000000UL) * 6UL) + 50UL) / 100UL;
+    if (minutes_scaled1e4 >= 600000UL) {
+        degrees++;
+        minutes_scaled1e4 = 0UL;
+    }
+
+    *coord1 = (u16)((degrees * 100UL) + (minutes_scaled1e4 / 10000UL));
+    *coord2 = (u16)(minutes_scaled1e4 % 10000UL);
 }
 
 static void ShipProtocol_WriteU16LE(u8 *dst, u16 value)
@@ -830,8 +840,10 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
     u16 angle;
     u32 abs_lon;
     u32 abs_lat;
-    u16 coord1;
-    u16 coord2;
+    u16 lon_coord1;
+    u16 lon_coord2;
+    u16 lat_coord1;
+    u16 lat_coord2;
     s8 rc;
     char lon_dir;
     char lat_dir;
@@ -854,11 +866,10 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
         payload[idx++] = (u8)lon_dir;
         abs_lon = (u32)gps->lon_deg1e7;
     }
-    coord1 = ShipProtocol_ToCoord1(abs_lon);
-    coord2 = ShipProtocol_ToCoord2(abs_lon);
-    ShipProtocol_WriteU16LE(&payload[idx], coord1);
+    ShipProtocol_ToLegacyNmeaCoord(abs_lon, &lon_coord1, &lon_coord2);
+    ShipProtocol_WriteU16LE(&payload[idx], lon_coord1);
     idx += 2U;
-    ShipProtocol_WriteU16LE(&payload[idx], coord2);
+    ShipProtocol_WriteU16LE(&payload[idx], lon_coord2);
     idx += 2U;
 
     if (gps->lat_deg1e7 < 0) {
@@ -870,11 +881,10 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
         payload[idx++] = (u8)lat_dir;
         abs_lat = (u32)gps->lat_deg1e7;
     }
-    coord1 = ShipProtocol_ToCoord1(abs_lat);
-    coord2 = ShipProtocol_ToCoord2(abs_lat);
-    ShipProtocol_WriteU16LE(&payload[idx], coord1);
+    ShipProtocol_ToLegacyNmeaCoord(abs_lat, &lat_coord1, &lat_coord2);
+    ShipProtocol_WriteU16LE(&payload[idx], lat_coord1);
     idx += 2U;
-    ShipProtocol_WriteU16LE(&payload[idx], coord2);
+    ShipProtocol_WriteU16LE(&payload[idx], lat_coord2);
     idx += 2U;
 
     ShipProtocol_ReadPowerSample(&power);
@@ -907,6 +917,14 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
              (u16)gps->course_deg_x100,
              (u16)payload[13],
              (u32)gps->update_sequence);
+        LOGI(SHIP_TAG,
+             "gps payload oldfmt ew=%c lon1=%u lon2=%u ns=%c lat1=%u lat2=%u",
+             lon_dir,
+             (u16)lon_coord1,
+             (u16)lon_coord2,
+             lat_dir,
+             (u16)lat_coord1,
+             (u16)lat_coord2);
         ShipProtocol_LogPayloadBrief("tx frame", SHIP_CMD_GPS_REPORT, payload, idx);
     }
 

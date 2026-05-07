@@ -46,24 +46,22 @@
       box-shadow: var(--shadow);
     }
 
-    .hero {
+    .hero, .panel-body {
       padding: 18px 20px;
-      display: grid;
-      gap: 14px;
     }
 
-    .title-row {
+    .title-row, .subhead {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      flex-wrap: wrap;
       gap: 12px;
+      flex-wrap: wrap;
     }
 
     h1, h2, h3, p { margin: 0; }
     h1 { font-size: 28px; line-height: 1.1; }
     h2 { font-size: 18px; }
-    .subtitle { color: var(--muted); font-size: 14px; }
+    .subtitle, .meta, .footnote { color: var(--muted); font-size: 13px; }
 
     .status-chip {
       padding: 10px 14px;
@@ -79,249 +77,172 @@
       display: grid;
       grid-template-columns: repeat(8, minmax(0, 1fr));
       gap: 10px;
+      margin-top: 14px;
       align-items: end;
     }
 
     .field {
       display: grid;
       gap: 6px;
-      min-width: 0;
     }
 
-    .field label {
+    label {
       font-size: 12px;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
       color: var(--muted);
       font-weight: 700;
     }
 
-    .field input,
-    .field select,
-    .field textarea,
-    .field button {
+    select, input, textarea {
       width: 100%;
-      border-radius: 12px;
       border: 1px solid var(--line);
-      background: #fff;
+      border-radius: 12px;
+      padding: 9px 10px;
+      background: #fffdf8;
       color: var(--text);
       font: inherit;
     }
 
-    .field input,
-    .field select,
-    .field textarea {
-      padding: 11px 12px;
+    textarea {
+      min-height: 130px;
+      resize: vertical;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
     }
 
     .actions {
       display: flex;
-      gap: 10px;
+      gap: 8px;
       flex-wrap: wrap;
-      grid-column: span 3;
+      grid-column: span 2;
     }
 
-    button {
-      cursor: pointer;
-      padding: 11px 14px;
-      font-weight: 700;
-      transition: transform 120ms ease;
-    }
-
-    button:hover:enabled { transform: translateY(-1px); }
-    button:disabled { opacity: 0.45; cursor: not-allowed; }
-
-    .btn-primary {
-      background: linear-gradient(180deg, #b57138 0%, var(--accent) 100%);
-      border-color: var(--accent-deep);
-      color: #fff8f0;
-    }
-
-    .btn-secondary { background: #fff; color: var(--accent-deep); }
-    .btn-danger {
-      background: linear-gradient(180deg, #ca5b4d 0%, var(--bad) 100%);
-      border-color: #8f261f;
-      color: #fff8f6;
-    }
-    .btn-ghost { background: #f8f0e1; color: var(--text); }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-secondary { background: var(--accent-deep); color: white; }
+    .btn-danger { background: var(--bad); color: white; }
+    .btn-ghost { background: var(--panel-soft); color: var(--accent-deep); }
 
     .tips {
-      display: flex;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 10px;
-      flex-wrap: wrap;
-      font-size: 13px;
-      color: var(--muted);
+      margin-top: 12px;
     }
 
     .tip {
-      padding: 8px 10px;
-      border-radius: 12px;
       border: 1px dashed var(--line);
-      background: #faf2e4;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.45);
+      padding: 10px;
+      color: var(--muted);
+      font-size: 13px;
     }
 
     .grid {
       display: grid;
-      grid-template-columns: 1.22fr 0.78fr;
+      grid-template-columns: 1.2fr 0.8fr;
       gap: 12px;
     }
 
-    .panel-body { padding: 16px; }
-
-    .cards {
+    .cards, .gps-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 10px;
+      margin-top: 12px;
     }
 
-    .card {
-      padding: 14px;
-      border-radius: 16px;
+    .card, .gps-item {
       border: 1px solid var(--line);
-      background: linear-gradient(180deg, #fffdf8 0%, #f8efdf 100%);
+      border-radius: 16px;
+      padding: 12px;
+      background: #fffdf8;
+      min-height: 94px;
     }
 
     .label {
       color: var(--muted);
       font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
+      font-weight: 800;
     }
 
     .value {
-      margin-top: 8px;
+      margin-top: 6px;
       font-size: 24px;
-      font-weight: 800;
-      line-height: 1.12;
-    }
-
-    .meta {
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 13px;
-      min-height: 18px;
+      line-height: 1.1;
+      font-weight: 900;
+      color: var(--accent-deep);
       word-break: break-word;
-    }
-
-    .subhead {
-      margin-bottom: 12px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .inline-actions {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      color: var(--muted);
-      font-size: 13px;
-      flex-wrap: wrap;
     }
 
     .table {
       width: 100%;
       border-collapse: collapse;
+      margin-top: 12px;
       font-size: 13px;
     }
 
     .table td {
-      padding: 10px 8px;
-      border-top: 1px solid #ead9bc;
+      border-top: 1px solid var(--line);
+      padding: 8px 6px;
       vertical-align: top;
     }
 
     .table td:first-child {
-      width: 148px;
+      width: 142px;
       color: var(--muted);
-      font-weight: 700;
+      font-weight: 800;
     }
 
-    .timeline,
-    .rawlog,
-    .pastebox {
-      width: 100%;
-      border: 1px solid #23190e;
+    .inline-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .timeline, .rawlog {
+      margin-top: 10px;
+      border: 1px solid var(--line);
       border-radius: 14px;
-      background: #20180f;
-      color: #f8e0ad;
+      background: #1f1a14;
+      color: #f7e9c8;
       font-family: var(--mono);
       font-size: 12px;
-      line-height: 1.55;
+      line-height: 1.45;
       white-space: pre-wrap;
       overflow: auto;
-    }
-
-    .timeline {
-      min-height: 260px;
-      max-height: 380px;
-      padding: 14px;
-    }
-
-    .rawlog {
-      min-height: 300px;
-      max-height: 500px;
-      padding: 14px;
-    }
-
-    .pastebox {
-      min-height: 150px;
       padding: 12px;
-      resize: vertical;
     }
+
+    .timeline { height: 300px; }
+    .rawlog { height: 360px; }
 
     .footnote {
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 12px;
+      margin-top: 8px;
     }
 
-    .gps-block {
-      display: grid;
-      gap: 10px;
+    @media (max-width: 1100px) {
+      .toolbar, .grid, .tips { grid-template-columns: 1fr; }
+      .cards, .gps-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .actions { grid-column: auto; }
     }
 
-    .gps-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .gps-item {
-      padding: 12px;
-      border-radius: 14px;
-      background: #fbf3e5;
-      border: 1px solid #ebd8b5;
-    }
-
-    .gps-item .value {
-      font-size: 18px;
-      margin-top: 6px;
-    }
-
-    .split {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
-    @media (max-width: 1180px) {
-      .toolbar { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-      .actions { grid-column: span 4; }
-      .grid { grid-template-columns: 1fr; }
-      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-
-    @media (max-width: 720px) {
-      .shell { width: min(100vw, calc(100vw - 12px)); }
-      .toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .actions { grid-column: span 2; }
-      .cards,
-      .split,
-      .gps-grid { grid-template-columns: 1fr; }
+    @media (max-width: 640px) {
+      .cards, .gps-grid { grid-template-columns: 1fr; }
+      h1 { font-size: 23px; }
     }
   </style>
 </head>
@@ -331,7 +252,7 @@
       <div class="title-row">
         <div>
           <h1>Black Pearl 串口日志解析</h1>
-          <p class="subtitle">用于现场查看配对、遥控在线、油门解析、动作判定、GPS 状态回传、电量和磁力计摘要。</p>
+          <p class="subtitle">现场查看配对、遥控在线、油门、动作、按键、GPS 0x12 回传、电量和磁力计。</p>
         </div>
         <div id="statusChip" class="status-chip">未连接串口</div>
       </div>
@@ -349,7 +270,6 @@
             <option>921600</option>
           </select>
         </div>
-
         <div class="field">
           <label for="dataBits">数据位</label>
           <select id="dataBits">
@@ -357,7 +277,6 @@
             <option selected>8</option>
           </select>
         </div>
-
         <div class="field">
           <label for="stopBits">停止位</label>
           <select id="stopBits">
@@ -365,7 +284,6 @@
             <option>2</option>
           </select>
         </div>
-
         <div class="field">
           <label for="parity">校验</label>
           <select id="parity">
@@ -374,17 +292,14 @@
             <option value="odd">odd</option>
           </select>
         </div>
-
         <div class="field">
-          <label for="timelineLimit">事件条数</label>
+          <label for="timelineLimit">事件保留</label>
           <input id="timelineLimit" type="number" min="100" max="20000" step="100" value="20000">
         </div>
-
         <div class="field">
-          <label for="rawLimit">原始日志条数</label>
+          <label for="rawLimit">原始日志保留</label>
           <input id="rawLimit" type="number" min="500" max="20000" step="100" value="20000">
         </div>
-
         <div class="actions">
           <button id="pickPortBtn" class="btn-secondary">选择串口</button>
           <button id="connectBtn" class="btn-primary" disabled>连接</button>
@@ -394,17 +309,15 @@
       </div>
 
       <div class="tips">
-        <div class="tip">Web Serial 需要在 `http://127.0.0.1` 或 `http://localhost` 下打开。</div>
-        <div class="tip">“已配对”不代表“遥控在线”，遥控在线只以最近收到 `0x11` 和超时日志为准。</div>
-        <div class="tip">当前页支持在线串口解析，也支持离线粘贴 `.log/.txt` 日志。</div>
+        <div class="tip">Web Serial 需要通过根目录启动脚本打开本页，浏览器用 Chrome 或 Edge。</div>
+        <div class="tip">“已配对”不等于“遥控器在线”，遥控器在线只看最近是否收到 0x11 和超时日志。</div>
+        <div class="tip">页面保留 2 万条历史，但只批量刷新最近可见日志，避免现场卡顿。</div>
       </div>
     </section>
 
     <div class="grid">
       <section class="panel panel-body">
-        <div class="subhead">
-          <h2>联调摘要</h2>
-        </div>
+        <div class="subhead"><h2>联调摘要</h2></div>
         <div class="cards">
           <div class="card">
             <div class="label">配对状态</div>
@@ -427,6 +340,11 @@
             <div id="motionMeta" class="meta">等待 0x11</div>
           </div>
           <div class="card">
+            <div class="label">按键状态</div>
+            <div id="keyValue" class="value">--</div>
+            <div id="keyMeta" class="meta">等待 key 日志</div>
+          </div>
+          <div class="card">
             <div class="label">状态回包</div>
             <div id="txValue" class="value">--</div>
             <div id="txMeta" class="meta">0x12 / sat / angle / power</div>
@@ -443,84 +361,51 @@
           </div>
         </div>
 
-        <table class="table" style="margin-top:12px;">
+        <table class="table">
           <tbody>
-            <tr>
-              <td>串口状态</td>
-              <td id="portInfo">未选择</td>
-            </tr>
-            <tr>
-              <td>遥控在线状态</td>
-              <td id="remoteInfo">离线</td>
-            </tr>
-            <tr>
-              <td>最近收到命令</td>
-              <td id="lastRxCmd">--</td>
-            </tr>
-            <tr>
-              <td>最近发送命令</td>
-              <td id="lastTxCmd">--</td>
-            </tr>
-            <tr>
-              <td>信道状态</td>
-              <td id="channelInfo">--</td>
-            </tr>
-            <tr>
-              <td>告警 / 错误</td>
-              <td id="warnInfo">--</td>
-            </tr>
-            <tr>
-              <td>计数</td>
-              <td id="counterInfo">行数 0 / 事件 0 / 手动帧 0 / 0x12 0</td>
-            </tr>
+            <tr><td>串口状态</td><td id="portInfo">未选择</td></tr>
+            <tr><td>遥控在线状态</td><td id="remoteInfo">离线</td></tr>
+            <tr><td>最近收到命令</td><td id="lastRxCmd">--</td></tr>
+            <tr><td>最近发送命令</td><td id="lastTxCmd">--</td></tr>
+            <tr><td>信道状态</td><td id="channelInfo">--</td></tr>
+            <tr><td>告警 / 错误</td><td id="warnInfo">--</td></tr>
+            <tr><td>计数</td><td id="counterInfo">行数 0 / 事件 0 / 手动帧 0 / 0x12 0</td></tr>
           </tbody>
         </table>
       </section>
 
       <section class="panel panel-body">
-        <div class="subhead">
-          <h2>GPS 摘要</h2>
-        </div>
-        <div class="gps-block">
-          <div class="gps-grid">
-            <div class="gps-item">
-              <div class="label">定位有效</div>
-              <div id="gpsFix" class="value">--</div>
-              <div id="gpsFixMeta" class="meta">等待 gps state 日志</div>
-            </div>
-            <div class="gps-item">
-              <div class="label">卫星数</div>
-              <div id="gpsSat" class="value">--</div>
-              <div id="gpsSatMeta" class="meta">sat / seq</div>
-            </div>
-            <div class="gps-item">
-              <div class="label">经度</div>
-              <div id="gpsLon" class="value">--</div>
-              <div id="gpsLonMeta" class="meta">E/W + deg1e7</div>
-            </div>
-            <div class="gps-item">
-              <div class="label">纬度</div>
-              <div id="gpsLat" class="value">--</div>
-              <div id="gpsLatMeta" class="meta">N/S + deg1e7</div>
-            </div>
+        <div class="subhead"><h2>GPS 摘要</h2></div>
+        <div class="gps-grid">
+          <div class="gps-item">
+            <div class="label">定位有效</div>
+            <div id="gpsFix" class="value">--</div>
+            <div id="gpsFixMeta" class="meta">等待 gps state 日志</div>
           </div>
-          <table class="table">
-            <tbody>
-              <tr>
-                <td>航向角</td>
-                <td id="gpsAngle">--</td>
-              </tr>
-              <tr>
-                <td>最近 0x12</td>
-                <td id="gpsTxInfo">--</td>
-              </tr>
-              <tr>
-                <td>GPS 源数据</td>
-                <td id="gpsRawInfo">等待 `gps state` 正式日志</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="gps-item">
+            <div class="label">卫星数</div>
+            <div id="gpsSat" class="value">--</div>
+            <div id="gpsSatMeta" class="meta">sat / seq</div>
+          </div>
+          <div class="gps-item">
+            <div class="label">经度</div>
+            <div id="gpsLon" class="value">--</div>
+            <div id="gpsLonMeta" class="meta">E/W + deg1e7</div>
+          </div>
+          <div class="gps-item">
+            <div class="label">纬度</div>
+            <div id="gpsLat" class="value">--</div>
+            <div id="gpsLatMeta" class="meta">N/S + deg1e7</div>
+          </div>
         </div>
+        <table class="table">
+          <tbody>
+            <tr><td>航向角</td><td id="gpsAngle">--</td></tr>
+            <tr><td>最近 0x12</td><td id="gpsTxInfo">--</td></tr>
+            <tr><td>遥控器旧格式</td><td id="gpsOldInfo">等待 gps payload oldfmt 日志</td></tr>
+            <tr><td>GPS 源数据</td><td id="gpsRawInfo">等待 gps state 日志</td></tr>
+          </tbody>
+        </table>
       </section>
     </div>
 
@@ -530,19 +415,18 @@
           <h2>事件时间线</h2>
           <div class="inline-actions">
             <label><input id="autoScrollTimeline" type="checkbox" checked> 自动滚动</label>
+            <label>可见 <input id="timelineVisibleLimit" type="number" min="100" max="2000" step="100" value="800" style="width:96px"> 条</label>
           </div>
         </div>
         <div id="timeline" class="timeline"></div>
-        <p class="footnote">优先保留配对、0x11、动作判定、0x12、GPS、遥控在线/超时、电量、磁力计、告警与错误。</p>
+        <p class="footnote">事件保留上限仍可设为 2 万条；页面只渲染最近可见条数。</p>
       </section>
 
       <section class="panel panel-body">
-        <div class="subhead">
-          <h2>离线日志解析</h2>
-        </div>
+        <div class="subhead"><h2>离线日志解析</h2></div>
         <div class="field">
           <label for="pasteBox">粘贴日志</label>
-          <textarea id="pasteBox" class="pastebox" placeholder="把串口日志粘贴到这里，然后点“解析粘贴内容”。"></textarea>
+          <textarea id="pasteBox" placeholder="把串口日志粘贴到这里，然后点“解析粘贴内容”。"></textarea>
         </div>
         <div class="actions" style="grid-column:auto; margin-top:10px;">
           <button id="parsePasteBtn" class="btn-primary">解析粘贴内容</button>
@@ -558,6 +442,7 @@
         <div class="inline-actions">
           <label><input id="autoScrollRaw" type="checkbox" checked> 自动滚动</label>
           <label><input id="showParsedOnly" type="checkbox"> 只看关键事件</label>
+          <label>可见 <input id="rawVisibleLimit" type="number" min="100" max="2000" step="100" value="800" style="width:96px"> 条</label>
         </div>
       </div>
       <div id="rawLog" class="rawlog"></div>
@@ -565,6 +450,8 @@
   </div>
 
   <script>
+    const RENDER_INTERVAL_MS = 120;
+
     const state = {
       port: null,
       reader: null,
@@ -578,6 +465,12 @@
       gpsTxCount: 0,
       timeline: [],
       rawLines: [],
+      dirty: {
+        cards: true,
+        counters: true,
+        timeline: true,
+        raw: true
+      },
       last: {
         pair: "未配对",
         pairMeta: "等待串口数据",
@@ -587,6 +480,8 @@
         throttleMeta: "等待 throttle_raw 日志",
         motionValue: "--",
         motionMeta: "等待 0x11",
+        keyValue: "--",
+        keyMeta: "等待 key 日志",
         txValue: "--",
         txMeta: "0x12 / sat / angle / power",
         powerValue: "--",
@@ -609,7 +504,8 @@
         gpsLatMeta: "N/S + deg1e7",
         gpsAngle: "--",
         gpsTxInfo: "--",
-        gpsRawInfo: "等待 `gps state` 正式日志"
+        gpsOldInfo: "等待 gps payload oldfmt 日志",
+        gpsRawInfo: "等待 gps state 日志"
       }
     };
 
@@ -620,6 +516,8 @@
       parity: document.getElementById("parity"),
       timelineLimit: document.getElementById("timelineLimit"),
       rawLimit: document.getElementById("rawLimit"),
+      timelineVisibleLimit: document.getElementById("timelineVisibleLimit"),
+      rawVisibleLimit: document.getElementById("rawVisibleLimit"),
       pickPortBtn: document.getElementById("pickPortBtn"),
       connectBtn: document.getElementById("connectBtn"),
       disconnectBtn: document.getElementById("disconnectBtn"),
@@ -633,6 +531,8 @@
       throttleMeta: document.getElementById("throttleMeta"),
       motionValue: document.getElementById("motionValue"),
       motionMeta: document.getElementById("motionMeta"),
+      keyValue: document.getElementById("keyValue"),
+      keyMeta: document.getElementById("keyMeta"),
       txValue: document.getElementById("txValue"),
       txMeta: document.getElementById("txMeta"),
       powerValue: document.getElementById("powerValue"),
@@ -656,6 +556,7 @@
       gpsLatMeta: document.getElementById("gpsLatMeta"),
       gpsAngle: document.getElementById("gpsAngle"),
       gpsTxInfo: document.getElementById("gpsTxInfo"),
+      gpsOldInfo: document.getElementById("gpsOldInfo"),
       gpsRawInfo: document.getElementById("gpsRawInfo"),
       timeline: document.getElementById("timeline"),
       rawLog: document.getElementById("rawLog"),
@@ -680,6 +581,12 @@
       return Math.max(min, Math.min(max, num));
     }
 
+    function markDirty(...names) {
+      for (const name of names) {
+        state.dirty[name] = true;
+      }
+    }
+
     function setStatus(text, tone = "normal") {
       el.statusChip.textContent = text;
       if (tone === "good") {
@@ -697,35 +604,6 @@
       }
     }
 
-    function markRemoteOnline(detailText) {
-      state.remoteSeenAt = Date.now();
-      state.last.rcValue = "在线";
-      state.last.remoteInfo = detailText || "在线，已开始收到 0x11";
-      updateCards();
-    }
-
-    function markRemoteOffline(reasonText) {
-      state.last.rcValue = "离线";
-      state.last.remoteInfo = reasonText || "离线，0x11 超时";
-      updateCards();
-    }
-
-    function refreshRemoteTimeout() {
-      if (state.remoteSeenAt === 0) {
-        return;
-      }
-
-      if ((Date.now() - state.remoteSeenAt) >= state.remoteTimeoutMs) {
-        state.remoteSeenAt = 0;
-        if (state.last.rcValue !== "离线") {
-          state.last.rcMeta = `页面超时 ${state.remoteTimeoutMs}ms`;
-          state.last.warnInfo = `页面按老版链路判定遥控超时`;
-          markRemoteOffline(`离线，页面超时 ${state.remoteTimeoutMs}ms`);
-          pushTimeline(`页面按老版超时语义判定遥控离线，dt=${state.remoteTimeoutMs}ms`);
-        }
-      }
-    }
-
     function pushTimeline(message) {
       state.eventCount += 1;
       state.timeline.push(`[${nowTag()}] ${message}`);
@@ -733,8 +611,7 @@
       if (state.timeline.length > limit) {
         state.timeline.splice(0, state.timeline.length - limit);
       }
-      renderTimeline();
-      updateCounters();
+      markDirty("timeline", "counters");
     }
 
     function addRawLine(line, important = false) {
@@ -743,11 +620,12 @@
       if (state.rawLines.length > limit) {
         state.rawLines.splice(0, state.rawLines.length - limit);
       }
-      renderRaw();
+      markDirty("raw");
     }
 
     function renderTimeline() {
-      el.timeline.textContent = state.timeline.join("\n");
+      const visible = clampNumber(el.timelineVisibleLimit.value, 100, 2000, 800);
+      el.timeline.textContent = state.timeline.slice(-visible).join("\n");
       if (el.autoScrollTimeline.checked) {
         el.timeline.scrollTop = el.timeline.scrollHeight;
       }
@@ -755,21 +633,20 @@
 
     function renderRaw() {
       const showParsedOnly = el.showParsedOnly.checked;
-      const lines = showParsedOnly
-        ? state.rawLines.filter(item => item.important).map(item => item.line)
-        : state.rawLines.map(item => item.line);
-      el.rawLog.textContent = lines.join("\n");
+      const visible = clampNumber(el.rawVisibleLimit.value, 100, 2000, 800);
+      const source = showParsedOnly ? state.rawLines.filter(item => item.important) : state.rawLines;
+      el.rawLog.textContent = source.slice(-visible).map(item => item.line).join("\n");
       if (el.autoScrollRaw.checked) {
         el.rawLog.scrollTop = el.rawLog.scrollHeight;
       }
     }
 
-    function updateCounters() {
+    function renderCounters() {
       el.counterInfo.textContent =
         `行数 ${state.lineCount} / 事件 ${state.eventCount} / 手动帧 ${state.manualCount} / 0x12 ${state.gpsTxCount}`;
     }
 
-    function updateCards() {
+    function renderCards() {
       el.pairValue.textContent = state.last.pair;
       el.pairMeta.textContent = state.last.pairMeta;
       el.rcValue.textContent = state.last.rcValue;
@@ -778,6 +655,8 @@
       el.throttleMeta.textContent = state.last.throttleMeta;
       el.motionValue.textContent = state.last.motionValue;
       el.motionMeta.textContent = state.last.motionMeta;
+      el.keyValue.textContent = state.last.keyValue;
+      el.keyMeta.textContent = state.last.keyMeta;
       el.txValue.textContent = state.last.txValue;
       el.txMeta.textContent = state.last.txMeta;
       el.powerValue.textContent = state.last.powerValue;
@@ -800,54 +679,81 @@
       el.gpsLatMeta.textContent = state.last.gpsLatMeta;
       el.gpsAngle.textContent = state.last.gpsAngle;
       el.gpsTxInfo.textContent = state.last.gpsTxInfo;
+      el.gpsOldInfo.textContent = state.last.gpsOldInfo;
       el.gpsRawInfo.textContent = state.last.gpsRawInfo;
-      updateCounters();
     }
 
-    function clearAll() {
-      state.lineBuffer = "";
-      state.lineCount = 0;
-      state.eventCount = 0;
-      state.manualCount = 0;
-      state.gpsTxCount = 0;
-      state.timeline = [];
-      state.rawLines = [];
-      state.last = {
-        pair: "未配对",
-        pairMeta: "等待串口数据",
-        rcValue: "离线",
-        rcMeta: "等待 0x11 手动帧",
-        throttleValue: "--",
-        throttleMeta: "等待 throttle_raw 日志",
-        motionValue: "--",
-        motionMeta: "等待 0x11",
-        txValue: "--",
-        txMeta: "0x12 / sat / angle / power",
-        powerValue: "--",
-        powerMeta: "ADC / mV / power byte",
-        magValue: "--",
-        magMeta: "X / Y / Z / norm",
-        portInfo: state.port ? state.last.portInfo : "未选择",
-        lastRxCmd: "--",
-        lastTxCmd: "--",
-        remoteInfo: "离线",
-        channelInfo: "--",
-        warnInfo: "--",
-        gpsFix: "--",
-        gpsFixMeta: "等待 gps state 日志",
-        gpsSat: "--",
-        gpsSatMeta: "sat / seq",
-        gpsLon: "--",
-        gpsLonMeta: "E/W + deg1e7",
-        gpsLat: "--",
-        gpsLatMeta: "N/S + deg1e7",
-        gpsAngle: "--",
-        gpsTxInfo: "--",
-        gpsRawInfo: "等待 `gps state` 正式日志"
+    function flushRender() {
+      refreshRemoteTimeout();
+      if (state.dirty.cards) {
+        renderCards();
+        state.dirty.cards = false;
+      }
+      if (state.dirty.counters) {
+        renderCounters();
+        state.dirty.counters = false;
+      }
+      if (state.dirty.timeline) {
+        renderTimeline();
+        state.dirty.timeline = false;
+      }
+      if (state.dirty.raw) {
+        renderRaw();
+        state.dirty.raw = false;
+      }
+    }
+
+    function markRemoteOnline(detailText) {
+      state.remoteSeenAt = Date.now();
+      state.last.rcValue = "在线";
+      state.last.remoteInfo = detailText || "在线，已收到 0x11";
+      markDirty("cards");
+    }
+
+    function markRemoteOffline(reasonText) {
+      state.last.rcValue = "离线";
+      state.last.remoteInfo = reasonText || "离线，0x11 超时";
+      markDirty("cards");
+    }
+
+    function refreshRemoteTimeout() {
+      if (state.remoteSeenAt === 0) {
+        return;
+      }
+      if ((Date.now() - state.remoteSeenAt) >= state.remoteTimeoutMs) {
+        state.remoteSeenAt = 0;
+        if (state.last.rcValue !== "离线") {
+          state.last.rcMeta = `页面超时 ${state.remoteTimeoutMs}ms`;
+          state.last.warnInfo = "页面按老版链路判定遥控超时";
+          markRemoteOffline(`离线，页面超时 ${state.remoteTimeoutMs}ms`);
+          pushTimeline(`页面判定遥控离线，dt=${state.remoteTimeoutMs}ms`);
+        }
+      }
+    }
+
+    function keyLabel(code, name) {
+      if (!code) {
+        return "--";
+      }
+      return `${name || "UNKNOWN"} (${code})`;
+    }
+
+    function keyActionText(action, extra) {
+      const map = {
+        "light-unbound": "A 兼容入口：灯引脚未绑定",
+        "light-unbound repeat": "A 重复：灯引脚仍未绑定",
+        "noop": "B 无动作",
+        "pulse-forward": "C 前冲脉冲",
+        "pulse-backward": "D 后退脉冲",
+        "reserved": "E 保留，不触发自动驾驶"
       };
-      renderTimeline();
-      renderRaw();
-      updateCards();
+      return `${map[action] || action}${extra ? ` / ${extra}` : ""}`;
+    }
+
+    function updateKeyFromFrame(code, name, source) {
+      state.last.keyValue = keyLabel(code, name);
+      state.last.keyMeta = `${source} / 等待 key action 日志确认动作`;
+      markDirty("cards");
     }
 
     function cmdName(cmd) {
@@ -855,7 +761,7 @@
         "0x0F": "0x0F 配对响应",
         "0x10": "0x10 配对请求",
         "0x11": "0x11 手动控制",
-        "0x12": "0x12 状态回传",
+        "0x12": "0x12 状态/GPS 回传",
         "0x13": "0x13 返航点",
         "0x14": "0x14 目标点",
         "0x15": "0x15 返航开关"
@@ -869,6 +775,12 @@
         return `${dir}${raw}`;
       }
       return `${dir}${(value / 1e7).toFixed(7)} (${raw})`;
+    }
+
+    function formatOldCoord(dir, part1, part2) {
+      const p1 = String(part1);
+      const p2 = String(part2).padStart(4, "0");
+      return `${dir}${p1}.${p2}`;
     }
 
     function parseLine(rawLine) {
@@ -937,6 +849,7 @@
       if (rc) {
         state.manualCount += 1;
         state.last.rcMeta = `lr=${rc[1]} ud=${rc[2]} key=${rc[3]}(${rc[4]}) paired=${rc[5]}`;
+        updateKeyFromFrame(rc[3], rc[4], "0x11");
         markRemoteOnline(`在线，最近 0x11：lr=${rc[1]} ud=${rc[2]} key=${rc[4]}`);
         pushTimeline(`收到 0x11：lr=${rc[1]} ud=${rc[2]} key=${rc[4]} paired=${rc[5]}`);
         important = true;
@@ -947,6 +860,7 @@
         state.last.throttleValue = `${throttle[3]}`;
         state.last.throttleMeta = `raw=${throttle[1]} steering=${throttle[4]} raw_lr=${throttle[2]} key=${throttle[6]}`;
         state.last.rcMeta = `throttle=${throttle[3]} steering=${throttle[4]} key=${throttle[5]}(${throttle[6]})`;
+        updateKeyFromFrame(throttle[5], throttle[6], "throttle");
         important = true;
       }
 
@@ -954,7 +868,25 @@
       if (manualParse) {
         state.last.motionValue = manualParse[7];
         state.last.motionMeta = `speed=${manualParse[8]} throttle=${manualParse[3]} steering=${manualParse[4]}`;
+        updateKeyFromFrame(manualParse[5], manualParse[6], "manual parse");
         pushTimeline(`动作判定：${manualParse[7]}，speed=${manualParse[8]}，throttle=${manualParse[3]} steering=${manualParse[4]}`);
+        important = true;
+      }
+
+      const keyAction = line.match(/\[SHIP\] [IW]: key action=([A-E]) ([a-zA-Z-]+)(?: (\d+)ms)?(?: (repeat))?/);
+      if (keyAction) {
+        const action = keyAction[4] ? `${keyAction[2]} ${keyAction[4]}` : keyAction[2];
+        const extra = keyAction[3] ? `${keyAction[3]}ms` : "";
+        state.last.keyValue = keyAction[1];
+        state.last.keyMeta = keyActionText(action, extra);
+        pushTimeline(`按键 ${keyAction[1]}：${state.last.keyMeta}`);
+        important = true;
+      }
+
+      const keyPulse = line.match(/\[SHIP\] I: key pulse motion=([a-zA-Z-]+) dur=(\d+)ms/);
+      if (keyPulse) {
+        state.last.keyMeta = `脉冲执行：${keyPulse[1]} / ${keyPulse[2]}ms`;
+        pushTimeline(`按键脉冲执行：${keyPulse[1]} ${keyPulse[2]}ms`);
         important = true;
       }
 
@@ -976,7 +908,7 @@
 
       const pwmDisabled = line.match(/\[SHIP\] I: pwm disabled by SHIP_THROTTLE_PWM_ENABLE=0/);
       if (pwmDisabled) {
-        state.last.motionMeta = `${state.last.motionMeta} / PWM已关闭`;
+        state.last.motionMeta = `${state.last.motionMeta} / PWM 已关闭`;
         pushTimeline("当前仅打印油门，PWM 已关闭");
         important = true;
       }
@@ -1007,6 +939,14 @@
         state.last.gpsAngle = `${gpsState[7]} / 100 deg`;
         state.last.gpsRawInfo = `fix=${gpsState[1]} sat=${gpsState[2]} lon=${gpsState[3]}${gpsState[4]} lat=${gpsState[5]}${gpsState[6]} angle=${gpsState[7]} seq=${gpsState[9]}`;
         pushTimeline(`GPS：fix=${gpsState[1]} sat=${gpsState[2]} lon=${gpsState[3]}${gpsState[4]} lat=${gpsState[5]}${gpsState[6]} angle=${gpsState[7]} seq=${gpsState[9]}`);
+        important = true;
+      }
+
+      const gpsOld = line.match(/\[SHIP\] I: gps payload oldfmt ew=([EW]) lon1=(\d+) lon2=(\d+) ns=([NS]) lat1=(\d+) lat2=(\d+)/);
+      if (gpsOld) {
+        state.last.gpsOldInfo =
+          `lon=${formatOldCoord(gpsOld[1], gpsOld[2], gpsOld[3])} lat=${formatOldCoord(gpsOld[4], gpsOld[5], gpsOld[6])}`;
+        pushTimeline(`GPS 旧格式：${state.last.gpsOldInfo}`);
         important = true;
       }
 
@@ -1059,7 +999,7 @@
       }
 
       addRawLine(line, important);
-      updateCards();
+      markDirty("cards", "counters");
     }
 
     function hexOrUnknown(value) {
@@ -1080,7 +1020,7 @@
         state.last.portInfo = `已选择 VID=${hexOrUnknown(info.usbVendorId)} PID=${hexOrUnknown(info.usbProductId)}`;
         el.connectBtn.disabled = false;
         setStatus("已选择串口，等待连接");
-        updateCards();
+        markDirty("cards");
       } catch (error) {
         setStatus("未选择串口", "warn");
       }
@@ -1091,7 +1031,6 @@
         alert("请先选择串口。");
         return;
       }
-
       try {
         await state.port.open({
           baudRate: Number(el.baudRate.value),
@@ -1115,21 +1054,18 @@
 
     async function disconnectPort() {
       state.reading = false;
-
       try {
         if (state.reader) {
           await state.reader.cancel();
         }
       } catch (error) {
       }
-
       try {
         if (state.port) {
           await state.port.close();
         }
       } catch (error) {
       }
-
       state.reader = null;
       el.disconnectBtn.disabled = true;
       el.connectBtn.disabled = !state.port;
@@ -1140,7 +1076,6 @@
 
     async function readLoop() {
       const decoder = new TextDecoder();
-
       try {
         while (state.port && state.port.readable && state.reading) {
           state.reader = state.port.readable.getReader();
@@ -1170,13 +1105,70 @@
       }
     }
 
+    function resetStateValues() {
+      Object.assign(state, {
+        lineBuffer: "",
+        remoteSeenAt: 0,
+        lineCount: 0,
+        eventCount: 0,
+        manualCount: 0,
+        gpsTxCount: 0,
+        timeline: [],
+        rawLines: []
+      });
+      Object.assign(state.last, {
+        pair: "未配对",
+        pairMeta: "等待串口数据",
+        rcValue: "离线",
+        rcMeta: "等待 0x11 手动帧",
+        throttleValue: "--",
+        throttleMeta: "等待 throttle_raw 日志",
+        motionValue: "--",
+        motionMeta: "等待 0x11",
+        keyValue: "--",
+        keyMeta: "等待 key 日志",
+        txValue: "--",
+        txMeta: "0x12 / sat / angle / power",
+        powerValue: "--",
+        powerMeta: "ADC / mV / power byte",
+        magValue: "--",
+        magMeta: "X / Y / Z / norm",
+        lastRxCmd: "--",
+        lastTxCmd: "--",
+        remoteInfo: "离线",
+        channelInfo: "--",
+        warnInfo: "--",
+        gpsFix: "--",
+        gpsFixMeta: "等待 gps state 日志",
+        gpsSat: "--",
+        gpsSatMeta: "sat / seq",
+        gpsLon: "--",
+        gpsLonMeta: "E/W + deg1e7",
+        gpsLat: "--",
+        gpsLatMeta: "N/S + deg1e7",
+        gpsAngle: "--",
+        gpsTxInfo: "--",
+        gpsOldInfo: "等待 gps payload oldfmt 日志",
+        gpsRawInfo: "等待 gps state 日志"
+      });
+      markDirty("cards", "counters", "timeline", "raw");
+    }
+
+    function clearAll() {
+      const portInfo = state.last.portInfo;
+      resetStateValues();
+      state.last.portInfo = portInfo;
+      pushTimeline("页面已清空");
+    }
+
     function parseBulkText(text) {
-      clearAll();
+      resetStateValues();
       const lines = text.split(/\r?\n/);
       for (const line of lines) {
         parseLine(line);
       }
       pushTimeline(`离线解析完成，共 ${lines.length} 行`);
+      flushRender();
     }
 
     function bindEvents() {
@@ -1184,56 +1176,34 @@
       el.connectBtn.addEventListener("click", connectPort);
       el.disconnectBtn.addEventListener("click", disconnectPort);
       el.clearBtn.addEventListener("click", clearAll);
-      el.showParsedOnly.addEventListener("change", renderRaw);
-      el.timelineLimit.addEventListener("change", renderTimeline);
-      el.rawLimit.addEventListener("change", renderRaw);
-
-      el.parsePasteBtn.addEventListener("click", () => {
-        const text = el.pasteBox.value.trim();
-        if (!text) {
-          alert("请先粘贴日志。");
-          return;
-        }
-        parseBulkText(text);
-      });
-
-      el.loadFileBtn.addEventListener("click", () => {
-        el.fileInput.click();
-      });
-
-      el.fileInput.addEventListener("change", async (event) => {
-        const file = event.target.files && event.target.files[0];
+      el.showParsedOnly.addEventListener("change", () => markDirty("raw"));
+      el.timelineLimit.addEventListener("change", () => markDirty("timeline"));
+      el.rawLimit.addEventListener("change", () => markDirty("raw"));
+      el.timelineVisibleLimit.addEventListener("change", () => markDirty("timeline"));
+      el.rawVisibleLimit.addEventListener("change", () => markDirty("raw"));
+      el.parsePasteBtn.addEventListener("click", () => parseBulkText(el.pasteBox.value));
+      el.loadFileBtn.addEventListener("click", () => el.fileInput.click());
+      el.fileInput.addEventListener("change", async () => {
+        const file = el.fileInput.files && el.fileInput.files[0];
         if (!file) {
           return;
         }
-        const text = await file.text();
-        el.pasteBox.value = text;
-        parseBulkText(text);
+        parseBulkText(await file.text());
+        el.fileInput.value = "";
       });
     }
 
-    function boot() {
-      bindEvents();
-      updateCards();
-      window.setInterval(refreshRemoteTimeout, 250);
-
-      if (!("serial" in navigator)) {
-        el.pickPortBtn.disabled = true;
-        el.connectBtn.disabled = true;
-        pushTimeline("提示：当前浏览器不支持 Web Serial，请换 Chrome/Edge。");
-        setStatus("浏览器不支持 Web Serial", "bad");
-      } else {
-        pushTimeline("页面已就绪，可选择串口或粘贴日志解析。");
-      }
+    bindEvents();
+    setInterval(flushRender, RENDER_INTERVAL_MS);
+    if (!("serial" in navigator)) {
+      el.pickPortBtn.disabled = true;
+      el.connectBtn.disabled = true;
+      setStatus("浏览器不支持 Web Serial", "bad");
+      pushTimeline("当前浏览器不支持 Web Serial，请使用 Chrome 或 Edge。");
+    } else {
+      pushTimeline("上位机已就绪");
     }
-
-    window.addEventListener("beforeunload", () => {
-      if (state.port) {
-        disconnectPort();
-      }
-    });
-
-    boot();
+    flushRender();
   </script>
 </body>
 </html>

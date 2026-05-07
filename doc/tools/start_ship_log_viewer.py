@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_PORT = 8000
 MAX_PORT_TRIES = 30
-VIEWER_PATH = "index.html"
+VIEWER_PATH = "doc/tools/ship_log_viewer.html"
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):

@@ -26,10 +26,15 @@
 #include "STC32G_NVIC.h"
 #include "STC32G_UART.h"
 #include "..\..\Function\Log\Log.h"
+#include "..\..\..\User\Task.h"
 
 #define GPS_DISPATCH_IGNORE        0U
 #define GPS_DISPATCH_OK            1U
 #define GPS_DISPATCH_PARSE_ERROR   2U
+#ifndef GPS_DIAG_LOG_ENABLE
+#define GPS_DIAG_LOG_ENABLE        1U
+#endif
+#define GPS_DIAG_LOG_MS            1000UL
 
 static GPS_State_t g_gps_state;
 
@@ -43,6 +48,11 @@ static u8   g_gps_fifo[GPS_UART_FIFO_SIZE];
 static u16  g_gps_fifo_head = 0;
 static u16  g_gps_fifo_tail = 0;
 static u16  g_gps_fifo_count = 0;
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+static u32  g_gps_diag_rx_bytes = 0UL;
+static u32  g_gps_diag_last_ms = 0UL;
+static u8   g_gps_diag_logged_once = 0U;
+#endif
 
 static void GPS_ClearState(void);
 static void GPS_ClearParser(void);
@@ -75,6 +85,12 @@ static u8   GPS_IsNewRmcTimestamp(u8 hour, u8 minute, u8 second, u16 msec,
 static u32  GPS_KnotsX100ToKmhX100(u32 speed_knots_x100);
 static u16  GPS_ToU16NonNegative(int32 value);
 static u32  GPS_ToU32NonNegative(int32 value);
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+static void GPS_DiagLogPoll(void);
+static void GPS_DiagSentenceSummary(const char *sentence, char *out, u8 out_len);
+static void GPS_DiagLogSentence(const char *sentence, u8 result);
+static void GPS_DiagLogParseFail(char *sentence, const char *reason);
+#endif
 
 static void GPS_ClearState(void)
 {
@@ -102,6 +118,11 @@ static void GPS_ClearParser(void)
     g_gps_fifo_head = 0;
     g_gps_fifo_tail = 0;
     g_gps_fifo_count = 0;
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+    g_gps_diag_rx_bytes = 0UL;
+    g_gps_diag_last_ms = 0UL;
+    g_gps_diag_logged_once = 0U;
+#endif
 
     for (i = 0; i < (u16)GPS_SENTENCE_BUFFER_SIZE; i++) {
         g_gps_sentence_buf[i] = 0;
@@ -119,6 +140,107 @@ static void GPS_RawEchoByte(u8 dat)
     dat = dat;
 #endif
 }
+
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+static void GPS_DiagLogPoll(void)
+{
+    u32 now_ms;
+
+    now_ms = Task_GetTickMs();
+    if ((g_gps_diag_logged_once == 0U) ||
+        ((now_ms - g_gps_diag_last_ms) >= GPS_DIAG_LOG_MS)) {
+        g_gps_diag_logged_once = 1U;
+        g_gps_diag_last_ms = now_ms;
+        LOGI("GPS",
+             "diag uart init=%u rx_cnt=%u read=%u fifo=%u bytes=%lu",
+             (u16)g_gps_initialized,
+             (u16)COM2.RX_Cnt,
+             (u16)g_gps_uart_read_index,
+             (u16)g_gps_fifo_count,
+             (u32)g_gps_diag_rx_bytes);
+        LOGI("GPS",
+             "diag parse ok=%u chk=%u parse=%u uovf=%u fovf=%u sovf=%u",
+             (u16)g_gps_state.sentence_ok_count,
+             (u16)g_gps_state.checksum_error_count,
+             (u16)g_gps_state.parse_error_count,
+             (u16)g_gps_state.uart_overflow_count,
+             (u16)g_gps_state.fifo_overflow_count,
+             (u16)g_gps_state.sentence_overflow_count);
+        LOGI("GPS",
+             "diag state fix=%u sat=%u view=%u seq=%lu",
+             (u16)g_gps_state.fix_valid,
+             (u16)g_gps_state.satellites_used,
+             (u16)g_gps_state.satellites_view,
+             (u32)g_gps_state.update_sequence);
+    }
+}
+
+static void GPS_DiagSentenceSummary(const char *sentence, char *out, u8 out_len)
+{
+    u8 i;
+    char ch;
+
+    if ((out == 0) || (out_len == 0U)) {
+        return;
+    }
+    if (sentence == 0) {
+        out[0] = 0;
+        return;
+    }
+
+    i = 0U;
+    while (i < (u8)(out_len - 1U)) {
+        ch = sentence[i];
+        if ((ch == 0) || (ch == '\r') || (ch == '\n')) {
+            break;
+        }
+        out[i] = ch;
+        i++;
+    }
+    out[i] = 0;
+}
+
+static void GPS_DiagLogSentence(const char *sentence, u8 result)
+{
+    char type0;
+    char type1;
+    char type2;
+    char summary[72];
+
+    if ((sentence == 0) || (sentence[0] != '$') ||
+        (sentence[3] == 0) || (sentence[4] == 0) || (sentence[5] == 0)) {
+        return;
+    }
+
+    type0 = sentence[3];
+    type1 = sentence[4];
+    type2 = sentence[5];
+    if ((result == GPS_DISPATCH_PARSE_ERROR) ||
+        ((type0 == 'R') && (type1 == 'M') && (type2 == 'C')) ||
+        ((type0 == 'G') && (type1 == 'G') && (type2 == 'A'))) {
+        GPS_DiagSentenceSummary(sentence, summary, (u8)sizeof(summary));
+        LOGI("GPS",
+             "sentence %c%c%c result=%u text=%s",
+             type0,
+             type1,
+             type2,
+             (u16)result,
+             summary);
+    }
+}
+
+static void GPS_DiagLogParseFail(char *sentence, const char *reason)
+{
+    char summary[72];
+
+    if (sentence == 0) {
+        LOGW("GPS", "parse fail reason=%s", reason);
+    } else {
+        GPS_DiagSentenceSummary(sentence, summary, (u8)sizeof(summary));
+        LOGW("GPS", "parse fail reason=%s text=%s", reason, summary);
+    }
+}
+#endif
 
 static u8 GPS_FifoPush(u8 dat)
 {
@@ -168,6 +290,9 @@ static void GPS_DrainUart2Buffer(void)
         while (g_gps_uart_read_index < COM_RX2_Lenth) {
             GPS_RawEchoByte(RX2_Buffer[g_gps_uart_read_index]);
             GPS_FifoPush(RX2_Buffer[g_gps_uart_read_index]);
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+            g_gps_diag_rx_bytes++;
+#endif
             g_gps_uart_read_index++;
         }
         g_gps_uart_read_index = 0;
@@ -177,6 +302,9 @@ static void GPS_DrainUart2Buffer(void)
     while (g_gps_uart_read_index != write_index) {
         GPS_RawEchoByte(RX2_Buffer[g_gps_uart_read_index]);
         GPS_FifoPush(RX2_Buffer[g_gps_uart_read_index]);
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+        g_gps_diag_rx_bytes++;
+#endif
         g_gps_uart_read_index++;
     }
 }
@@ -222,6 +350,9 @@ static void GPS_ProcessSentence(char *sentence)
     u8 checksum_recv;
     u8 field_count;
     u8 result;
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+    char diag_sentence[72];
+#endif
 
     if ((sentence == 0) || (sentence[0] != '$')) {
         return;
@@ -245,13 +376,22 @@ static void GPS_ProcessSentence(char *sentence)
 
     if ((star == 0) || (GPS_ParseHexByte(star + 1, &checksum_recv) == 0)) {
         g_gps_state.checksum_error_count++;
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+        GPS_DiagLogParseFail(sentence, "checksum-missing");
+#endif
         return;
     }
     if (checksum_recv != checksum_calc) {
         g_gps_state.checksum_error_count++;
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+        GPS_DiagLogParseFail(sentence, "checksum-bad");
+#endif
         return;
     }
 
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+    GPS_DiagSentenceSummary(sentence, diag_sentence, (u8)sizeof(diag_sentence));
+#endif
     *star = 0;
     payload = sentence + 1;
     field_count = GPS_SplitFields(payload, fields, GPS_MAX_FIELDS);
@@ -264,6 +404,9 @@ static void GPS_ProcessSentence(char *sentence)
     }
 
     result = GPS_DispatchSentence(fields, field_count);
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+    GPS_DiagLogSentence(diag_sentence, result);
+#endif
     if (result == GPS_DISPATCH_OK) {
         g_gps_state.sentence_ok_count++;
     } else if (result == GPS_DISPATCH_PARSE_ERROR) {
@@ -376,13 +519,19 @@ static u8 GPS_ParseRMC(char **fields, u8 field_count)
         return 0;
     }
     if ((!GPS_FieldPresent(fields[1])) ||
-        (!GPS_FieldPresent(fields[2])) ||
-        (!GPS_FieldPresent(fields[9]))) {
+        (!GPS_FieldPresent(fields[2]))) {
         return 0;
     }
-    if ((GPS_ParseUtc(fields[1], &hour, &minute, &second, &msec) == 0) ||
-        (GPS_ParseDate(fields[9], &day, &month, &year) == 0)) {
+    if (GPS_ParseUtc(fields[1], &hour, &minute, &second, &msec) == 0) {
         return 0;
+    }
+    day = 0U;
+    month = 0U;
+    year = 0U;
+    if (GPS_FieldPresent(fields[9])) {
+        if (GPS_ParseDate(fields[9], &day, &month, &year) == 0) {
+            return 0;
+        }
     }
 
     status = fields[2][0];
@@ -440,6 +589,29 @@ static u8 GPS_ParseRMC(char **fields, u8 field_count)
     if (fix_valid) {
         g_gps_state.lat_deg1e7 = lat_deg1e7;
         g_gps_state.lon_deg1e7 = lon_deg1e7;
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+        LOGI("GPS", "rmc valid lat=%ld lon=%ld",
+             (long)lat_deg1e7,
+             (long)lon_deg1e7);
+        LOGI("GPS", "rmc move spd=%ld course=%ld time=%u:%u:%u",
+             (long)(has_speed ? speed_knots_x100 : 0L),
+             (long)(has_course ? course_deg_x100 : 0L),
+             (u16)hour,
+             (u16)minute,
+             (u16)second);
+#endif
+    } else {
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+        LOGW("GPS",
+             "rmc void status=%c time=%u:%u:%u date=%u-%u-%u",
+             status,
+             (u16)hour,
+             (u16)minute,
+             (u16)second,
+             (u16)day,
+             (u16)month,
+             (u16)year);
+#endif
     }
 
     if (has_speed) {
@@ -510,6 +682,15 @@ static u8 GPS_ParseGGA(char **fields, u8 field_count)
     if (has_altitude) {
         g_gps_state.altitude_cm = altitude_cm;
     }
+
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+    LOGI("GPS",
+         "gga quality=%u sat=%u hdop=%ld alt_cm=%ld",
+         (u16)quality,
+         (u16)(has_satellites ? satellites : 0U),
+         (long)(has_hdop ? hdop_x100 : 0L),
+         (long)(has_altitude ? altitude_cm : 0L));
+#endif
 
     return 1;
 }
@@ -1182,6 +1363,9 @@ void GPS_Poll(void)
     while (GPS_FifoPop(&dat) == 0) {
         GPS_ParseByte(dat);
     }
+#if (GPS_DIAG_LOG_ENABLE != 0U)
+    GPS_DiagLogPoll();
+#endif
 }
 
 const GPS_State_t *GPS_GetState(void)
