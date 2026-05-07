@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  APP_DMA_UART                                                       27/04/26  00:55:20  PAGE 1   
+C251 COMPILER V5.60.0,  APP_DMA_UART                                                       07/05/26  09:39:24  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_DMA_UART
 OBJECT MODULE PLACED IN .\list\APP_DMA_UART.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_DMA_UART.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\
-                    -User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\
-                    -Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\
-                    -APP_DMA_UART.lst) TABS(2) OBJECT(.\list\APP_DMA_UART.obj) 
+                    -User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\F
+                    -unction\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\
+                    -WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP_DMA_UART.lst) TABS(2) OBJECT(.\list\APP_DMA_UART.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    51          // 版本: V1.0, 2021-05-27
    52          //========================================================================
    53          void DMA_UART_init(void)
-C251 COMPILER V5.60.0,  APP_DMA_UART                                                       27/04/26  00:55:20  PAGE 2   
+C251 COMPILER V5.60.0,  APP_DMA_UART                                                       07/05/26  09:39:24  PAGE 2   
 
    54          {
    55   1        u16 i;
@@ -134,7 +134,7 @@ stmt  level    source
   103   1        DMA_UR2R_CLRFIFO();   //清空 DMA FIFO
   104   1      //  DMA_UR3R_CLRFIFO();   //清空 DMA FIFO
   105   1      //  DMA_UR4R_CLRFIFO();   //清空 DMA FIFO
-C251 COMPILER V5.60.0,  APP_DMA_UART                                                       27/04/26  00:55:20  PAGE 3   
+C251 COMPILER V5.60.0,  APP_DMA_UART                                                       07/05/26  09:39:24  PAGE 3   
 
   106   1        //----------------------------------------------
   107   1        DmaTx1Flag = 0;
@@ -202,7 +202,7 @@ stmt  level    source
   165   2          DmaRx4Flag = 0;
   166   2          DMA_UR4T_TRIG();  //重新触发UART4发送功能，可在DMA中断里及时处理
   167   2          DMA_UR4R_TRIG();  //重新触发UART4接收功能，可在DMA中断里及时处理
-C251 COMPILER V5.60.0,  APP_DMA_UART                                                       27/04/26  00:55:20  PAGE 4   
+C251 COMPILER V5.60.0,  APP_DMA_UART                                                       07/05/26  09:39:24  PAGE 4   
 
   168   2        }
   169   1      }

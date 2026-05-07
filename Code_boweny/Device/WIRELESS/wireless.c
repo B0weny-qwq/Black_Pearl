@@ -1,21 +1,20 @@
 /**
  * @file    wireless.c
- * @brief   LT8920 æ— çº¿é“¾è·¯ç®¡ç†å±‚å®žçŽ°ã€‚
+ * @brief   LT8920 ÎÞÏßÁ´Â·¹ÜÀí²ãÊµÏÖ¡£
  * @author  boweny
  * @date    2026-05-06
  * @version v1.1
  *
  * @details
- * æœ¬æ–‡ä»¶åœ¨ LT8920 èŠ¯ç‰‡å±‚ä¹‹ä¸Šç»´æŠ¤åˆå§‹åŒ–ã€å¤©çº¿é€‰æ‹©ã€æ”¶å‘çŠ¶æ€ã€
- * æŽ¥æ”¶é˜Ÿåˆ—ã€å‘é€å…¥å£å’Œè°ƒè¯•æŽ¥å£ã€‚æ—§é¥æŽ§å™¨ä¸šåŠ¡éœ€è¦çš„æŒ‡å®šä¿¡é“å‘é€ã€
- * åŒæ­¥å¯„å­˜å™¨ idle å†™å…¥ã€å·¥ä½œ RX æ‰“å¼€ç­‰æµç¨‹åœ¨è¿™é‡Œå°è£…ç»™åè®®å±‚ä½¿ç”¨ã€‚
+ * ±¾ÎÄ¼þÔÚ LT8920 Ð¾Æ¬²ãÖ®ÉÏÎ¬»¤³õÊ¼»¯¡¢ÌìÏßÑ¡Ôñ¡¢ÊÕ·¢×´Ì¬¡¢
+ * ½ÓÊÕ¶ÓÁÐ¡¢·¢ËÍÈë¿ÚºÍµ÷ÊÔ½Ó¿Ú¡£¾ÉÒ£¿ØÆ÷ÒµÎñÐèÒªµÄÖ¸¶¨ÐÅµÀ·¢ËÍ¡¢
+ * Í¬²½¼Ä´æÆ÷ idle Ð´Èë¡¢¹¤×÷ RX ´ò¿ªµÈÁ÷³Ì¶¼ÔÚÕâÀï·â×°¸øÐ­Òé²ãÊ¹ÓÃ¡£
  *
  * @note
- * `Wireless_Receive()` è¿”å›žçš„æ˜¯ LT8920 RF payloadï¼Œä¸ç­‰åŒäºŽå®Œæ•´
- * `AA | len | cmd | payload | xor | BB` ä¸šåŠ¡åè®®å¸§ã€‚
+ * `Wireless_Receive()` ·µ»ØµÄÊÇ LT8920 RF payload£¬²»µÈÍ¬ÓÚÍêÕû
+ * `AA | len | cmd | payload | xor | BB` ÒµÎñÐ­ÒéÖ¡¡£
  */
 #include "wireless.h"
-
 #include "lt8920.h"
 #include "wireless_port.h"
 #include "..\..\Function\Log\Log.h"
@@ -26,38 +25,6 @@ static u8 g_wireless_rx_data[WIRELESS_RX_QUEUE_DEPTH][LT8920_MAX_PAYLOAD_LEN];
 static u8 g_wireless_rx_head = 0U;
 static u8 g_wireless_rx_tail = 0U;
 static u8 g_wireless_rx_count = 0U;
-
-#ifndef WIRELESS_TX_ONLY_TEST
-#define WIRELESS_TX_ONLY_TEST 0
-#endif
-
-#ifndef WIRELESS_PAIR_TX_ONLY_TEST
-#define WIRELESS_PAIR_TX_ONLY_TEST 0
-#endif
-
-#ifndef WIRELESS_FRONTEND_BYPASS_TEST
-#define WIRELESS_FRONTEND_BYPASS_TEST 0
-#endif
-
-#ifndef WIRELESS_CONTINUOUS_TX_TEST
-#define WIRELESS_CONTINUOUS_TX_TEST 0
-#endif
-
-#ifndef WIRELESS_CARRIER_WAVE_TEST
-#define WIRELESS_CARRIER_WAVE_TEST 0
-#endif
-
-#ifndef WIRELESS_RX_TRACE_ENABLE
-#define WIRELESS_RX_TRACE_ENABLE 1
-#endif
-
-#ifndef WIRELESS_TX_TRACE_ENABLE
-#define WIRELESS_TX_TRACE_ENABLE 1
-#endif
-
-#ifndef PAIR_CHANNEL
-#define PAIR_CHANNEL 0x7FU
-#endif
 
 static s8 Wireless_GetLatchedErrorOrState(void)
 {
@@ -204,7 +171,7 @@ static s8 Wireless_SetRxModeOnChannel(u8 channel)
 static void Wireless_EnableTxFrontend(void)
 {
 #if !WIRELESS_FRONTEND_BYPASS_TEST
-    /* Legacy LT8920_TxData() keeps RX_EN high and only pulses TX_EN. */
+    /* å…¼å®¹æ—§ç‰ˆ LT8920_TxData() çš„æ—¶åºï¼šRX_EN ä¿æŒé«˜ç”µå¹³ï¼Œåªè„‰å†?TX_ENã€?*/
     WirelessPort_SetRxEn(1U);
     WirelessPort_SetTxEn(1U);
     WirelessPort_DelayUs(5U);
@@ -1017,10 +984,9 @@ s8 Wireless_RunMinimalTest(void)
         return WIRELESS_ERR_VERIFY;
     }
 
-    /* Reg7 mixes mode/control bits with channel-related fields.
-     * It is not a clean "write channel then read back the same byte" register,
-     * so do not use it as the SPI write-path proof.
-     */
+    /* Reg7 åŒæ—¶æ··åˆäº†æ¨¡å¼æŽ§åˆ¶ä½å’Œä¿¡é“å­—æ®µï¼Œ
+     * ä¸æ˜¯é‚£ç§â€œå†™è¿›åŽ»å†åŽŸæ ·è¯»å›žæ¥â€çš„å¯„å­˜å™¨ï¼Œ
+     * æ‰€ä»¥ä¸è¦æ‹¿å®ƒå½“ä½?SPI å†™è·¯å¾„çš„å”¯ä¸€éªŒè¯ä¾æ®ã€?     */
     rc = LT8920_SetChannel(0x12U);
     if (rc != SUCCESS) {
         LOGE(WIRELESS_TAG, "test set ch fail rc=%d", rc);
@@ -1262,3 +1228,4 @@ s8 Wireless_GetRxDebug(Wireless_RxDebug_t *dbg)
     dbg->channel = (u8)(reg7 & 0x007FU);
     return SUCCESS;
 }
+

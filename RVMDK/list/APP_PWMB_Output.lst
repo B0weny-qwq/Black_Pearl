@@ -1,12 +1,13 @@
-C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    27/04/26  00:55:20  PAGE 1   
+C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    07/05/26  09:39:24  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_PWMB_Output
 OBJECT MODULE PLACED IN .\list\APP_PWMB_Output.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_PWMB_Output.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;
-                    -..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_bowe
-                    -ny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\li
-                    -st\APP_PWMB_Output.lst) TABS(2) OBJECT(.\list\APP_PWMB_Output.obj) 
+                    -..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_bowen
+                    -y\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Devi
+                    -ce\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP_PWMB_Output.lst) TABS(2) OBJECT(.\list\APP_PWMB_Output.o
+                    -bj) 
 
 stmt  level    source
 
@@ -65,9 +66,9 @@ stmt  level    source
    53          // 版本: V1.0, 2020-09-28
    54          //========================================================================
    55          void PWMB_Output_init(void)
-   56          {
-C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    27/04/26  00:55:20  PAGE 2   
+C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    07/05/26  09:39:24  PAGE 2   
 
+   56          {
    57   1        PWMx_InitDefine   PWMx_InitStructure;
    58   1        
    59   1        PWMB_Duty.PWM5_Duty = 128;
@@ -133,9 +134,9 @@ stmt  level    source
   111   2        }
   112   1        else
   113   1        {
-  114   2          PWMB_Duty.PWM5_Duty--;
-C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    27/04/26  00:55:20  PAGE 3   
+C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    07/05/26  09:39:24  PAGE 3   
 
+  114   2          PWMB_Duty.PWM5_Duty--;
   115   2          if(PWMB_Duty.PWM5_Duty <= 0) PWM5_Flag = 0;
   116   2        }
   117   1      

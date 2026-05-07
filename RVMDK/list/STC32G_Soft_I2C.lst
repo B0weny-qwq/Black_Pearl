@@ -1,12 +1,13 @@
-C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    27/04/26  00:55:21  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    07/05/26  09:39:27  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_Soft_I2C
 OBJECT MODULE PLACED IN .\list\STC32G_Soft_I2C.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_Soft_I2C.c XSMALL INTR2 BROWSE INCDIR(..\Driver\i
-                    -nc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_b
-                    -oweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.
-                    -\list\STC32G_Soft_I2C.lst) TABS(2) OBJECT(.\list\STC32G_Soft_I2C.obj) 
+                    -nc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_bo
+                    -weny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\D
+                    -evice\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_Soft_I2C.lst) TABS(2) OBJECT(.\list\STC32G_Soft_I2
+                    -C.obj) 
 
 stmt  level    source
 
@@ -65,9 +66,9 @@ stmt  level    source
    53   1        I2C_Delay();
    54   1        SCL = 1;
    55   1        I2C_Delay();
-   56   1        SCL = 0;
-C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    27/04/26  00:55:21  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    07/05/26  09:39:27  PAGE 2   
 
+   56   1        SCL = 0;
    57   1        I2C_Delay();
    58   1      }
    59          
@@ -133,9 +134,9 @@ stmt  level    source
   119   1        {
   120   2          SCL = 1;
   121   2          I2C_Delay();
-  122   2          dat <<= 1;
-C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    27/04/26  00:55:21  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    07/05/26  09:39:27  PAGE 3   
 
+  122   2          dat <<= 1;
   123   2          if(SDA)     dat++;
   124   2          SCL  = 0;
   125   2          I2C_Delay();
@@ -201,9 +202,9 @@ stmt  level    source
   181   3            I2C_Check_ACK();
   182   3            if(!F0)
   183   3            {
-  184   4              do
-C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    27/04/26  00:55:21  PAGE 4   
+C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    07/05/26  09:39:27  PAGE 4   
 
+  184   4              do
   185   4              {
   186   5                *p = I2C_ReadAbyte();   p++;
   187   5                if(number != 1)     S_ACK();    //send ACK

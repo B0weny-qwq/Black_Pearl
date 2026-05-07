@@ -2,8 +2,8 @@
  * @file    ship_protocol.h
  * @brief   船端无线业务协议解析与调度接口。
  * @author  boweny
- * @date    2026-05-06
- * @version v1.1
+ * @date    2026-05-07
+ * @version v1.2
  *
  * @details
  * 定义船端无线帧格式的帧头、帧尾、命令字和对外调度函数。
@@ -22,6 +22,9 @@
  * - `PAIR_RSP(0x0F)` 仅在有效窗口内置配对成功并打印。
  * - 任意合法协议帧分发结束后立即回发一次 `GPS_REPORT(0x12)`。
  * - `GPS_REPORT(0x12)` payload 保持老版 15 字节，不新增字段。
+ * - `THROTTLE(0x11)` 恢复为老版手动开环判定，不走 IMU/AHRS/航向闭环。
+ * - `A/C/D` 按键入口保留老版语义，其中 A 键灯控因当前 v1.1 板级引脚未确认，
+ *   只保留日志提示，不在本层擅自绑定到未知引脚。
  *
  * @note
  * 当前主路径应调用 ShipProtocol_RunScheduler()，由调度器统一消费无线接收
@@ -82,13 +85,13 @@ s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len);
  * @details
  * 用于执行固定 seed 配对、配对响应窗口、工作信道监听和旧版协议流式解析。
  * 每收到一帧合法协议数据都会按旧版业务回发一次 `SHIP_CMD_GPS_REPORT(0x12)`；
- * 收到 `SHIP_CMD_THROTTLE(0x11)` 时额外打印 lr/ud/key。
- * 当前测试要求下，`SHIP_THROTTLE_PWM_ENABLE` 默认关闭，遥控器油门数据只打印，
- * 不会直接输出到真实电机 PWM。
+ * 收到 `SHIP_CMD_THROTTLE(0x11)` 时恢复老版开环前进、后退、左转、右转、停止判定。
+ * 当 `SHIP_THROTTLE_PWM_ENABLE=1` 时，本层会驱动 `Motor` 模块输出真实 PWM；
+ * 若该宏为 0，则只保留日志，不输出电机 PWM。
  *
  * @warning
- * 当前工程缺少旧版 autoDrive / Power_ADC_Get_Level() 完整实现，相关业务只做
- * 日志和状态包回传，不伪造自动驾驶动作。
+ * 当前工程有意关闭旧版 autoDrive/巡航/数据融合链路，`0x13/0x14/0x15`
+ * 只保留兼容解析入口和日志，不参与今晚主控船链路。
  */
 void ShipProtocol_RunScheduler(void);
 

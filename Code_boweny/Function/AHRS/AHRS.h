@@ -21,10 +21,10 @@
 
 #include "config.h"
 
-#define AHRS_IMU_PERIOD_MS               17U     /**< IMU 融合更新周期，单位 ms。 */
+#define AHRS_IMU_PERIOD_MS               9U      /**< IMU 融合更新周期，单位 ms。 */
 #define AHRS_MAG_PERIOD_MS               100U    /**< 地磁航向修正周期，单位 ms。 */
 #define AHRS_DT_MAX_MS                   50U     /**< 单次积分最大 dt，超过后钳位以避免角度突跳。 */
-#define AHRS_GYRO_LSB_PER_DPS            2048L   /**< 陀螺仪灵敏度，单位 LSB/(deg/s)。 */
+#define AHRS_GYRO_LSB_PER_DPS            256L    /**< 陀螺仪灵敏度，单位 LSB/(deg/s)。 */
 #define AHRS_GYRO_STILL_DPS100           800L    /**< 静止零偏学习阈值，单位 deg/s * 100。 */
 #define AHRS_GYRO_DEADBAND_DPS100        12L     /**< 陀螺仪死区，单位 deg/s * 100。 */
 #define AHRS_GYRO_LPF_SHIFT              2U      /**< 陀螺仪一阶低通强度，值越大响应越慢。 */

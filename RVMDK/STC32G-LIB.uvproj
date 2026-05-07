@@ -340,6 +340,11 @@
               <FilePath>..\User\Task.c</FilePath>
             </File>
             <File>
+              <FileName>MainLoop.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\MainLoop.c</FilePath>
+            </File>
+            <File>
               <FileName>isr.asm</FileName>
               <FileType>2</FileType>
               <FilePath>..\User\isr.asm</FilePath>
@@ -702,6 +707,16 @@
               <FileType>5</FileType>
               <FilePath>..\Code_boweny\Device\QMC6309\QMC6309.h</FilePath>
             </File>
+            <File>
+              <FileName>QMC6309_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Code_boweny\Device\QMC6309\QMC6309_port.c</FilePath>
+            </File>
+            <File>
+              <FileName>QMC6309_port.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Code_boweny\Device\QMC6309\QMC6309_port.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -716,6 +731,16 @@
               <FileName>QMI8658.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\Code_boweny\Device\QMI8658\QMI8658.h</FilePath>
+            </File>
+            <File>
+              <FileName>QMI8658_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Code_boweny\Device\QMI8658\QMI8658_port.c</FilePath>
+            </File>
+            <File>
+              <FileName>QMI8658_port.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Code_boweny\Device\QMI8658\QMI8658_port.h</FilePath>
             </File>
           </Files>
         </Group>

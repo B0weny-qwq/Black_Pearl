@@ -1,6 +1,7 @@
 ".\list\main.obj",
 ".\list\system_init.obj",
 ".\list\Task.obj",
+".\list\MainLoop.obj",
 ".\list\APP.obj",
 ".\list\APP_AD_UART.obj",
 ".\list\APP_Lamp.obj",
@@ -61,7 +62,9 @@
 ".\list\STC32G_CAN_Isr.obj",
 ".\list\STC32G_LIN_Isr.obj",
 ".\list\QMC6309.obj",
+".\list\QMC6309_port.obj",
 ".\list\QMI8658.obj",
+".\list\QMI8658_port.obj",
 ".\list\GPS.obj",
 ".\list\wireless.obj",
 ".\list\lt8920.obj",
@@ -70,6 +73,8 @@
 ".\list\Motor.obj",
 ".\list\Log.obj",
 ".\list\Filter.obj",
+".\list\AHRS.obj",
+".\list\PID.obj",
 "..\Driver\lib\STC32_MDU32_LARGE.LIB" 
 TO ".\list\STC32G-LIB" 
 PRINT(".\list\STC32G-LIB.map") CASE DISABLEWARNING (16,57) 

@@ -23,9 +23,7 @@
  */
 
 #include "GPS.h"
-#include "STC32G_GPIO.h"
 #include "STC32G_NVIC.h"
-#include "STC32G_Switch.h"
 #include "STC32G_UART.h"
 #include "..\..\Function\Log\Log.h"
 
@@ -48,7 +46,6 @@ static u16  g_gps_fifo_count = 0;
 
 static void GPS_ClearState(void);
 static void GPS_ClearParser(void);
-static void GPS_ConfigUart2Pins(void);
 static void GPS_RawEchoByte(u8 dat);
 static u8   GPS_FifoPush(u8 dat);
 static u8   GPS_FifoPop(u8 *dat);
@@ -112,13 +109,6 @@ static void GPS_ClearParser(void)
     for (i = 0; i < (u16)GPS_UART_FIFO_SIZE; i++) {
         g_gps_fifo[i] = 0;
     }
-}
-
-static void GPS_ConfigUart2Pins(void)
-{
-    P1_MODE_IO_PU(GPIO_Pin_0 | GPIO_Pin_1);
-    P1_PULL_UP_ENABLE(GPIO_Pin_0 | GPIO_Pin_1);
-    UART2_SW(UART2_SW_P10_P11);
 }
 
 static void GPS_RawEchoByte(u8 dat)
@@ -1146,7 +1136,6 @@ s8 GPS_Init(void)
 
     GPS_ClearState();
     GPS_ClearParser();
-    GPS_ConfigUart2Pins();
 
     uart_init.UART_Mode = UART_8bit_BRTx;
     uart_init.UART_BRT_Use = BRT_Timer2;

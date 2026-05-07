@@ -1,84 +1,97 @@
-﻿/**
+/**
  * @file    total.md
- * @brief   Black Pearl v1.1 工程总览文档
+ * @brief   Black Pearl v1.1 当前工程总览
  *
  * @author  boweny
- * @date    2026-05-06
- * @version v1.7.28
+ * @date    2026-05-07
+ * @version v1.7.52
  *
  * @details
- * 本文档基于 2026-04-27 当前工程实际代码重新整理，
- * 在 GPS、IMU、MAG 已接入基础上，补充 WIRELESS 模块接入后的真实运行链路、
- * 资源占用与约束边界，并补充 MOTOR PWM 驱动、PID 功能模块与 AHRS 姿态融合模块。
- *
- * @note    详细变更记录请查阅 date.md
+ * 本文档按 2026-05-07 今晚联调版源码重新整理。
+ * 当前目标不是姿态融合验证，而是让船在明早前具备可配对、可手动开环驱动、
+ * 可回传 `0x12` 状态包的最小可用控船能力。
  *
  * @see     date.md
  */
 
 # Black Pearl v1.1 工程总览
 
-> 本文档已按当前工程真实状态更新，不再沿用旧版“计划中的运行流”。
-> 若代码与旧描述冲突，以本文档和源码现状为准。
+> 当前文档只描述现在这版代码的真实行为。若旧文档、旧日志或旧计划与源码冲突，以当前源码和本文档为准。
 
----
+## 1. 当前联调目标
 
-## 1. 工程基本信息
+今晚目标只有一条主线：先让船开环跑起来。
 
-| 项目 | 说明 |
-|------|------|
-| 工程名称 | Black Pearl v1.1 (STC32G_Library) |
-| MCU 芯片 | STC32G |
-| 主时钟 | `MAIN_Fosc = 24000000L` |
-| 编译器 | Keil MDK / C251 |
-| 开发方式 | `User + Driver + App/Code_boweny` 三层结构 |
-| 当前日志口 | UART1 (`P3.0/P3.1`) |
-| 当前 GPS 口 | UART2 (`P1.0/P1.1`) |
+当前验收重点：
 
----
+- 遥控器能配对成功
+- 手动前进、后退、左转、右转、回中停止真实有效
+- 合法协议帧后能回老版 `0x12`
+- `A/C/D` 按键入口恢复
+- 磁力计可上电、可观察
+
+当前明确不做：
+
+- 陀螺仪 bring-up
+- IMU 运行期轮询
+- AHRS 姿态融合
+- 自动驾驶、巡航、返航、航点业务恢复
 
 ## 2. 目录结构
 
 ```text
 Black_Pearl_v1.1/
-├── User/                     # 系统入口、初始化、主循环、任务框架
-├── Driver/                   # STC 官方底层外设库（禁止项目内修改）
-├── App/                      # 官方示例应用层
-├── Code_boweny/             # 项目扩展模块
-│   ├── Function/Log/        # UART1 日志系统
-│   ├── Function/Filter/     # Q8 定点低通滤波
-│   ├── Function/AHRS/       # 定点姿态融合与轴向映射
-│   ├── Function/PID/        # Q10 定点 PID 控制器
-│   └── Device/
-│       ├── QMC6309/         # 地磁计驱动
-│       ├── QMI8658/         # IMU 驱动
-│       ├── GPS/             # GPS NMEA 解析模块
-│       ├── WIRELESS/        # LT8920 + KCT8206L 无线驱动
-│       └── MOTOR/           # PWMA3/PWMA4 双电机 PWM 驱动
-├── RVMDK/                    # Keil 工程文件
+├── User/                     # 系统入口、初始化、主循环、功能开关
+├── Driver/                   # STC 官方底层驱动
+├── App/                      # 官方示例与当前保留的状态灯任务
+├── Code_boweny/
+│   ├── Device/
+│   │   ├── GPS/             # GPS NMEA 解析
+│   │   ├── MOTOR/           # PWMA 双电机驱动
+│   │   ├── QMC6309/         # 地磁计
+│   │   ├── QMI8658/         # IMU（今晚关闭）
+│   │   └── WIRELESS/        # LT8920 + 旧遥控器协议移植层
+│   └── Function/
+│       ├── AHRS/            # 姿态融合（今晚关闭）
+│       ├── Filter/          # 定点低通
+│       ├── Log/             # UART1 日志
+│       └── PID/             # 定点 PID
 └── doc/
-    ├── project_doc/         # total.md / date.md
-    ├── build_doc/           # 功能模块开发手册
-    └── device_doc/          # 设备说明文档
+    └── project_doc/
+        ├── total.md
+        └── date.md
 ```
 
----
+## 3. 当前功能开关
 
-## 3. 当前软件结构与真实运行流
+当前集中在 [User/FeatureSwitch.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/User/FeatureSwitch.h)：
 
-### 3.1 分层职责
+```c
+#define ENABLE_WIRELESS_MODULE         1
+#define ENABLE_GPS_MODULE              1
+#define ENABLE_MAG_MODULE              1
+#define ENABLE_IMU_MODULE              0
 
-| 层级 | 目录 | 职责 |
-|------|------|------|
-| 芯片/系统层 | `User/` | 入口、初始化、主循环、任务框架 |
-| 底层驱动层 | `Driver/` | UART/I2C/SPI/Timer/GPIO 等标准外设 API |
-| 示例应用层 | `App/` | 官方示例模块 |
-| 项目设备层 | `Code_boweny/Device/` | QMC6309 / QMI8658 / GPS / WIRELESS 等项目设备驱动 |
-| 项目功能层 | `Code_boweny/Function/` | LOG / Filter / AHRS / PID 等通用功能模块 |
+#define ENABLE_SHIP_PROTOCOL_SCHED     1
+#define ENABLE_MAG_STANDALONE_POLL     1
+#define ENABLE_IMU_AHRS_POLL           0
 
-### 3.2 当前真实启动顺序
+#define AHRS_TEST_ONLY                 0
+#define SHIP_PROTOCOL_POLL_ENABLE      1
+#define SHIP_THROTTLE_PWM_ENABLE       1
+#define WIRELESS_MINIMAL_TEST_ONLY     0
+```
 
-当前 `SYS_Init()` 实际运行顺序如下：
+含义：
+
+- 无线、GPS、磁力计启用
+- IMU 整条链路关闭
+- 无线协议调度启用
+- 电机 PWM 真实输出启用
+
+## 4. 当前真实启动顺序
+
+当前 `SYS_Init()` 主路径如下：
 
 ```text
 EAXSFR()
@@ -91,515 +104,180 @@ EAXSFR()
 -> EA = 1
 -> APP_config()
 -> log_init()
--> Wireless_Init()         [skipped when AHRS_TEST_ONLY=1]
--> GPS_Init()              [skipped when AHRS_TEST_ONLY=1 or WIRELESS_MINIMAL_TEST_ONLY=1]
+-> Wireless_Init()
+-> GPS_Init()
 -> Sensor_I2C_prepare()
--> AHRS_Reset()
 -> QMC6309_Init()
--> QMI8658_PowerOnSelfTest()
 ```
 
-### 3.3 当前真实主循环
+当前不会执行：
 
-当前 `User/config.h` 中 `AHRS_TEST_ONLY=0`、`WIRELESS_MINIMAL_TEST_ONLY=1`，固件处于无线最小业务模式。该模式只初始化并运行 LT8920 无线链路、配对调度和 LED 任务，跳过 GPS / IMU / MAG 初始化与轮询，不启用电机控制：
+- `AHRS_Reset()`
+- `QMI8658_Init()`
+- `QMI8658_RequestReinit()`
 
-```c
-Wireless_MinimalTestUnit();
-while (1)
-{
-    Wireless_Poll();
-    ShipProtocol_RunScheduler();
-    Task_Pro_Handler_Callback();
-}
-```
+## 5. 当前真实主循环
 
-当前串口重点输出：
+当前主循环在 [User/MainLoop.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/User/MainLoop.c)：
 
 ```text
-[SHIP] I: pair ok, enter work channel rx_ch=13 tx_ch=13
-[SHIP] I: pair success paired=1 work_rx=... work_tx=... key=.../...
-[SHIP] I: rc lr=100 ud=142 key=0xA0 paired=1
-[SHIP] I: throttle=142 steering=100 key=0xA0
-[SHIP] I: pwm disabled by SHIP_THROTTLE_PWM_ENABLE=0
-[SHIP] I: adc p0.0 raw=2048 adc_mv=1650 bat_mv=1650 power=0x80
+MainLoop_RunOnce()
+  -> GPS_Poll()
+  -> Wireless_Poll()
+  -> ShipProtocol_RunScheduler()
+  -> Wireless_SearchSignalPoll()
+  -> MAG_StandalonePoll()
+  -> Task_Pro_Handler_Callback()
 ```
 
-当前无线测试验收项有两个硬性输出：收到有效 `PAIR_RSP(0x0F)` 后必须打印 `pair ok, enter work channel rx_ch=... tx_ch=...`；收到遥控器 `cmd=0x11` 后必须打印 `rc lr=... ud=... key=... paired=...` 和 `throttle=... steering=... key=...`。`lr/ud/key` 分别来自 `cmd=0x11` 载荷的 3 个字节。
-
-真实 PWM 油门输出由 `User/Config.h` 中 `SHIP_THROTTLE_PWM_ENABLE` 控制，默认值为 `0`。默认测试固件只打印遥控器值，不调用 `Motor_SetBothSpeed()`；每帧遥控数据会额外打印 `pwm disabled by SHIP_THROTTLE_PWM_ENABLE=0`，用于确认没有输出真实 PWM。只有显式改为 `1` 后，协议层才会初始化 `Motor` 并把 `ud` 油门轴映射到左右电机同速 PWM 输出。
-
-无线最小业务模式下，`Wireless_MinimalTestUnit()` 只执行一次 LT8920 固定寄存器签名自检；之后不进入单向发送诊断循环，而是由 `ShipProtocol_RunScheduler()` 发送 10 次 `PAIR_REQ(0x10)`。第 10 次发送完成后按老版 `RF_Encrypt_Config()` 等效流程只写 `reg36/reg39` 并停在配对信道空闲态，同时打开 `PAIR_RSP(0x0F)` 有效窗口；继续等待 30 个调度节拍后才打开工作接收。窗口内收到合法 `0x0F` 即打印配对成功。当前固定 seed 为 `65 65 A0 65`，按老版公式派生 `work_ch=13`、`key=32/30`。
-收到任意合法协议帧后，船体会立即回发一次 `0x12` 状态包，对齐老版 `WirelessProtocal_Resolve_Handle()` 末尾固定调用 `RF_Send_Gps_Data()` 的行为。`0x12` 载荷固定 15 字节，不新增字段；power 字段仍为老版位置的 1 字节，当前来自 `P0.0 / ADC_CH8` 的 12 位采样值右移 4 位。串口额外打印 ADC 原始值、ADC 输入端毫伏值、按分压参数还原的电池毫伏值，以及实际发送的 power 字节。
-
-当前接收时序已按 `Wireless_other/LT8920/LT8920_SPI.c` 对齐：工作同步只写 `reg36=key0/key0`、`reg39=key1/key1`，保留 `reg37=0x0380`、`reg38=0x5A5A`，不清 FIFO，不自动打开接收；工作接收打开顺序为 `reg7 idle -> reg52 clear -> reg8=0x6C90 -> reg7 RX`。无有效包时每 10 个调度节拍重新打开接收，对应老版 `Rx_TimeOUT > 10` 逻辑。`rxdbg` 会打印 `reg36/reg37/reg38/reg39`，用于现场确认同步寄存器是否与老版一致。
-
-当前发送时序也按老版 `LT8920_TxData()` 对齐：协议发送不再通过会自动开接收的 `Wireless_SetChannel()` 预设信道，而是走 `Wireless_SendOnChannel()`，执行 `reg7 idle(channel) -> reg52 clear -> FIFO -> reg7 TX -> reg7 idle(channel)`。发送前端保持老版 `RXEN=1`，发送时只拉高 `TXEN=1`，发送结束拉低 `TXEN=0`；后续是否进入接收由业务状态机显式决定。
-
-公开头文件约束已同步：
-
-- `wireless.h`：`Wireless_Receive()` 返回一次 LT8920 射频载荷，不承诺等于完整旧协议帧。
-- `ship_protocol.h`：本层是 `Wireless_other/wirelessProtocal.c` 移植兼容层，必须保持旧遥控器包格式、seed 派生、工作接收和固定 `0x12` 回包节奏。
-- `ShipProtocol_ParseFrame()` 只接收已经截出的完整 `AA..BB` 协议帧；主路径由 `ShipProtocol_RunScheduler()` 内部按旧版逐字节截帧。
-
-正常完整运行模式为 `AHRS_TEST_ONLY=0` 且 `WIRELESS_MINIMAL_TEST_ONLY=0`，`User/Main.c` 将接入 GPS、无线协议轮询、任务处理、MAG 独立测试和 AHRS 姿态融合：
-
-```c
-Wireless_MinimalTestUnit();
-while (1)
-{
-    GPS_Poll();
-    Wireless_Poll();
-    ShipProtocol_RunScheduler();
-    if (SHIP_PROTOCOL_COMPAT_ENABLE) {
-        ShipProtocol_Poll();
-    }
-    Wireless_SearchSignalPoll();
-    Task_Pro_Handler_Callback();
-    MAG_StandalonePoll();
-    IMU_HighRatePoll();
-}
-```
-
-含义：
-
-- `Wireless_MinimalTestUnit()` 在系统启动后执行一次，读取 LT8920 固定寄存器签名，确认无线 SPI 链路可读
-- `GPS_Poll()` 高优先级处理 UART2 字节流，避免 GPS 串口堆积
-- `Wireless_Poll()` 高频轮询 LT8920 状态，维持常驻接收和发包后自动回到接收
-- `ShipProtocol_RunScheduler()` 执行配对、工作信道监听和协议收包调度
-- `ShipProtocol_Poll()` 仅在兼容开关启用时消费无线收包
-- `Wireless_SearchSignalPoll()` 执行无线搜索和信号扫描相关轮询
-- `Task_Pro_Handler_Callback()` 消费 Timer0 标记任务，当前用于驱动 `P3.6` LED 闪烁
-- `MAG_StandalonePoll()` 每 1000ms 独立读取一次 QMC6309 原始三轴地磁数据，用于 IMU 不 ready 时单独验证磁力计；`AHRS_TEST_ONLY=1` 时不调用
-- `IMU_HighRatePoll()` 按 Timer0 1ms 调度节拍读取 QMI8658 6 轴数据，调用 AHRS 完成姿态融合，并低频读取 QMC6309 修正航向
-- `DisplayScan()` 当前仍未接入主循环
-- `Task.c` 当前已作为 LED 闪烁调度器参与运行
-
----
-
-## 4. 当前启用模块状态
-
-### 4.1 User 层
-
-| 模块 | 状态 | 说明 |
-|------|------|------|
-| `GPIO_config()` | 启用 | 初始化端口模式，I2C 口先设为开漏 |
-| `Switch_config()` | 启用 | 功能脚切换，UART2 已改为 `P1.0/P1.1` |
-| `Timer_config()` | 启用 | 仅启用 Timer0 1ms 中断 |
-| `UART_config()` | 启用 | 只初始化 UART1，用于 LOG |
-| `ADC_config()` | 启用 | 打开 STC32G ADC，当前 `P0.0 / ADC_CH8` 用于无线状态回传和串口 ADC 打印 |
-| `I2C_config()` | 启用 | 初始化硬件 I2C |
-| `Wireless_Init()` | 启用 | `AHRS_TEST_ONLY=0` 时初始化 LT8920、SPI4 和双天线扫描 |
-| `APP_config()` | 启用 | 当前保留 `Lamp_init()`，配置 `P3.6` LED |
-| `Task.c` | 启用 | 主循环已调用，当前执行 `Sample_Lamp()` |
-
-### 4.2 App 层
-
-当前 `APP_config()` 已调整为：
-
-- `Lamp_init()`：保留，改为 `P3.6` LED 初始化
-- `ADtoUART_init()`：停用
-- 其他示例：保持注释禁用
-
-停用 `ADtoUART_init()` 的原因：
-
-- 该示例原先会重新占用 `Timer2`
-- UART2 固定依赖 `Timer2` 作为波特率发生器
-- 若继续启用，会与 GPS 模块产生资源冲突
-
-### 4.3 Code_boweny 扩展模块
-
-| 模块 | 状态 | 说明 |
-|------|------|------|
-| `Function/Log` | 启用 | UART1 日志输出 |
-| `Function/Filter` | 启用 | QMI8658 / QMC6309 定点低通 |
-| `Function/AHRS` | 启用 | 定点互补姿态融合，输出 roll/pitch/yaw 与船体系角速度 |
-| `Function/PID` | 已纳入工程 | Q10 定点 PID 控制器，当前提供 API，默认未在启动流中调用 |
-| `Device/QMC6309` | 启用 | 硬件 I2C 地磁计 |
-| `Device/QMI8658` | 启用 | 硬件 I2C IMU |
-| `Device/GPS` | 启用 | UART2 NMEA0183 解析模块 |
-| `Device/WIRELESS` | 启用 | LT8920 + KCT8206L 半双工无线驱动 |
-| `Device/MOTOR` | 已纳入工程 | PWMA CH3/CH4 双电机驱动，当前提供 API，默认未在启动流中调用 |
-
----
-
-## 5. 当前通信资源与引脚占用
-
-| 资源 | 当前用途 | 引脚/路由 | 备注 |
-|------|----------|-----------|------|
-| UART1 | LOG 输出 | `P3.0=RX / P3.1=TX` | `UART_config()` 初始化，使用 Timer1 |
-| UART2 | GPS 模块 | `P1.0=RX / P1.1=TX` | `GPS_Init()` 初始化，固定使用 Timer2 |
-| I2C | QMC6309 + QMI8658 | `P1.4=SDA / P1.5=SCL` | 共享硬件 I2C 总线 |
-| SPI4 | WIRELESS 模块 | `P3.2=SCLK / P3.3=MISO / P3.4=MOSI / P3.5=CS` | 由 `WirelessPort_Init()` 运行时切换并初始化为主机 |
-| Timer0 | 系统 1ms 节拍 | - | 当前用于任务标记与 LED 闪烁调度基准 |
-| Timer1 | UART1 波特率发生器 | - | 给 LOG 使用 |
-| Timer2 | UART2 波特率发生器 | - | 已专门留给 GPS |
-| P3.6 | 单灯闪烁 | `P3.6` | `Lamp_init()` 配置，`Sample_Lamp()` 250ms 翻转 |
-| P0.0 | ADC 采样输入 | `P0.0 / ADC_CH8` | 已用于无线 `0x12` 状态包 power 字节回传；电压估算由 `SHIP_ADC_REF_MV`、`SHIP_BAT_DIV_NUM`、`SHIP_BAT_DIV_DEN` 控制 |
-| P5.0 | 无线复位 | `P5.0` | LT8920 `RST` |
-| P5.1 | 天线选择 | `P5.1` | `ANT_SEL` |
-| P5.4 | 发射使能 | `P5.4` | `TXEN` |
-| P1.3 | 接收使能 | `P1.3` | `RXEN` |
-| PWMA CH3 | 左电机 PWM | `PWM3P_2=P2.4 / PWM3N_2=P2.5` | `MLB=P / MLA=N` |
-| PWMA CH4 | 右电机 PWM | `PWM4P_2=P2.6 / PWM4N_2=P2.7` | `MRB=P / MRA=N` |
-
-### 5.1 当前功能脚切换结果
-
-`Switch_config()` 当前配置：
-
-- `UART1_SW(UART1_SW_P30_P31)`
-- `UART2_SW(UART2_SW_P10_P11)`
-- `UART3_SW(UART3_SW_P00_P01)`
-- `UART4_SW(UART4_SW_P02_P03)`
-- `I2C_SW(I2C_P14_P15)`
-- `SPI_SW(SPI_P22_P23_P24_P25)`
-
-MOTOR 模块在 `Motor_Init()` 内部独立执行：
-
-- `PWM3_USE_P24P25()`：`PWM3P_2 -> P2.4(MLB)`，`PWM3N_2 -> P2.5(MLA)`
-- `PWM4_USE_P26P27()`：`PWM4P_2 -> P2.6(MRB)`，`PWM4N_2 -> P2.7(MRA)`
-
-说明：
-
-- `Switch_config()` 仍保留默认 `SPI_P22_P23_P24_P25`
-- 无线模块在 `WirelessPort_Init()` 中会运行时切换为 `SPI_P35_P34_P33_P32`
-- 当前已启用模块中，没有其它运行链路依赖 SPI 第 2 组或第 4 组
-- `P0.0` 当前已切为 ADC 输入并关闭数字输入，用于采样后经无线状态包回传
-- MOTOR 当前不在 `SYS_Init()` 中自动调用，避免上电后电机误动作；需要运动控制时由上层显式调用 `Motor_Init()`
-
----
-
-## 6. 当前设备模块说明
-
-### 6.1 LOG 模块
-
-- 路径：`Code_boweny/Function/Log/`
-- 输出口：UART1
-- 调用前提：`UART_config()` 完成后再 `log_init()`
-- 当前用途：QMC6309 / QMI8658 / GPS 初始化与错误日志
-
-### 6.1.1 AHRS
-
-- 路径：`Code_boweny/Function/AHRS/`
-- 类型：定点互补姿态融合器
-- 机体系：`+X=船尾`，`+Y=船右/右舷`，`+Z=上`
-- 数据格式：姿态角输出为 `deg * 100`，角速度输出为 `deg/s * 100`
-- 当前节拍：IMU 更新周期 `AHRS_IMU_PERIOD_MS=17ms`，地磁修正周期 `AHRS_MAG_PERIOD_MS=100ms`
-- 当前融合策略：
-  - 陀螺仪负责短期角速度积分
-  - 加速度计负责 roll/pitch 慢修正，并通过模长窗口抵抗冲击和船体线加速度
-  - 地磁计负责 yaw 慢修正，可通过 `AHRS_MAG_ENABLE` 关闭
-  - 启动阶段自动学习加速度 1g 参考值和静止陀螺仪零偏
-- 当前对外接口：
-
-```c
-void AHRS_Reset(void);
-s8 AHRS_Update6Axis(int16 ax, int16 ay, int16 az,
-                    int16 gx, int16 gy, int16 gz,
-                    u16 dt_ms);
-s8 AHRS_UpdateRaw6Axis(int16 raw_ax, int16 raw_ay, int16 raw_az,
-                       int16 raw_gx, int16 raw_gy, int16 raw_gz,
-                       u16 dt_ms);
-s8 AHRS_UpdateMag(int16 mx, int16 my, int16 mz);
-s8 AHRS_UpdateRawMag(int16 raw_mx, int16 raw_my, int16 raw_mz);
-const AHRS_State_t *AHRS_GetState(void);
-u8 AHRS_IsReady(void);
-```
-
-### 6.1.2 PID
-
-- 路径：`Code_boweny/Function/PID/`
-- 类型：通用位置式 PID 控制器
-- 数据格式：`kp/ki/kd` 使用 Q10 定点数，`1024 = 1.0`
-- 状态模型：每个 `PID_Controller_t` 独立保存目标值、积分、上一帧误差和限幅配置
-- 当前用途：作为后续电机速度环、航向环、姿态角速度环的基础控制函数，当前未在启动流中自动调用
-- 当前对外接口：
-
-```c
-void PID_Init(PID_Controller_t *pid,
-              int16 kp, int16 ki, int16 kd,
-              int16 output_min, int16 output_max,
-              int32 integral_min, int32 integral_max);
-void PID_Reset(PID_Controller_t *pid);
-void PID_SetTarget(PID_Controller_t *pid, int16 target);
-void PID_SetGains(PID_Controller_t *pid, int16 kp, int16 ki, int16 kd);
-void PID_SetOutputLimit(PID_Controller_t *pid, int16 output_min, int16 output_max);
-void PID_SetIntegralLimit(PID_Controller_t *pid, int32 integral_min, int32 integral_max);
-int16 PID_Update(PID_Controller_t *pid, int16 measured);
-int16 PID_UpdateTarget(PID_Controller_t *pid, int16 target, int16 measured);
-```
-
-### 6.2 QMC6309
-
-- 路径：`Code_boweny/Device/QMC6309/`
-- 总线：硬件 I2C `P1.4/P1.5`
-- 当前状态：启动阶段初始化并读回寄存器
-- 与 QMI8658 共线运行
-- 当前用途：主循环中约 100ms 读取一次滤波地磁数据，供 AHRS 航向慢修正使用
-
-### 6.3 QMI8658
-
-- 路径：`Code_boweny/Device/QMI8658/`
-- 总线：硬件 I2C `P1.4/P1.5`
-- 当前状态：启动自检后，在主循环中由 `IMU_HighRatePoll()` 周期读取加速度 + 陀螺仪并送入 AHRS
-- 自检成功后置 `g_qmi8658_ready = 1`
-- 当前读取接口：`QMI8658_ReadAll()`，一次读取 6 轴数据，避免加速度/陀螺仪分开读取导致时间不一致
-
-### 6.4 GPS
-
-- 路径：`Code_boweny/Device/GPS/`
-- 接口：UART2 `P1.0/P1.1`
-- 默认波特率：`GPS_BAUDRATE = 115200`
-- 当前调试状态：`GPS_RAW_ECHO_ENABLE = 0`，当前已关闭 UART2 原始透传，便于单独观察 I2C 初始化链路
-- 当前支持语句：`GGA / RMC / GSA / GSV / VTG`
-- 数据结构：`GPS_State_t`
-- 当前对外接口：
-
-```c
-s8 GPS_Init(void);
-void GPS_Reset(void);
-void GPS_Poll(void);
-const GPS_State_t *GPS_GetState(void);
-```
-
-### 6.5 GPS 当前实现要点
-
-- 接收链路：`RX2_Buffer -> GPS FIFO -> NMEA 状态机`
-- 不修改 Driver 层 UART2 ISR
-- 使用 XOR 校验，不接受未校验通过的语句
-- 支持语句只有在整句解析成功后才提交到 `GPS_State_t`
-- `RMC` 作为主状态更新源，`update_sequence` 仅在新的 `RMC UTC/Date` 到达时递增
-- 经纬度使用 `deg1e7`，速度使用 `x100`，海拔使用 `cm`，DOP 使用 `x100`
-- 经纬度定点换算已按 32 位整型上限做安全收敛，避免溢出
-- `GSV` 当前只汇总 `satellites_view` 与 `max_snr`，不维护完整卫星表
-
-### 6.6 WIRELESS
-
-- 路径：`Code_boweny/Device/WIRELESS/`
-- 架构：`wireless.*` + `lt8920.*` + `wireless_port.*`
-- 射频芯片：单颗 `LT8920`
-- 前端芯片：`KCT8206L`
-- 当前总线：默认软件 SPI，宏 `WIRELESS_SOFT_SPI_TEST=0` 时可切换硬件 `SPI4`
-- 当前模式：单芯片半双工，默认常驻接收，发送时切换到发送，发完立即回到接收
-- 双天线策略：启动扫描 `ANT1/ANT2` 后固定到较优天线
-- 当前对外接口：
-
-```c
-s8 Wireless_Init(void);
-s8 Wireless_Deinit(void);
-s8 Wireless_Poll(void);
-s8 Wireless_Send(const u8 *data, u8 len);
-s8 Wireless_Receive(u8 *data, u8 buf_len, u8 *out_len);
-s8 Wireless_SetAntenna(u8 ant_sel);
-s8 Wireless_GetState(Wireless_State_t *state);
-s8 Wireless_RescanAntenna(void);
-```
-
-### 6.7 WIRELESS 当前实现要点
-
-- 不复用 `User/System_init.c` 中原示例 `SPI_config()`，避免从机模式和重复初始化冲突
-- 板级抽象集中在 `wireless_port.*`，硬件脚位不散落到业务层
-- 默认软件 SPI 使用 `P3.2=SCLK / P3.3=MISO / P3.4=MOSI / P3.5=CS`，硬件 SPI4 复测时仍使用同一组引脚
-- LT8920 寄存器初始化表按根目录 `LDT89xxconfig` 补齐 `Reg7=0x0030` 与 `Reg50=0x0000`，`Reg50` 只写入不读回校验
-- 默认软件 SPI 关闭额外 bit 延时，按根目录 `SlowSPI_io=0` 快速 GPIO SPI 流程运行；需要放慢时只改 `WIRELESS_SOFT_SPI_DELAY_US`
-- LT8920 复位时序、FIFO 长度字节、TX/RX 入口顺序已按根目录 `Wireless/` 可工作实现对齐
-- TX 发送在进入 TX 后先延时 `100us`，随后以 `1000us` 间隔轮询 `Reg48 PKT`
-- 当前无线最小业务已接入旧 `wirelessProtocal.c` 的配对与遥控值解析核心逻辑；GPS/返航/航点等旧业务仍只保留解析或占位
-- 当前不使用 `PKT` 外部中断脚，全部依赖寄存器轮询
-- 当前无线运行不会修改 UART/I2C/Timer 资源分配
-- `main()` 中已增加一次性最小测试单元，用固定寄存器签名替代不存在的 `WHO_AM_I`
-- 当前配对调度位于 `Code_boweny/Device/WIRELESS/ship_protocol.c`
-- 当前配对请求为 `cmd=0x10`，整帧格式固定为 `AA 06 10 seed0 seed1 seed2 seed3 xor BB`
-- 当前默认配对发射信道为 `0x7F`，固定 seed 为 `65 65 A0 65`
-- 当前 `seed[4]` 不是单纯持久化标记，而是当前配对输入；船端会基于它派生工作信道和同步/密钥字节
-- 当前收包解析按旧 `WirelessProtocal_Receive_Handle()` 对齐：在单个射频载荷内逐字节寻找 `0xAA`，第二字节作为长度字段，收满后校验 `xor` 和 `0xBB`；射频载荷超过 30 字节时按旧逻辑截为 10 字节处理
-- 当前 `ship_protocol.h` / `wireless.h` 已补充 Doxygen 边界说明：射频载荷与旧协议帧不是同一概念，协议层是移植兼容层，不允许随意新增载荷字段
-- 当前配对成功判定按旧遥控器兼容逻辑执行：配对响应窗口内收到合法 `cmd=0x0F` 即置 `paired=1`；若响应载荷长度为 4，会在成功日志中打印该载荷供调试
-- 当前单芯片配对状态机为 `BOOT_WAIT -> PAIR_SEND -> WORK_RX`：每约 `300ms` 成功发送一次 `cmd=0x10`，累计 10 次后只写工作同步寄存器并停在配对信道空闲态，同时保留约 `5s` 的 `PAIR_RSP(0x0F)` 有效窗口；等待 30 个调度节拍后才打开工作接收，窗口超时不重启配对
-- 当前配对请求发送失败不会消耗 10 次配对包计数；最后一包后若无法切入工作接收，也不会提前打开响应窗口
-- 当前配对发送失败只输出业务级 `retry` 计数；协议层不直接读取 LT8920 状态寄存器，避免业务层越过 `wireless.h` 访问芯片层 API
-- 当前配对成功后不再在解析 `PAIR_RSP` 时直接重配射频参数；解析层只更新协议状态，工作接收由调度器统一维护，减少队列处理期间清 FIFO 的风险
-- 当前工作同步寄存器对齐老版 `RF_Encrypt_Config()`：只写 `reg36=key0/key0` 和 `reg39=key1/key1`，不再把 `reg37/reg38` 清零，保持默认 `0x0380/0x5A5A`，且不清 FIFO、不自动打开接收
-- 当前协议发送路径对齐老版 `LT8920_TxData()`：指定信道发送后保持空闲态，不在配对包发送前后自动打开接收
-- 当前工作接收对齐老版 `RF_Receive()` 空闲处理：未收到 PKT 时累计空闲计数，超过 10 个调度节拍后重新执行 `LT8920_OpenRx()` 等效流程
-- 当前 `cmd=0x11` 遥控器值每帧打印 `rc lr=... ud=... key=0x.. paired=1` 和 `throttle=... steering=... key=...`；默认 `SHIP_THROTTLE_PWM_ENABLE=0`，不调用电机控制，只输出 `pwm disabled...` 安全确认日志
-- 当前每个通过校验的协议帧都会回发一次 `cmd=0x12`，包括旧版未显式处理的 `cmd=0x10/0x12/unknown`，以保持老业务固定回包节奏
-- 当前无线正常路径已删除 `mode->rx/mode->tx/tx done/rx pkt/rx frame/status` 等刷屏日志，只保留关键状态与错误日志
-- 当前无线业务层只依赖 `wireless.h` 管理层入口；`lt8920.h` 芯片层 API 仍公开给无线管理层和底层联调用途使用，但不作为业务主路径入口
-- 当前 `Code_boweny/Device/WIRELESS/` 下 4 个公开头文件均已补齐中文 Doxygen 风格文件头、宏/结构体字段说明和公开函数注释
-- 当前 Keil Build 结果为 `0 Error(s), 1 Warning(s)`；唯一告警为既有 `System_init.c` 中 `Sensor_I2C_prepare` 未引用静态函数。
-
-### 6.8 MOTOR
-
-- 路径：`Code_boweny/Device/MOTOR/`
-- 定时器资源：`PWMA`
-- 左电机：`PWM3N_2 -> MLA(P2.5)`，`PWM3P_2 -> MLB(P2.4)`
-- 右电机：`PWM4N_2 -> MRA(P2.7)`，`PWM4P_2 -> MRB(P2.6)`
-- 输出定义：`MRA/MLA = N`，`MRB/MLB = P`
-- 默认周期：`MOTOR_PWM_PERIOD = 1000`
-- 速度范围：`-1000 ~ +1000`，超范围自动限幅
-- 当前对外接口：
-
-```c
-void Motor_Init(void);
-void Motor_SetSpeed(Motor_Id_t motor, int16 speed);
-void Motor_SetBothSpeed(int16 left_speed, int16 right_speed);
-void Motor_Stop(Motor_Id_t motor);
-void Motor_StopAll(void);
-int16 Motor_GetSpeed(Motor_Id_t motor);
-```
-
-### 6.9 MOTOR 当前实现要点
-
-- 使用 `PWM3/PWM4` 的 P/N 互补输出，而不是把 P/N 当作两个独立占空比通道
-- 正速度默认使用 P 侧作为主动方向，负速度通过极性翻转使用 N 侧作为主动方向
-- 速度为 0 时关闭对应 PWM 通道输出，避免互补输出在 0 占空比下仍有一路处于有效态
-- 切换方向前先关闭对应电机输出，再更新极性和占空比，降低方向切换瞬态风险
-- 当前没有加入 `SYS_Init()` 自动初始化，防止系统启动时电机意外动作
-
----
-
-## 7. 任务系统当前状态
-
-`User/Task.c` 仍然是 Timer0 驱动的轮询调度框架，当前工程的实际状态如下：
-
-1. 主循环已经调用 `Task_Pro_Handler_Callback()`
-2. `Sample_ADtoUART` 已停用，仅剩 `Sample_Lamp` 保留在任务表中
-
-因此当前运行时：
-
-- 任务框架已编译
-- Timer0 中断仍会置任务运行标志
-- `Task_GetTickMs()` 对外提供 1ms 系统 tick，当前用于 AHRS 计算真实 `dt_ms`
-- 主循环会执行任务处理函数
-- 当前唯一实际运行的任务是 `Sample_Lamp()`，用于 `P3.6` LED 闪烁
-
-这也是本次修订 `total.md` 的重点之一：文档必须反映“当前真实运行链路”，而不是旧版计划流。
-
----
-
-## 8. 关键开发约束
-
-### 8.1 扩展 SFR 访问
-
-STC32G 大量外设寄存器位于扩展 SFR 区，访问前必须确保 `EAXFR=1`。
-当前工程已在 `SYS_Init()` 开始执行 `EAXSFR()`。
-
-### 8.2 禁止浮点运算
-
-- STC32G 无 FPU
-- GPS / IMU / MAG / Filter 全部使用定点整数
-- LOG 中禁止 `%f`
-
-### 8.3 Driver 层不可修改
-
-以下目录禁止项目内业务修改：
-
-- `Driver/inc/`
-- `Driver/src/`
-- `Driver/isr/`
-- `User/STC32G.H`
-
-项目扩展必须放在：
-
-- `User/`
-- `App/`
-- `Code_boweny/`
-- `doc/`
-- `RVMDK/`（仅工程纳入与分组同步）
-
-### 8.4 UART2 与 Timer2 绑定约束
-
-- UART2 固定使用 Timer2 作为波特率发生器
-- 因此 GPS 模块接入后，不能再启用 `APP_AD_UART` 这类会重新占用 Timer2 的示例
-- 资源冲突应在上层规避，不允许通过修改 Driver 层实现绕过
-
-### 8.5 GPS 接收边界
-
-- 不重写 UART2 ISR
-- 不直接清空 Driver 内部缓冲管理逻辑
-- GPS 模块只做增量消费 `COM2.RX_Cnt / RX2_Buffer`
-- 上层若需要 GPS 数据，只通过 `GPS_GetState()` 读取
-
-### 8.6 WIRELESS 资源边界
-
-- 不修改 `Driver` 层 SPI/GPIO/UART/I2C 实现
-- 不启用 `User/System_init.c` 中原有 `SPI_config()`，无线模块自行初始化 SPI4 主机
-- `P5.4` 不可再用于 `MCLKO/SS_3/PWM6_2`
-- `P5.0/P5.1` 不可再用于比较器输入
-- 无线接入后，不能再并行启用依赖旧 SPI 示例引脚的 `APP_SPI_PS` 类模块
-
-### 8.7 MOTOR 资源边界
-
-- `PWMA CH3/CH4` 已预留给 MOTOR 模块
-- `P2.4/P2.5/P2.6/P2.7` 作为电机 PWM 输出后，不应再被 LCM 数据口、SPI 第二组或其它 GPIO 业务复用
-- 不能并行启用 `APP_PWMA_Output` 中使用 `PWM3/PWM4` 的示例输出
-- MOTOR 不占用 Timer0/Timer1/Timer2，不影响任务节拍、UART1 LOG 和 UART2 GPS
-
-### 8.8 PID 使用边界
-
-- PID 模块只做控制量计算，不直接操作 PWM、GPIO 或传感器
-- 禁止传入浮点增益，所有增益必须换算为 Q10 定点值
-- 对同一个控制对象应使用独立 `PID_Controller_t`，不要让左右电机或不同控制环共用同一个 PID 状态
-- 切换控制模式或目标对象时建议调用 `PID_Reset()`，避免沿用旧积分导致输出突跳
-
-### 8.9 AHRS 使用边界
-
-- AHRS 模块不直接访问 I2C、GPIO、PWM 或传感器寄存器，只消费上层传入的 IMU/MAG 数据
-- AHRS 内部禁止浮点运算，角度输出统一为 `deg * 100`
-- 当前默认坐标系为 `+X=船尾`、`+Y=船右/右舷`、`+Z=上`
-- 芯片丝印、datasheet 和实测确认后，只通过 `AHRS_IMU_BODY_*` / `AHRS_MAG_BODY_*` 宏调整轴向，不在业务层散落取反和换轴
-- 地磁在船体电机附近容易受干扰，航向修正默认慢；若联调阶段发现 yaw 被磁干扰拉偏，可先将 `AHRS_MAG_ENABLE` 置 0
-- 修改 QMI8658 陀螺仪量程后，必须同步更新 `AHRS_GYRO_LSB_PER_DPS`
-
----
-
-## 9. 文档体系
-
-| 文档 | 路径 | 用途 |
-|------|------|------|
-| `total.md` | `doc/project_doc/total.md` | 当前工程总览 |
-| `date.md` | `doc/project_doc/date.md` | 变更日志 |
-| `README_GPS.md` | `doc/build_doc/README_GPS.md` | GPS 模块开发参考手册 |
-| `GPS/README.md` | `Code_boweny/Device/GPS/README.md` | GPS 模块实现说明 |
-| `README_wireless.md` | `doc/build_doc/README_wireless.md` | 无线模块移植与接入说明 |
-| `WIRELESS/README.md` | `Code_boweny/Device/WIRELESS/README.md` | 无线模块实现说明 |
-| `MOTOR/README.md` | `Code_boweny/Device/MOTOR/README.md` | PWM 电机驱动实现说明 |
-| `PID/README.md` | `Code_boweny/Function/PID/README.md` | PID 定点控制器实现说明 |
-| `AHRS/README.md` | `Code_boweny/Function/AHRS/README.md` | AHRS 姿态融合与调参说明 |
-| `LOG.md` | `doc/device_doc/LOG.md` | LOG 模块说明 |
-| `IMU_QMI8658.md` | `doc/device_doc/IMU_QMI8658.md` | QMI8658 说明 |
-| `QMC6309.md` | `doc/device_doc/QMC6309.md` | QMC6309 说明 |
-
----
-
-## 10. 版本历史
+当前保留模块职责：
+
+- `GPS_Poll()`：持续消费 UART2 数据
+- `Wireless_Poll()`：轮询 LT8920，维持收发状态
+- `ShipProtocol_RunScheduler()`：配对、工作信道监听、旧协议截帧、`0x11/0x12` 业务
+- `Wireless_SearchSignalPoll()`：低频无线搜索/扫描辅助
+- `MAG_StandalonePoll()`：低频打印 QMC6309 原始值，仅用于可见性验证
+- `Task_Pro_Handler_Callback()`：当前只驱动 `P3.6` 状态灯闪烁
+
+## 6. 当前无线业务状态
+
+当前无线业务文件：
+
+- [ship_protocol.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/ship_protocol.c)
+- [ship_protocol.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/ship_protocol.h)
+
+当前保持的协议集合：
+
+- `0x0F`：配对响应
+- `0x10`：配对请求
+- `0x11`：手动控制 + 按键
+- `0x12`：状态/GPS 回传
+- `0x13/0x14/0x15`：仅保留兼容解析入口，不恢复自动驾驶动作
+
+### 6.1 配对
+
+当前配对行为对齐老版核心节奏：
+
+- 固定发送 10 次 `PAIR_REQ(0x10)`
+- 固定 seed：`65 65 A0 65`
+- 派生工作信道：`13`
+- 派生 key：`32/30`
+- 第 10 次后先只写同步寄存器，等待 30 个调度节拍，再切工作 RX
+- 配对窗口内收到合法 `PAIR_RSP(0x0F)` 后置 `paired=1`
+
+### 6.2 手动控制
+
+当前 `0x11` 恢复老版开环判定：
+
+- 比较 `abs(frontBack-100)+5` 与 `abs(leftRight-100)`
+- 前后量主导时进入前进/后退
+- 左右量主导时进入左转/右转
+- 摇杆回中时停机
+
+当前不使用：
+
+- 姿态角
+- 航向角
+- 陀螺仪修正
+- 数据融合结果
+
+### 6.3 按键
+
+当前按键行为：
+
+- `A`：保留老版灯控入口，但板级灯引脚未确认，只打印提示日志
+- `B`：保持 no-op
+- `C`：150ms 前冲
+- `D`：150ms 后退
+- `E`：兼容入口保留，不启用巡航/自动驾驶副作用
+
+补充说明：
+- 当前 `C/D` 是按“今晚先让船开环动起来”的目标映射为主推进电机短脉冲。
+- 老版 `C/D` 原始实现实际是 `P0.2/P0.3` 独立脉冲输出；而当前 v1.1 工程里 `P0.2/P0.3` 已被 `UART4_SW(P02_P03)` 复用占用，板级用途未确认前不能直接恢复老版 GPIO 版本。
+
+### 6.4 状态回传
+
+当前每收到一帧合法协议帧，都会立即回发一次 `0x12`。
+
+`0x12` 保持老版 15 字节格式，不新增字段：
+
+- 卫星数
+- 航向角
+- 经度方向 + 经度整数/小数部分
+- 纬度方向 + 纬度整数/小数部分
+- 电量字节
+- 保留自动驾驶状态字节
+
+补充说明：
+- 当前 `0x12` 发完后会立即重开工作信道 RX，避免状态回包后出现额外接收空窗。
+
+## 7. 传感器状态
+
+### 7.1 GPS
+
+- 启用
+- 路由：UART2 `P1.0/P1.1`
+- 用于无线 `0x12` 状态包回传
+
+### 7.2 QMC6309
+
+- 启用
+- 仅做上电初始化和低频轮询可见性验证
+- 不参与控船闭环
+
+### 7.3 QMI8658
+
+- 关闭
+- 不初始化
+- 不轮询
+- 不进入 AHRS
+- 不参与控船
+
+## 8. 电机与资源占用
+
+电机资源：
+
+- 左电机：`PWM3P_2=P2.4 / PWM3N_2=P2.5`
+- 右电机：`PWM4P_2=P2.6 / PWM4N_2=P2.7`
+
+无线资源：
+
+- `SPI4`: `P3.2/P3.3/P3.4/P3.5`
+- `P5.0`: `RST`
+- `P5.1`: `ANT_SEL`
+- `P1.3`: `RXEN`
+- `P5.4`: `TXEN`
+- `P0.0`: `ADC_CH8`
+
+系统资源：
+
+- `UART1`: 日志
+- `UART2`: GPS
+- `Timer0`: 1ms 节拍
+- `Timer1`: UART1 波特率
+- `Timer2`: UART2 波特率
+
+## 9. 当前已知风险
+
+以下两项当前仍需现场确认：
+
+1. `A` 键船灯引脚
+   - 老版是 `P31` 或 `P22`
+   - 当前仓只有 `P3.6` 状态灯事实，不足以证明它就是船灯
+2. 电机正反极性
+   - 当前 `ship_protocol.c` 已恢复老版动作判定
+   - 但“前进/左转”映射到新 `Motor` 正负号后是否与实船一致，必须以现场为准
+
+## 10. 文档入口
+
+- [date.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/date.md)
+- [WIRELESS/README.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/README.md)
+- [Motor/README.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/Motor/README.md)
+
+## 11. 版本记录
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
-| 2026-05-06 | v1.7.28 | 文档说明全部收敛为中文表述，统一“射频载荷、空闲态、调度节拍、底层联调”等术语；同步保持当前无线移植、ADC 回传和调试日志要求不变。 |
-| 2026-05-06 | v1.7.27 | 明确无线遥控器接收测试验收项：配对成功必须打印进入工作通道，收到 `cmd=0x11` 必须打印油门/转向/按键；新增 `SHIP_THROTTLE_PWM_ENABLE` 宏门控，默认关闭真实 PWM 输出，只做日志调试。 |
-| 2026-05-06 | v1.7.26 | 按 `Wireless_other/README.md` 逐项复核无线移植：修正 seed key 截断位置，默认 `65 65 A0 65` 派生为 `work_ch=13,key=32/30`；第 10 次配对包后只写 `reg36/reg39` 并停在配对信道空闲态，等待 30 个调度节拍后再打开工作接收；同步寄存器写入不再清 FIFO。 |
-| 2026-05-06 | v1.7.25 | 复核并修正配对发送时序：协议发送走 `Wireless_SendOnChannel()`，按旧版 `LT8920_TxData()` 在指定信道发送后保持空闲态；发送前端保持 `RXEN=1`，只脉冲 `TXEN`；工作 key 配置改为先在空闲态写寄存器，再显式打开工作接收。 |
-| 2026-05-06 | v1.7.24 | 对齐 `Wireless_other` 工作接收时序和同步寄存器保持策略：`SetSyncRegs()` 只写 reg36/reg39，保留 reg37/reg38 默认值；工作接收空闲时每 10 个调度节拍重开接收窗口，并在 `rxdbg` 打印同步寄存器。 |
-| 2026-04-22 | v1.0 | 初版工程总览建立 |
-| 2026-04-23 | v1.1 | 补充 QMC6309 / QMI8658 / Filter 相关说明 |
-| 2026-04-24 | v1.3 | 按当前工程真实状态重写总览，补充 GPS 模块、UART2 路由、Timer2 资源调整和当前主循环事实 |
-| 2026-04-26 | v1.4 | 补充 WIRELESS 模块接入、SPI4 资源占用、双天线策略与真实启动/主循环链路 |
-| 2026-04-27 | v1.5 | 新增 MOTOR PWM 驱动模块说明，补充 PWMA CH3/CH4 与 P2.4~P2.7 引脚占用 |
-| 2026-04-27 | v1.6 | 新增 Function/PID 定点 PID 控制器说明，补充 Keil 工程纳入状态与使用边界 |
-| 2026-05-06 | v1.7.19 | 切回 WIRELESS 最小业务配对接收流程，关闭单向发送诊断，以显式状态机完成配对响应窗口和工作态遥控值打印 |
-| 2026-05-05 | v1.7.18 | 补齐 WIRELESS 寄存器表、默认软件 SPI 快速分支、FIFO/TX 轮询时序与根目录 `Wireless/` 一致 |
-| 2026-05-05 | v1.7.16 | 补充 `ship_protocol.c` 当前单芯片半双工配对流、`seed` 对工作信道/同步字节的派生关系，以及配对响应校验与超时诊断说明 |
-| 2026-05-01 | v1.7.15 | QMI8658 默认切到旧 STC I2C 路径复测，并在启动日志标明 `i2c=legacy/ackdiag` |
-| 2026-05-01 | v1.7.14 | QMI8658 I2C 读写改为逐段 ACK 检查，启动日志标明 ACK 失败阶段 |
-| 2026-05-01 | v1.7.13 | AHRS 测试输出改为定点度数，零偏 ready 后再锁定相对 yaw，并放宽陀螺零偏学习阈值 |
-| 2026-05-01 | v1.7.12 | AHRS 测试模式增加传感器上电等待与 QMI8658 初始化重试 |
-| 2026-05-01 | v1.7.11 | AHRS 测试模式在陀螺零偏未就绪时追加 `gyro_dps100` 诊断 |
-| 2026-05-01 | v1.7.10 | QMI8658 初始化改为按 `WHO_AM_I=0x05` 选择 `0x6B/0x6A` 地址 |
-| 2026-05-01 | v1.7.9 | AHRS 测试模式保留 ERROR 诊断，并移除泛化 `imu not ready` 刷屏 |
-| 2026-05-01 | v1.7.8 | 新增 AHRS 角度-only 串口测试模式，只保留 `rpy_cd/flags` 输出 |
-| 2026-04-27 | v1.7 | 新增 Function/AHRS 定点姿态融合说明，补充 1ms 调度节拍、轴向映射、IMU/MAG 融合链路与使用边界 |
-
----
-
-> 关联文档：详细变更记录、GPS 接入记录和 review 结论请查阅 `date.md`。
+| 2026-05-07 | v1.7.52 | 二次复核老版无线业务后，补回 `0x12` 回传后的工作 RX 立即恢复、长静默后的开环安全恢复节奏，并修正左右转极性映射；同时明确 `C/D` 以当前电机 PWM 脉冲语义为准，不恢复老版独立脉冲链路。 |
+| 2026-05-07 | v1.7.51 | 切到今晚开环控船联调版：关闭 IMU/AHRS，恢复无线 `0x11` 手动动作和 `0x12` 老版回传，磁力计只保留可见性轮询。 |
+| 2026-05-07 | v1.7.50 | QMI8658 继续按 5.1 凌晨老版阻塞路径复测。 |

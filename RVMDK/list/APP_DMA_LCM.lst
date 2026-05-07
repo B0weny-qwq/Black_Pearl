@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 1   
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_DMA_LCM
 OBJECT MODULE PLACED IN .\list\APP_DMA_LCM.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_DMA_LCM.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\U
-                    -ser;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\D
-                    -evice\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\A
-                    -PP_DMA_LCM.lst) TABS(2) OBJECT(.\list\APP_DMA_LCM.obj) 
+                    -ser;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Fu
+                    -nction\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\W
+                    -IRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP_DMA_LCM.lst) TABS(2) OBJECT(.\list\APP_DMA_LCM.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    53          #define BROWN            0XBC40 //棕色
    54          #define BRRED            0XFC07 //棕红色
    55          #define GRAY             0X8430 //灰色
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 2   
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 2   
 
    56          
    57          #define DMA_AMT_LEN  2047  //n+1, 不要超过芯片 xdata 空间上限
@@ -134,7 +134,7 @@ stmt  level    source
   119   1        LCM_InitStructure.LCM_Enable = ENABLE;      //LCM接口使能   ENABLE,DISABLE
   120   1        LCM_InitStructure.LCM_Mode = MODE_I8080;    //LCM接口模式   MODE_I8080,MODE_M6800
   121   1        LCM_InitStructure.LCM_Bit_Wide = BIT_WIDE_8;  //LCM数据宽度   BIT_WIDE_8,BIT_WIDE_16
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 3   
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 3   
 
   122   1        LCM_InitStructure.LCM_Setup_Time = 2;     //LCM通信数据建立时间   0~7
   123   1        LCM_InitStructure.LCM_Hold_Time = 1;      //LCM通信数据保持时间   0~3
@@ -202,7 +202,7 @@ stmt  level    source
   182           * @function   :Write an 16-bit command to the LCD screen
   183           * @parameters :data:Command value to be written
   184           * @retvalue   :None
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 4   
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 4   
 
   185          ******************************************************************************/
   186          void LCD_WR_REG(u8 Reg)  
@@ -270,7 +270,7 @@ stmt  level    source
   248   1      }
   249          
   250          /*****************************************************************************
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 5   
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 5   
 
   251           * @name       :void LCD_DrawPoint(u16 x,u16 y)
   252           * @date       :2018-08-09 
@@ -338,7 +338,7 @@ stmt  level    source
   314   2            lcddev.width=LCD_H;
   315   2            lcddev.height=LCD_W;
   316   2            LCD_WriteReg(0x36,(1<<3)|(1<<5)|(1<<6));
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 6   
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 6   
 
   317   2          break;  
   318   2          default:break;
@@ -406,7 +406,7 @@ stmt  level    source
   380   1        LCD_WR_DATA(0x01); 
   381   1        LCD_WR_REG(0xE0);    //Set Gamma 
   382   1        LCD_WR_DATA(0x0F); 
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 7   
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 7   
 
   383   1        LCD_WR_DATA(0x1D); 
   384   1        LCD_WR_DATA(0x1A); 
@@ -474,7 +474,7 @@ stmt  level    source
   446   1      }
   447          
   448          /*****************************************************************************
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 8   
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 8   
 
   449           * @name       :void LCD_ShowChar(u16 x,u16 y,u16 fc, u16 bc, u8 num,u8 size,u8 mode)
   450           * @date       :2018-08-09 
@@ -542,7 +542,7 @@ stmt  level    source
   512           * @retvalue   :None
   513          ******************************************************************************/          
   514          void Show_Str(u16 x, u16 y, u16 fc, u16 bc, u8 *str,u8 size,u8 mode)
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 9   
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 9   
 
   515          {         
   516   1        u16 x0=x;                   
@@ -611,7 +611,7 @@ Module Information          Static   Overlayable
   bit size             =    ------     ------
   ebit size            =    ------     ------
   bitaddressable size  =    ------     ------
-C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        27/04/26  00:55:19  PAGE 10  
+C251 COMPILER V5.60.0,  APP_DMA_LCM                                                        07/05/26  09:39:24  PAGE 10  
 
   ebitaddressable size =    ------     ------
   far data size        =    ------     ------

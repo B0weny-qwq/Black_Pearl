@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  APP_DMA_AD                                                         27/04/26  00:55:19  PAGE 1   
+C251 COMPILER V5.60.0,  APP_DMA_AD                                                         07/05/26  09:39:23  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_DMA_AD
 OBJECT MODULE PLACED IN .\list\APP_DMA_AD.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_DMA_AD.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\Us
-                    -er;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\De
-                    -vice\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\AP
-                    -P_DMA_AD.lst) TABS(2) OBJECT(.\list\APP_DMA_AD.obj) 
+                    -er;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Fun
+                    -ction\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WI
+                    -RELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP_DMA_AD.lst) TABS(2) OBJECT(.\list\APP_DMA_AD.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    50          //                            外部函数和变量声明
    51          //========================================================================
    52          
-C251 COMPILER V5.60.0,  APP_DMA_AD                                                         27/04/26  00:55:19  PAGE 2   
+C251 COMPILER V5.60.0,  APP_DMA_AD                                                         07/05/26  09:39:23  PAGE 2   
 
    53          
    54          //========================================================================
@@ -134,7 +134,7 @@ stmt  level    source
   106          //========================================================================
   107          void Sample_DMA_AD(void)
   108          {
-C251 COMPILER V5.60.0,  APP_DMA_AD                                                         27/04/26  00:55:19  PAGE 3   
+C251 COMPILER V5.60.0,  APP_DMA_AD                                                         07/05/26  09:39:23  PAGE 3   
 
   109   1        u8  i,n;
   110   1      

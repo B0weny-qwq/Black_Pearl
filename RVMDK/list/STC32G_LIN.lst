@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         07/05/26  09:39:28  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_LIN
 OBJECT MODULE PLACED IN .\list\STC32G_LIN.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_LIN.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..
-                    -\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny
-                    -\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list
-                    -\STC32G_LIN.lst) TABS(2) OBJECT(.\list\STC32G_LIN.obj) 
+                    -\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\
+                    -Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device
+                    -\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_LIN.lst) TABS(2) OBJECT(.\list\STC32G_LIN.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    54   1        {
    55   2          pdat[i] = LinReadReg(LBUF);
    56   2        }
-C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         07/05/26  09:39:28  PAGE 2   
 
    57   1      }
    58          
@@ -134,7 +134,7 @@ stmt  level    source
   120   1        u8 lsr;
   121   1        do{
   122   2          lsr = LinReadReg(LSR);
-C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         07/05/26  09:39:28  PAGE 3   
 
   123   2        }while(!(lsr & 0x02));    //判断ready状态
   124   1        return lsr;
@@ -202,7 +202,7 @@ stmt  level    source
   186          
   187          //========================================================================
   188          // 函数: void ResponseRxCmd(void)
-C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 4   
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         07/05/26  09:39:28  PAGE 4   
 
   189          // 描述: 从模式发送Lin总线Rx Response函数。
   190          // 参数: none.
@@ -270,7 +270,7 @@ stmt  level    source
   252   1        SendHeadCmd();            //主模式 Send Seader
   253   1        WaitLinReady();           //等待ready状态
   254   1        GetLinError();            //读取清除错误寄存器
-C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 5   
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         07/05/26  09:39:28  PAGE 5   
 
   255   1      
   256   1        SendDatCmd();             //Send Data
@@ -338,7 +338,7 @@ stmt  level    source
   318   1        LinWriteReg(HDP,prescaler);   //设置帧头延时分频
   319   1      }
   320          
-C251 COMPILER V5.60.0,  STC32G_LIN                                                         27/04/26  00:55:22  PAGE 6   
+C251 COMPILER V5.60.0,  STC32G_LIN                                                         07/05/26  09:39:28  PAGE 6   
 
   321          //========================================================================
   322          // 函数: void LIN_Inilize(LIN_InitTypeDef *LIN)

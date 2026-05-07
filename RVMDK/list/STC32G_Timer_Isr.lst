@@ -1,12 +1,13 @@
-C251 COMPILER V5.60.0,  STC32G_Timer_Isr                                                   27/04/26  00:55:23  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_Timer_Isr                                                   07/05/26  09:39:29  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_Timer_Isr
 OBJECT MODULE PLACED IN .\list\STC32G_Timer_Isr.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\isr\STC32G_Timer_Isr.c XSMALL INTR2 BROWSE INCDIR(..\Driver\
-                    -inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_
-                    -boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(
-                    -.\list\STC32G_Timer_Isr.lst) TABS(2) OBJECT(.\list\STC32G_Timer_Isr.obj) 
+                    -inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_b
+                    -oweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\
+                    -Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_Timer_Isr.lst) TABS(2) OBJECT(.\list\STC32G_Timer
+                    -_Isr.obj) 
 
 stmt  level    source
 
@@ -65,9 +66,9 @@ stmt  level    source
    53          void Timer3_ISR_Handler (void) interrupt TMR3_VECTOR    //进中断时已经清除标志
    54          {
    55   1        // TODO: 在此处添加用户代码
-   56   1        P64 = ~P64;
-C251 COMPILER V5.60.0,  STC32G_Timer_Isr                                                   27/04/26  00:55:23  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_Timer_Isr                                                   07/05/26  09:39:29  PAGE 2   
 
+   56   1        P64 = ~P64;
    57   1      }
    58          
    59          //========================================================================

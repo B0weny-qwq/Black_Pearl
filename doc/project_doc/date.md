@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-05-06
- * @version v1.7.28
+ * @date    2026-05-07
+ * @version v1.7.52
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,228 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-07] - v1.7.52 无线业务复核修正
+
+### Bug 修复
+- **[`0x12` 回传后 RX 断续]** 当前 `ShipProtocol_SendGpsOnce()` 发完状态包后只把 `work_rx_configured` 置 0，依赖下一轮调度再恢复工作 RX。修复：发完 `0x12` 后立即重开工作信道 RX，避免合法帧后出现额外的接收空窗。
+- **[遥控失联恢复节奏偏弱]** 当前代码只有 `SHIP_THROTTLE_TIMEOUT_MS` 超时停机，没有把老版“长时间收不到遥控帧后重新整理接收链路”的节奏带回来。修复：增加开环安全版恢复逻辑，`0x11` 长时间静默后重新打开工作 RX，但不恢复老版自动驾驶、巡航或软复位副作用。
+- **[左右转向极性映射错误]** 复核老版 `pwm.h` 的 `MOTOR_POSITIVE=TRUE`、`MOTOR_LEFTRIGHT=FALSE` 与 `DcMotor_Direction_Set()` 后确认，当前新 `Motor` 映射中的左/右转正负号写反。修复：`SHIP_MOTION_LEFT/RIGHT` 的双电机符号已按老版方向语义纠正。
+
+### 变更记录
+- **[Wireless Scheduler]** 当前在保持 `0x10/0x0F/0x11/0x12` 老版协议不变的前提下，补回了更贴近老版的工作 RX 恢复节奏。
+
+### 开发者备注
+- `A` 键船灯引脚仍未确认，当前不能擅自把老版 `P31/P22` 或现仓 `P3.6` 当成同一功能脚。
+- `C/D` 已按当前 v1.1 板级真实定义固定为“通过现有电机 PWM 引脚直接让船产生 150ms 前冲/后退动作”，不再追求老版 `P0.2/P0.3` 独立脉冲实现。
+
+---
+
+## [2026-05-07] - v1.7.51 今晚开环控船联调版
+
+### 新增功能
+- **[Wireless 手动链路]** `ship_protocol.c` 恢复老版 `0x11` 手动开环判定，重新按前进、后退、左转、右转、停止五种语义驱动 `Motor`。
+- **[按键恢复]** 恢复 `C` 短促前冲、`D` 短促后退、`B` no-op、`E` 兼容入口但禁用自动驾驶副作用；`A` 保留灯控入口日志，等待板级引脚确认。
+- **[状态回传]** 保持老版“任意合法协议帧后立刻回发一次 `0x12`”的节奏，继续使用老版 15 字节 payload 格式。
+
+### Bug 修复
+- **[主循环目标偏离]** 之前代码和文档仍残留 IMU/AHRS 测试档路径，与今晚“先把船开环跑起来”的目标不一致。修复：切换功能开关到无线/GPS/磁力计开启、IMU/AHRS 关闭的联调档，并从 `MainLoop.c` 和 `System_init.c` 移除 IMU/AHRS 主路径调用。
+- **[文档失真]** `ship_protocol.h`、`WIRELESS/README.md`、`total.md` 仍描述“只打印油门、不输出 PWM”的旧测试态。修复：统一更新为当前真实开环联调行为，并补记 A 键引脚未确认的限制。
+- **[头文件注释缺失/乱码]** `Code_boweny` 下多份公开头文件缺少中文 Doxygen 文件头或存在编码乱码。修复：补齐 `GPS/QMC6309/QMC6309_port/QMI8658/QMI8658_port` 等头文件的中文 Doxygen 风格说明，并纠正 `ship_protocol.h` 的旧描述。
+
+### 优化改进
+- **[无线业务边界]** 明确 `ship_protocol.h` 是旧版 `Wireless_other/wirelessProtocal.c` 的移植兼容层，不是新协议设计层；后续修改必须优先对齐老版空口和业务节奏。
+- **[总览文档]** 重写 `total.md`，聚焦当前真实启动顺序、主循环、功能开关、无线主链路和今晚验收目标，移除与当前固件无关的陈旧测试档描述。
+- **[模块说明]** 重写 `WIRELESS/README.md`，明确当前配对节奏、`0x11` 手动控制、`0x12` 回传、按键语义和已知未决项。
+
+### 变更记录
+- **[FeatureSwitch]** 当前联调档固定为 `ENABLE_WIRELESS_MODULE=1`、`ENABLE_GPS_MODULE=1`、`ENABLE_MAG_MODULE=1`、`ENABLE_IMU_MODULE=0`、`SHIP_THROTTLE_PWM_ENABLE=1`。
+- **[System_init]** 传感器初始化只保留 `QMC6309_Init()`；`QMI8658_Init()` 与相关 AHRS 路径不再进入今晚主链路。
+- **[MainLoop]** 当前主循环保持 `GPS_Poll()`、`Wireless_Poll()`、`ShipProtocol_RunScheduler()`、`Wireless_SearchSignalPoll()`、`MAG_StandalonePoll()`、`Task_Pro_Handler_Callback()`。
+
+### 开发者备注
+- `A` 键船灯引脚仍未确认，当前不能擅自把老版 `P31/P22` 或现仓 `P3.6` 当成同一功能脚。
+- 电机正反极性仍需以明早实船效果最终确认，仓内没有足够板级证据证明“前进/左转”对应的新 `Motor` 正负号方向已经完全正确。
+
+---
+
+## [2026-05-07] - v1.7.50 QMI8658 5.1 凌晨老版路径复测
+
+### 变更记录
+- **[QMI8658]** 将本轮测试切到 `QMI8658_INIT_NONBLOCKING=0`，初始化重新走 5.1 凌晨老版阻塞 bring-up 流程。
+- **[寄存器顺序]** 按老版顺序执行 `CTRL7=0x00 -> CTRL1 -> CTRL2 -> CTRL3 -> CTRL5 -> CTRL7=0x03 -> 30ms -> 读回 -> STATUS0`。
+- **[寄存器数值]** 恢复 `CTRL2=0x07`、`CTRL3=0x07`、`CTRL5=0x11`，并保持 `soft_reset=0`、`CLEAR_DATAPATH=0`，绕开 `RESET` 与 `CTRL9` 干扰项。
+- **[IIC 速率]** 共享传感器 IIC 回到 `SENSOR_I2C_SPEED_CFG=58`（约 100kHz），对齐 5.1 老版 QMC6309/QMI8658 传感器总线配置。
+- **[日志窗口]** 失败时恢复连续 10 次 `STATUSINT/STATUS0/timestamp/temp/raw` 数据窗口打印，用于确认是否仍然是 `WHO_AM_I` 正常但数据域全零。
+
+### 当前效果
+- 当前固件用于验证“老版库函数整包 IIC + 老版寄存器顺序/数值”是否能恢复 QMI8658 出数。
+- QMC6309 仍然启用并走同一条共享 IIC 后端，可同步观察磁力计是否受本轮回退影响。
+
+---
+
+## [2026-05-07] - v1.7.49 传感器硬件 IIC 后端统一切回库函数
+
+### 优化改进
+- **[Sensor IIC]** `QMI8658_port` 的硬件 IIC 路径改为统一调用 `I2C_WriteNbyte()` 和 `I2C_ReadNbyte()`，不再手动拼 `Start/SendData/RecvACK/RecvData/Stop` 事务。
+- **[QMC6309]** 由于磁力计复用 `QMI8658_port` 后端，当前 `bus=hard` 时也会自动统一到同一套库函数整包读写路径。
+
+---
+
+## [2026-05-07] - v1.7.48 QMI8658 关闭 soft reset 试验
+
+### 优化改进
+- **[QMI8658]** 将 `QMI8658_SOFT_RESET_ENABLE` 关闭，当前初始化阶段不再写 `RESET=0xB0`。
+- **[QMI8658]** 本轮验证目标是进一步贴近 `0f33bd2` 老版本的最小 bring-up 路径，观察在绕开 `CTRL9` 后、同时关闭 soft reset 时，IMU 是否恢复 `STATUS0 / timestamp / raw` 更新。
+
+---
+
+## [2026-05-07] - v1.7.47 QMI8658 绕开 CTRL9 命令链试验
+
+### 优化改进
+- **[QMI8658]** 将 `QMI8658_CLEAR_DATAPATH_ENABLE` 关闭，当前初始化阶段不再执行 `CTRL6/8/FIFO/CTRL9` 数据通路清理。
+- **[QMI8658]** 本轮验证目标是直接绕开 `CTRL9` 命令寄存器和未握手的 FIFO reset 流程，观察 IMU 是否恢复 `STATUS0 / timestamp / raw` 更新。
+
+---
+
+## [2026-05-07] - v1.7.46 QMI8658 延长 READY 观察窗口并收敛重试日志
+
+### 优化改进
+- **[QMI8658]** 将 `QMI8658_READY_TIMEOUT_MS` 从 `200ms` 调整为 `1000ms`，在宣布 ready timeout 之前持续更久地观察 `STATUS0/timestamp/raw` 是否开始变化。
+- **[QMI8658]** 调整状态机重试返回值：当驱动只是安排下一轮 retry 而非真正进入 `FAILED` 时，`QMI8658_Service()` 不再返回错误，避免主循环把正常重试误报成 `service failed`。
+
+---
+
+## [2026-05-07] - v1.7.45 QMI8658 最大量程与关闭低通试验
+
+### 优化改进
+- **[QMI8658]** 将 `CTRL2` 从 `0x07` 调整为 `0x37`，把加速度计切到 `±16g @ 58.75Hz`。
+- **[QMI8658]** 将 `CTRL3` 从 `0x07` 调整为 `0x77`，把陀螺仪切到 `±2048dps @ 58.75Hz`。
+- **[QMI8658]** 将 `CTRL5` 从 `0x11` 调整为 `0x00`，关闭 Accel/Gyro 低通滤波，用于排除滤波链路对出数的影响。
+
+---
+
+## [2026-05-07] - v1.7.44 QMI8658 按手册时序调整启动等待
+
+### 优化改进
+- **[QMI8658]** 依据 `QMI8658C datasheet rev 0.9` 的 System Turn On Time 说明，将 `QMI8658_PWR_UP_DELAY_MS` 从 `50ms` 调整为 `150ms`。
+- **[QMI8658]** 依据同一手册中 Software Reset / Power-On Default 的启动时序要求，将 `QMI8658_RESET_DELAY_MS` 从 `10ms` 调整为 `150ms`，避免 reset 后过早继续配置寄存器。
+
+---
+
+## [2026-05-07] - v1.7.43 QMI8658 配置寄存器值回退试验
+
+### 优化改进
+- **[QMI8658]** 将 `CTRL2/CTRL3` 初始化值从当前 `0x16/0x36` 回退到 `0x07/0x07`，与 `0f33bd2` 老版本保持一致，用于配合老版时序继续验证 IMU 是否能恢复出数。
+
+---
+
+## [2026-05-07] - v1.7.42 QMI8658 寄存器配置时序回退试验
+
+### 优化改进
+- **[QMI8658]** 将状态机中的寄存器配置顺序调整得更贴近 `0f33bd2` 老版本：先写 `CTRL7=0x00`，再写 `CTRL1/CTRL2/CTRL3/CTRL5`，随后写 `CTRL7=0x03` 使能，等待 `ENABLE_DELAY` 后才做整组读回验证。
+- **[QMI8658]** `cfg readback` 现在会额外检查 `CTRL7`，便于直接确认“老版时序下使能位是否保持正确”。
+
+---
+
+## [2026-05-07] - v1.7.41 传感器共享 IIC 速率上调到 400k 验证
+
+### 优化改进
+- **[Sensor IIC]** 将 `User/FeatureSwitch.h` 中 `SENSOR_I2C_SPEED_CFG` 从 `28` 进一步调整为 `13`，把 `P1.4/P1.5` 共享总线从约 `200kHz` 提升到约 `400kHz`，用于继续验证 QMI8658 在高速 IIC 下的读数表现。
+
+---
+
+## [2026-05-07] - v1.7.40 传感器共享 IIC 速率上调验证
+
+### 优化改进
+- **[Sensor IIC]** 将 `User/FeatureSwitch.h` 中 `SENSOR_I2C_SPEED_CFG` 从 `58` 调整为 `28`，把 `P1.4/P1.5` 共享总线从约 `100kHz` 提升到约 `200kHz`，用于验证 QMI8658 在更高速率下的读数表现。
+
+---
+
+## [2026-05-07] - v1.7.39 QMC6309 IIC 后端与 QMI8658 对齐
+
+### 优化改进
+- **[QMC6309 端口层]** 新增 `QMC6309_port.c/.h`，磁力计不再直接依赖 `Start/SendData/RecvData` 等硬件 IIC 原语，改为通过 port 层访问总线。
+- **[共享后端]** `QMC6309` 默认复用 `QMI8658_port` 的软/硬 IIC 后端与总线恢复逻辑，`P1.4/P1.5` 共享总线切换行为保持一致。
+- **[编码清理]** `QMC6309.h/.c` 重写为干净 UTF-8 版本，并统一包含 `Config.h`，便于后续继续维护和补丁。
+
+---
+
+## [2026-05-06] - v1.7.38 QMI8658 软/硬IIC与非阻塞状态机
+
+### 新增功能
+- **[QMI8658 端口层]** 新增 `QMI8658_port.c/.h`，把 IMU 总线访问从驱动主体中拆出，统一收口 `P1.4/P1.5` 的板级口线、延时、总线恢复，以及软/硬 IIC 后端切换。
+- **[双后端切换]** 在 `User/FeatureSwitch.h` 新增 `QMI8658_I2C_USE_SOFT`、`QMI8658_SOFT_I2C_DELAY_US`、`QMI8658_READY_MODE_STATUS0/STATUSINT`、`QMI8658_INIT_NONBLOCKING` 等宏，当前默认仍走硬件 IIC，软件 IIC 与其共用 `P1.4/P1.5`。
+- **[状态机接口]** `QMI8658` 新增 `QMI8658_Service()`、`QMI8658_RequestReinit()`、`QMI8658_IsReady()`、`QMI8658_HasDataReady()`、`QMI8658_ClearDataReady()`，初始化与读数调度改为服务式推进。
+
+### 优化改进
+- **[初始化非阻塞]** 旧的 `System_init.c` 阻塞式 IMU 上电自检被移除，QMI8658 现改为 `BUS_PREPARE -> ID_PROBE -> QUIESCE -> SOFT_RESET -> CONFIG -> ENABLE -> READY_WAIT` 状态机，主循环持续推进，不再在启动阶段长时间卡住。
+- **[ready标志轮询]** 当前板上没有 IMU 外部 INT 脚，因此“中断标志位轮询”按寄存器 ready 位实现；默认使用 `STATUS0.aDA/gDA` 作为主判据，`STATUSINT` 仅保留为可选实验分支。
+- **[运行期恢复]** `MainLoop.c` 中 AHRS 采样链改为先跑 `QMI8658_Service()`，再按 `data_ready` 取数；若 `ReadAll()` 连续失败达到阈值，会主动请求 IMU 重初始化并重置 AHRS。
+
+### 变更记录
+- **[主循环读数模型]** `IMU_HighRatePoll()` 不再按固定周期盲读 IMU，而是消费 `QMI8658` 状态机置起的数据就绪标志，再把 6 轴数据送入 AHRS。
+- **[兼容接口保留]** `QMI8658_ReadID/ReadAcc/ReadGyro/ReadAll/GetLastI2cError` 等旧接口继续保留；`QMI8658_Wait_AccReady/Wait_GyroReady` 退化为兼容性的阻塞包装，不再是主链路核心。
+
+---
+
+## [2026-05-06] - v1.7.32 IMU+MAG 融合测试配置
+
+### 新增功能
+- **[测试档切换]** 将 `User/FeatureSwitch.h` 切换为 `IMU + 磁力计` 融合测试专用配置：打开 `ENABLE_IMU_MODULE`、`ENABLE_MAG_MODULE`、`ENABLE_IMU_AHRS_POLL`，并开启 `AHRS_TEST_ONLY`。
+
+### 变更记录
+- **[关闭其余链路]** 关闭 `ENABLE_WIRELESS_MODULE`、`ENABLE_GPS_MODULE`、`ENABLE_SHIP_PROTOCOL_SCHED` 和 `SHIP_PROTOCOL_POLL_ENABLE`，确保当前主循环只保留传感器初始化、AHRS 融合和日志输出链路。
+- **[测试目标]** 当前配置用于单独观察 QMI8658 + QMC6309 融合输出，不再同时带无线配对、GPS 解析或其它联调任务。
+
+---
+
+## [2026-05-06] - v1.7.31 Device 冗余清理首轮收口
+
+### 优化改进
+- **[GPS 归口]** 删除 `GPS.c` 中与 `User/System_init.c` 重复的 `UART2_SW` 与 P1.0/P1.1 管脚前置配置，保留 `GPS_Init()` 的 UART2 运行态初始化、NVIC 使能、状态清零和 FIFO 清空逻辑。
+- **[MAG 归口]** 收缩 `QMC6309.c` 的 I2C 总线恢复流程，不再在模块内部重复整套 `I2C_SetSpeed()` / `I2C_WDTA_DIS()` 主控恢复性重配置，恢复后继续沿用 `System_init` 已经建立的 I2C 配置。
+- **[IMU 清理]** 整理 `QMI8658.h` 中先定义再 `#undef` 覆盖的配置写法，收敛为单一宏定义；同时移除未被当前主链路使用的 `QMI8658_ProbeAddr()` 和未启用诊断分支对应的静态实现残留。
+
+### 变更记录
+- **[硬件配置边界]** 当前工程继续按 `System_init` 负责最终硬件配置、device 负责运行期读写与防御性恢复的边界推进，首轮已覆盖 GPS / QMC6309 / QMI8658 三条链路。
+- **[业务保持]** 无线配对调度、GPS 状态更新、QMC6309 地址探测、QMI8658 `WHO_AM_I` 校验和稳定读数判定逻辑保持不变。
+
+---
+
+## [2026-05-06] - v1.7.30 无线联调配置继续收口
+
+### 新增功能
+- **[配置收口]** 继续把无线联调相关的编译期开关统一进 `User/FeatureSwitch.h`，包括 `PAIR_CHANNEL`、`SHIP_PAIR_SEED0~3`、`SHIP_PAIR_SYNC_WORD`、`SHIP_PAIR_SEND_TIMES`、`SHIP_WAIT_TICKS_DEFAULT`、`SHIP_THROTTLE_PWM_ENABLE`、`WIRELESS_FRONTEND_BYPASS_TEST`、`WIRELESS_RX_TRACE_ENABLE`、`WIRELESS_TX_TRACE_ENABLE` 等。
+- **[SPI 切换]** 无线端口的软/硬件 SPI 切换统一改为 `WIRELESS_SPI_USE_SOFT`，同时把硬件 SPI 速率也收口到 `WIRELESS_HW_SPI_SPEED_CFG`。
+- **[中文注释]** 将无线相关核心文件的文件头和关键联调注释统一改为中文，便于后续排查和调试。
+
+### 变更记录
+- **[无线链路]** `wireless.c`、`wireless_port.c`、`ship_protocol.c` 不再各自维护一套本地兜底宏，统一从 `User/FeatureSwitch.h` 读取配置。
+- **[调试开关]** 保留旧宏兼容层，但新联调优先只改 `FeatureSwitch.h`，避免多处同步遗漏。
+
+---
+
+## [2026-05-06] - v1.7.29 Main入口解耦与功能开关集中
+
+### 新增功能
+- **[功能开关集中]** 新增 `User/FeatureSwitch.h`，统一承载 `AHRS_TEST_ONLY`、`WIRELESS_MINIMAL_TEST_ONLY`、`SHIP_THROTTLE_PWM_ENABLE`、`SHIP_PROTOCOL_POLL_ENABLE` 等编译期调试/模式开关，后续联调只需要改这一处。
+- **[主循环模块化]** 新增 `User/MainLoop.h/.c`，把原先 `User/Main.c` 中的 `Wireless_MinimalTestUnit()`、`MAG_StandalonePoll()`、`IMU_HighRatePoll()` 以及主循环轮询流程收拢到独立运行时模块。
+
+### 优化改进
+- **[入口职责收敛]** `User/Main.c` 现在只保留 `SYS_Init()`、`MainLoop_Bootstrap()` 和 `MainLoop_RunOnce()` 调用，避免主入口继续膨胀到数百行。
+- **[配置分层]** `User/Config.h` 现在只保留主时钟和公共包含，并通过 `#include "FeatureSwitch.h"` 引入功能开关，减少“基础配置”和“调试模式”混在一起的问题。
+- **[工程同步]** `RVMDK/STC32G-LIB.uvproj` 已加入 `User/MainLoop.c`，保证 Keil 工程和源码目录结构一致。
+
+### 变更记录
+- **[文档同步]** 更新 `doc/project_doc/total.md`，把“开关位于 `User/Config.h`”修正为“开关集中在 `User/FeatureSwitch.h`”，并把主循环职责从 `User/Main.c` 调整为 `User/MainLoop.c`。
+- **[历史说明保留]** 早期日志中关于 `Main.c` / `Config.h` 的记录反映的是当时状态，本次不回改旧条目内容，只在新版本和总览文档中标明当前结构。
+
+### 开发者备注
+- 本次主要是结构整理，不改变现有默认运行模式和无线业务逻辑。
+- 当前默认调试入口请优先查看 `User/FeatureSwitch.h`，不要再把功能开关继续散落回 `Main.c`。
 
 ---
 
@@ -751,6 +973,74 @@
 - 默认量程和ODR可在 `QMI8658.h` 的 `QMI8658_CTRL2_INIT` / `QMI8658_CTRL3_INIT` 宏中修改
 - I2C总线异常时调用 `QMI8658_BusRecover()` 恢复
 - QMI8658和QMC6309可同时使用，共用同一I2C总线
+
+---
+
+## [2026-05-06] - v1.7.37 QMI8658 复位前先静默传感器
+
+### 变更记录
+- **复位前先停传感器**: `QMI8658_Init()` 在软复位前新增 `CTRL7=0x00`，先强制关闭 Accel/Gyro，避免运行态下忽略 `RESET=0xB0`。
+- **复位前先清命令/数据通路**: 软复位前先执行一次 `QMI8658_ClearDataPath()`，清理 `CTRL6/CTRL8/FIFO/CTRL9` 相关残留状态。
+- **诊断日志补点**: 新增 `pre_reset` 寄存器快照，便于观察复位前芯片是否仍处于上一次运行态。
+
+### 当前效果
+- `QMI8658` 初始化更贴近“先静默、再复位、后配置、最后使能”的稳妥顺序。
+- 若后续 `reset_state/status/timestamp/raw` 仍保持全零，则更能确认问题不只是 reset 时机，而是芯片状态域或硬件层异常。
+
+---
+
+## [2026-05-06] - v1.7.36 QMI8658 上电阻塞与复位时序调整
+
+### 变更记录
+- **上电等待缩短**: `QMI8658_PWR_UP_DELAY_MS` 从 `500ms` 收到 `50ms`，减少刚上电时的阻塞等待。
+- **软复位改为主动执行**: 当前只要 `QMI8658_SOFT_RESET_ENABLE=1`，初始化阶段就固定写入 `RESET=0xB0`，不再依赖 `RESET_STATE` 是否为 `0x80` 再决定是否复位。
+- **复位后等待收敛**: `QMI8658_RESET_DELAY_MS` 调整为 `200ms`，更贴近当前 bring-up 经验。
+- **初始化顺序保持严格**: 复位等待完成后，先写入并读回 `CTRL1/2/3/5`，最后再写 `CTRL7` 使能 Accel/Gyro。
+
+### 当前效果
+- 启动阻塞时间明显缩短，同时保持 `reset -> wait 200ms -> config -> enable` 这条更稳妥的时序。
+- 若后续仍出现 `STATUS0=0x00` 与原始数据全零，则更能聚焦到芯片状态域或硬件问题，而不是初始化时序过乱。
+
+---
+
+## [2026-05-06] - v1.7.35 QMI8658 配置重新对齐
+
+### 变更记录
+- **软复位恢复默认开启**: `QMI8658_SOFT_RESET_ENABLE` 改为由 `User/FeatureSwitch.h` 统一配置，当前测试档默认开启，避免 MCU 复位但 IMU 未掉电时残留旧状态机。
+- **数据通路清理恢复**: `QMI8658_CLEAR_DATAPATH_ENABLE` 同样收口到 `User/FeatureSwitch.h`，当前默认执行 `CTRL6/CTRL8/FIFO/CTRL9` 清理。
+- **量程与 ODR 对齐**: `QMI8658_CTRL2_INIT` 改回 `0x16`（ACC ±4G / 117Hz），`QMI8658_CTRL3_INIT` 改回 `0x36`（GYRO ±125/128dps / 117Hz）。
+- **AHRS 同步修正**: `AHRS_IMU_PERIOD_MS` 恢复为 `9U`，`AHRS_GYRO_LSB_PER_DPS` 恢复为 `256L`，与新的 QMI8658 默认配置保持一致。
+- **文档纠偏**: `Code_boweny/Device/QMI8658/README.md` 更新为当前真实默认配置，不再保留 `CTRL2/3=0x07/0x07`、`soft reset=0` 这套旧 bring-up 描述。
+
+### 当前效果
+- 底层 QMI8658 初始化策略、README 说明和 AHRS 解算参数重新对齐，避免“驱动配置是 2g/2048dps，但文档或算法按 4g/256dps 理解”的隐性问题。
+- 如果后续仍然出现 `WHO_AM_I` 正常但 `STATUS0/temp/acc/gyro` 全零，则更接近芯片状态域或硬件本体问题，而不是当前这层配置矛盾。
+
+---
+
+## [2026-05-06] - v1.7.34 QMI8658 使能前读回确认
+
+### 变更记录
+- **初始化顺序收紧**: `QMI8658_Init()` 现改为先写入 `CTRL1/2/3/5`，并在开启 `CTRL7` 之前先做一次读回确认。
+- **使能条件明确**: 只有当前置配置读回值与期望值一致时，才继续写入 `CTRL7=0x03` 使能 Accel/Gyro。
+- **日志更聚焦**: 启动阶段新增 `pre-enable readback` 与 `post-enable readback CTRL7` 日志，便于区分“配置没写进去”和“配置已生效但数据域仍无输出”。
+
+### 当前效果
+- 更符合 QMI8658 的推荐初始化顺序：先配置基础寄存器，再开启全局使能。
+- 若后续仍然出现 `STATUS0=0x00`、`temp/acc/gyro` 全零，则更能确认问题集中在数据域或芯片状态，而不是 CTRL 配置写入次序。
+
+---
+
+## [2026-05-06] - v1.7.33 恢复 IMU IIC 调试日志
+
+### 变更记录
+- **IMU 调试开关收口**: 在 `User/FeatureSwitch.h` 新增 `QMI8658_DIAG_ENABLE`，当前 IMU + MAG 融合测试档默认打开，便于集中控制 IIC 排障日志。
+- **QMI8658 日志恢复**: `Code_boweny/Device/QMI8658/QMI8658.c` 不再无条件 `#undef LOGD`，当 `QMI8658_DIAG_ENABLE=1` 时恢复详细 DEBUG 日志。
+- **头文件兼容处理**: `Code_boweny/Device/QMI8658/QMI8658.h` 改为优先使用外部配置宏；若外部未定义，则默认关闭诊断日志。
+
+### 当前效果
+- 重新打印 QMI8658 上电等待、地址探测、`WHO_AM_I` 校验、`wait acc ready` 过程和失败后的寄存器窗口诊断。
+- 仍保持当前测试档只启用 `IMU + MAG + AHRS + LOG`，无线与 GPS 继续关闭。
 
 ---
 

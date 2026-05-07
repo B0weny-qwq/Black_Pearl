@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  APP_AD_UART                                                        27/04/26  00:55:18  PAGE 1   
+C251 COMPILER V5.60.0,  APP_AD_UART                                                        07/05/26  09:39:22  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_AD_UART
 OBJECT MODULE PLACED IN .\list\APP_AD_UART.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_AD_UART.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\U
-                    -ser;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\D
-                    -evice\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\A
-                    -PP_AD_UART.lst) TABS(2) OBJECT(.\list\APP_AD_UART.obj) 
+                    -ser;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Fu
+                    -nction\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\W
+                    -IRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP_AD_UART.lst) TABS(2) OBJECT(.\list\APP_AD_UART.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    53   1        ADC_InitTypeDef   ADC_InitStructure;    //结构定义
    54   1        COMx_InitDefine   COMx_InitStructure;         //结构定义
    55   1      
-C251 COMPILER V5.60.0,  APP_AD_UART                                                        27/04/26  00:55:18  PAGE 2   
+C251 COMPILER V5.60.0,  APP_AD_UART                                                        07/05/26  09:39:22  PAGE 2   
 
    56   1        P0_MODE_IN_HIZ(GPIO_Pin_LOW | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6);    //P0.0~P0.6 设置为高阻输入
    57   1        P1_MODE_IN_HIZ(GPIO_Pin_All);   //P1.0~P1.7 设置为高阻输入
@@ -135,7 +135,7 @@ Module Information          Static   Overlayable
   edata size           =         1         14
   bit size             =    ------     ------
   ebit size            =    ------     ------
-C251 COMPILER V5.60.0,  APP_AD_UART                                                        27/04/26  00:55:18  PAGE 3   
+C251 COMPILER V5.60.0,  APP_AD_UART                                                        07/05/26  09:39:22  PAGE 3   
 
   bitaddressable size  =    ------     ------
   ebitaddressable size =    ------     ------

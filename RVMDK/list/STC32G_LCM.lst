@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  STC32G_LCM                                                         27/04/26  00:55:21  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_LCM                                                         07/05/26  09:39:26  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_LCM
 OBJECT MODULE PLACED IN .\list\STC32G_LCM.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_LCM.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..
-                    -\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny
-                    -\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list
-                    -\STC32G_LCM.lst) TABS(2) OBJECT(.\list\STC32G_LCM.obj) 
+                    -\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\
+                    -Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device
+                    -\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_LCM.lst) TABS(2) OBJECT(.\list\STC32G_LCM.obj) 
 
 stmt  level    source
 

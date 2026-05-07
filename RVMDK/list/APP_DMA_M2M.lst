@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  APP_DMA_M2M                                                        27/04/26  00:55:19  PAGE 1   
+C251 COMPILER V5.60.0,  APP_DMA_M2M                                                        07/05/26  09:39:24  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_DMA_M2M
 OBJECT MODULE PLACED IN .\list\APP_DMA_M2M.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_DMA_M2M.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\U
-                    -ser;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\D
-                    -evice\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\A
-                    -PP_DMA_M2M.lst) TABS(2) OBJECT(.\list\APP_DMA_M2M.obj) 
+                    -ser;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Fu
+                    -nction\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\W
+                    -IRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP_DMA_M2M.lst) TABS(2) OBJECT(.\list\APP_DMA_M2M.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    53          //========================================================================
    54          // 函数: DMA_M2M_init
    55          // 描述: 用户初始化程序.
-C251 COMPILER V5.60.0,  APP_DMA_M2M                                                        27/04/26  00:55:19  PAGE 2   
+C251 COMPILER V5.60.0,  APP_DMA_M2M                                                        07/05/26  09:39:24  PAGE 2   
 
    56          // 参数: None.
    57          // 返回: None.
@@ -134,7 +134,7 @@ stmt  level    source
   107   2          DmaTxBuffer[i] = i;
   108   2          DmaRxBuffer[i] = 0;
   109   2        }
-C251 COMPILER V5.60.0,  APP_DMA_M2M                                                        27/04/26  00:55:19  PAGE 3   
+C251 COMPILER V5.60.0,  APP_DMA_M2M                                                        07/05/26  09:39:24  PAGE 3   
 
   110   1        DMA_M2M_TRIG();   //触发启动转换
   111   1      }

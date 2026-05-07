@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  STC32G_DMA                                                         27/04/26  00:55:22  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_DMA                                                         07/05/26  09:39:27  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_DMA
 OBJECT MODULE PLACED IN .\list\STC32G_DMA.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_DMA.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..
-                    -\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny
-                    -\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list
-                    -\STC32G_DMA.lst) TABS(2) OBJECT(.\list\STC32G_DMA.obj) 
+                    -\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\
+                    -Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device
+                    -\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_DMA.lst) TABS(2) OBJECT(.\list\STC32G_DMA.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    54          //========================================================================
    55          // 函数: void DMA_SPI_Inilize(DMA_SPI_InitTypeDef *DMA)
    56          // 描述: DMA SPI 初始化程序.
-C251 COMPILER V5.60.0,  STC32G_DMA                                                         27/04/26  00:55:22  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_DMA                                                         07/05/26  09:39:27  PAGE 2   
 
    57          // 参数: DMA: 结构参数,请参考DMA.h里的定义.
    58          // 返回: none.
@@ -134,7 +134,7 @@ stmt  level    source
   119   2          DMA_UR2R_STA = 0x00;
   120   2          DMA_UR2T_AMT = (u8)DMA->DMA_TX_Length;
   121   2          DMA_UR2T_AMTH = (u8)(DMA->DMA_TX_Length>>8);
-C251 COMPILER V5.60.0,  STC32G_DMA                                                         27/04/26  00:55:22  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_DMA                                                         07/05/26  09:39:27  PAGE 3   
 
   122   2          DMA_UR2T_TXAH = (u8)(DMA->DMA_TX_Buffer>>8);
   123   2          DMA_UR2T_TXAL = (u8)(DMA->DMA_TX_Buffer);
@@ -202,7 +202,7 @@ stmt  level    source
   185          {
   186   1        DMA_LCM_STA = 0x00;
   187   1        DMA_LCM_RXAH = (u8)(DMA->DMA_Rx_Buffer>>8);
-C251 COMPILER V5.60.0,  STC32G_DMA                                                         27/04/26  00:55:22  PAGE 4   
+C251 COMPILER V5.60.0,  STC32G_DMA                                                         07/05/26  09:39:27  PAGE 4   
 
   188   1        DMA_LCM_RXAL = (u8)(DMA->DMA_Rx_Buffer);
   189   1        DMA_LCM_TXAH = (u8)(DMA->DMA_Tx_Buffer>>8);

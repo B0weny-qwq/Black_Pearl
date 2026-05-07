@@ -1,142 +1,246 @@
-C251 COMPILER V5.60.0,  wireless_port                                                      27/04/26  00:55:24  PAGE 1   
+C251 COMPILER V5.60.0,  wireless_port                                                      07/05/26  09:39:32  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE wireless_port
 OBJECT MODULE PLACED IN .\list\wireless_port.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\WIRELESS\wireless_port.c XSMALL INTR2 BROWSE INC
-                    -DIR(..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QM
-                    -C6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR
-                    -) DEBUG PRINT(.\list\wireless_port.lst) TABS(2) OBJECT(.\list\wireless_port.obj) 
+                    -DIR(..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\
+                    -AHRS;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;.
+                    -.\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\wireless_port.lst) TABS(2) OBJECT(.\list\w
+                    -ireless_port.obj) 
 
 stmt  level    source
 
-    1          #include "wireless_port.h"
-    2          
-    3          #include "..\..\..\Driver\inc\STC32G_Delay.h"
-    4          #include "..\..\..\Driver\inc\STC32G_GPIO.h"
-    5          #include "..\..\..\Driver\inc\STC32G_NVIC.h"
-    6          #include "..\..\..\Driver\inc\STC32G_SPI.h"
-    7          #include "..\..\..\Driver\inc\STC32G_Switch.h"
-    8          
-    9          static u8 g_wireless_port_initialized = 0U;
-   10          
-   11          s8 WirelessPort_Init(void)
-   12          {
-   13   1          SPI_InitTypeDef spi_init;
-   14   1      
-   15   1          EAXSFR();
-   16   1      
-   17   1          P1_MODE_OUT_PP(GPIO_Pin_3);
-   18   1          P1_PULL_UP_DISABLE(GPIO_Pin_3);
-   19   1          P1_SPEED_HIGH(GPIO_Pin_3);
-   20   1      
-   21   1          P3_MODE_OUT_PP(GPIO_Pin_2 | GPIO_Pin_4 | GPIO_Pin_5);
-   22   1          P3_MODE_IN_HIZ(GPIO_Pin_3);
-   23   1          P3_PULL_UP_ENABLE(GPIO_Pin_3);
-   24   1          P3_SPEED_HIGH(GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5);
-   25   1      
-   26   1          P5_MODE_OUT_PP(GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_4);
-   27   1          P5_PULL_UP_DISABLE(GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_4);
-   28   1          P5_SPEED_HIGH(GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_4);
-   29   1      
-   30   1          WirelessPort_SetCs(1U);
-   31   1          WirelessPort_SetRst(1U);
-   32   1          WirelessPort_SetTxEn(0U);
-   33   1          WirelessPort_SetRxEn(0U);
-   34   1          WirelessPort_SetAntSel(WIRELESS_PORT_ANT1);
-   35   1      
-   36   1          SPI_SW(SPI_P35_P34_P33_P32);
-   37   1      
-   38   1          spi_init.SPI_Enable = ENABLE;
-   39   1          spi_init.SPI_SSIG = ENABLE;
-   40   1          spi_init.SPI_FirstBit = SPI_MSB;
-   41   1          spi_init.SPI_Mode = SPI_Mode_Master;
-   42   1          spi_init.SPI_CPOL = SPI_CPOL_Low;
-   43   1          spi_init.SPI_CPHA = SPI_CPHA_2Edge;
-   44   1          spi_init.SPI_Speed = SPI_Speed_16;
-   45   1          SPI_Init(&spi_init);
-   46   1          NVIC_SPI_Init(DISABLE, Priority_0);
-   47   1      
-   48   1          g_wireless_port_initialized = 1U;
-   49   1          return SUCCESS;
-   50   1      }
-   51          
-   52          s8 WirelessPort_Deinit(void)
-   53          {
-   54   1          if (!g_wireless_port_initialized) {
-   55   2              return SUCCESS;
-   56   2          }
-C251 COMPILER V5.60.0,  wireless_port                                                      27/04/26  00:55:24  PAGE 2   
+    1          /**
+    2           * @file    wireless_port.c
+    3           * @brief   无线模块板级端口适配实现。
+    4           * @author  boweny
+    5           * @date    2026-05-06
+    6           * @version v1.1
+    7           *
+    8           * @details
+    9           * 本文件集中管理 LT8920/KCT8206L 所需的 GPIO、SPI、复位、天线选择、
+   10           * RXEN/TXEN 和延时接口。芯片层只通过本文件访问硬件引脚，避免
+   11           * 业务协议代码直接操作 `Pxx` 端口。
+   12           *
+   13           * @note
+   14           * 默认引脚以当前 Black Pearl v1.1 硬件为准：
+   15           * SCLK=P3.2、MISO=P3.3、MOSI=P3.4、CS=P3.5、
+   16           * RST=P5.0、ANT_SEL=P5.1、RXEN=P1.3、TXEN=P5.4。
+   17           */
+   18          #include "wireless_port.h"
+   19          #include "..\..\..\Driver\inc\STC32G_Delay.h"
+   20          #include "..\..\..\Driver\inc\STC32G_GPIO.h"
+   21          #include "..\..\..\Driver\inc\STC32G_NVIC.h"
+   22          #include "..\..\..\Driver\inc\STC32G_SPI.h"
+   23          #include "..\..\..\Driver\inc\STC32G_Switch.h"
+   24          
+   25          static u8 g_wireless_port_initialized = 0U;
+   26          
+   27          
+   28          static void WirelessPort_SoftSpiClock(u8 level)
+   29          {
+   30   1          P32 = (level != 0U) ? 1 : 0;
+   31   1      }
+   32          
+   33          static void WirelessPort_SoftSpiMosi(u8 level)
+   34          {
+   35   1          P34 = (level != 0U) ? 1 : 0;
+   36   1      }
+   37          
+   38          s8 WirelessPort_Init(void)
+   39          {
+   40   1      #if !WIRELESS_SPI_USE_SOFT
+   41   1          SPI_InitTypeDef spi_init;
+   42   1      #endif
+   43   1      
+   44   1          EAXSFR();
+   45   1      
+   46   1      #if !WIRELESS_FRONTEND_BYPASS_TEST
+   47   1          P1_MODE_OUT_PP(GPIO_Pin_3);
+   48   1          P1_PULL_UP_DISABLE(GPIO_Pin_3);
+   49   1          P1_SPEED_HIGH(GPIO_Pin_3);
+   50   1      #endif
+   51   1      
+   52   1          P3_MODE_OUT_PP(GPIO_Pin_2 | GPIO_Pin_4 | GPIO_Pin_5);
+   53   1          P3_MODE_IN_HIZ(GPIO_Pin_3);
+   54   1          P3_PULL_UP_ENABLE(GPIO_Pin_3 | GPIO_Pin_5);
+   55   1          P3_SPEED_HIGH(GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5);
+C251 COMPILER V5.60.0,  wireless_port                                                      07/05/26  09:39:32  PAGE 2   
 
-   57   1      
-   58   1          WirelessPort_SetTxEn(0U);
-   59   1          WirelessPort_SetRxEn(0U);
-   60   1          WirelessPort_SetCs(1U);
-   61   1          g_wireless_port_initialized = 0U;
-   62   1          return SUCCESS;
-   63   1      }
-   64          
-   65          void WirelessPort_SetCs(u8 level)
-   66          {
-   67   1          P35 = (level != 0U) ? 1 : 0;
-   68   1      }
-   69          
-   70          void WirelessPort_SetRst(u8 level)
-   71          {
-   72   1          P50 = (level != 0U) ? 1 : 0;
-   73   1      }
-   74          
-   75          void WirelessPort_SetAntSel(u8 ant_sel)
-   76          {
-   77   1          P51 = (ant_sel == WIRELESS_PORT_ANT2) ? 1 : 0;
-   78   1      }
-   79          
-   80          void WirelessPort_SetRxEn(u8 level)
-   81          {
-   82   1          P13 = (level != 0U) ? 1 : 0;
-   83   1      }
-   84          
-   85          void WirelessPort_SetTxEn(u8 level)
-   86          {
-   87   1          P54 = (level != 0U) ? 1 : 0;
-   88   1      }
-   89          
-   90          void WirelessPort_DelayMs(u16 ms)
-   91          {
-   92   1          delay_ms(ms);
+   56   1      
+   57   1          P5_MODE_OUT_PP(GPIO_Pin_0);
+   58   1          P5_PULL_UP_DISABLE(GPIO_Pin_0);
+   59   1          P5_SPEED_HIGH(GPIO_Pin_0);
+   60   1      #if !WIRELESS_FRONTEND_BYPASS_TEST
+   61   1          P5_MODE_OUT_PP(GPIO_Pin_1 | GPIO_Pin_4);
+   62   1          P5_PULL_UP_DISABLE(GPIO_Pin_1 | GPIO_Pin_4);
+   63   1          P5_SPEED_HIGH(GPIO_Pin_1 | GPIO_Pin_4);
+   64   1      #endif
+   65   1      
+   66   1          WirelessPort_SetCs(1U);
+   67   1          WirelessPort_SetRst(1U);
+   68   1      #if !WIRELESS_FRONTEND_BYPASS_TEST
+   69   1          WirelessPort_SetTxEn(0U);
+   70   1          WirelessPort_SetRxEn(0U);
+   71   1          WirelessPort_SetAntSel(WIRELESS_PORT_ANT1);
+   72   1      #endif
+   73   1      
+   74   1      #if WIRELESS_SPI_USE_SOFT
+                   WirelessPort_SoftSpiClock(0U);
+                   WirelessPort_SoftSpiMosi(0U);
+               #else
+   78   1          SPI_SW(SPI_P35_P34_P33_P32);
+   79   1      
+   80   1          spi_init.SPI_Enable = ENABLE;
+   81   1          spi_init.SPI_SSIG = ENABLE;
+   82   1          spi_init.SPI_FirstBit = SPI_MSB;
+   83   1          spi_init.SPI_Mode = SPI_Mode_Master;
+   84   1          spi_init.SPI_CPOL = SPI_CPOL_Low;
+   85   1          spi_init.SPI_CPHA = SPI_CPHA_2Edge;
+   86   1          spi_init.SPI_Speed = WIRELESS_HW_SPI_SPEED_CFG;
+   87   1          SPI_Init(&spi_init);
+   88   1          NVIC_SPI_Init(DISABLE, Priority_0);
+   89   1      #endif
+   90   1      
+   91   1          g_wireless_port_initialized = 1U;
+   92   1          return SUCCESS;
    93   1      }
    94          
-   95          void WirelessPort_DelayUs(u16 us)
+   95          s8 WirelessPort_Deinit(void)
    96          {
-   97   1          u8 dly;
-   98   1      
-   99   1          while (us > 0U) {
-  100   2              dly = (u8)(MAIN_Fosc / 2000000UL);
-  101   2              while (--dly) {
-  102   3              }
-  103   2              us--;
-  104   2          }
-  105   1      }
-  106          
-  107          u8 WirelessPort_SpiTransfer(u8 value)
-  108          {
-  109   1          SPDAT = value;
-  110   1          while (SPIF == 0) {
-  111   2          }
-  112   1          SPI_ClearFlag();
-  113   1          return SPDAT;
-  114   1      }
+   97   1          if (!g_wireless_port_initialized) {
+   98   2              return SUCCESS;
+   99   2          }
+  100   1      
+  101   1          WirelessPort_SetTxEn(0U);
+  102   1          WirelessPort_SetRxEn(0U);
+  103   1          WirelessPort_SetCs(1U);
+  104   1          g_wireless_port_initialized = 0U;
+  105   1          return SUCCESS;
+  106   1      }
+  107          
+  108          void WirelessPort_SetCs(u8 level)
+  109          {
+  110   1          P35 = (level != 0U) ? 1 : 0;
+  111   1      }
+  112          
+  113          void WirelessPort_SetRst(u8 level)
+  114          {
+  115   1          P50 = (level != 0U) ? 1 : 0;
+  116   1      }
+  117          
+  118          #if !WIRELESS_FRONTEND_BYPASS_TEST
+  119          void WirelessPort_SetAntSel(u8 ant_sel)
+  120          {
+  121   1          P51 = (ant_sel == WIRELESS_PORT_ANT2) ? 1 : 0;
+C251 COMPILER V5.60.0,  wireless_port                                                      07/05/26  09:39:32  PAGE 3   
+
+  122   1      }
+  123          
+  124          void WirelessPort_SetRxEn(u8 level)
+  125          {
+  126   1          P13 = (level != 0U) ? 1 : 0;
+  127   1      }
+  128          
+  129          void WirelessPort_SetTxEn(u8 level)
+  130          {
+  131   1          P54 = (level != 0U) ? 1 : 0;
+  132   1      }
+  133          #else
+               void WirelessPort_SetAntSel(u8 ant_sel)
+               {
+               }
+               
+               void WirelessPort_SetRxEn(u8 level)
+               {
+               }
+               
+               void WirelessPort_SetTxEn(u8 level)
+               {
+               }
+               #endif
+  146          
+  147          u8 WirelessPort_GetAntSel(void)
+  148          {
+  149   1          return (P51 != 0U) ? 1U : 0U;
+  150   1      }
+  151          
+  152          u8 WirelessPort_GetRxEn(void)
+  153          {
+  154   1          return (P13 != 0U) ? 1U : 0U;
+  155   1      }
+  156          
+  157          u8 WirelessPort_GetTxEn(void)
+  158          {
+  159   1          return (P54 != 0U) ? 1U : 0U;
+  160   1      }
+  161          
+  162          void WirelessPort_DelayMs(u16 ms)
+  163          {
+  164   1          delay_ms(ms);
+  165   1      }
+  166          
+  167          void WirelessPort_DelayUs(u16 us)
+  168          {
+  169   1          u8 dly;
+  170   1      
+  171   1          while (us > 0U) {
+  172   2              dly = (u8)(MAIN_Fosc / 2000000UL);
+  173   2              while (--dly) {
+  174   3              }
+  175   2              us--;
+  176   2          }
+  177   1      }
+  178          
+  179          u8 WirelessPort_SpiTransfer(u8 value)
+  180          {
+  181   1      #if WIRELESS_SPI_USE_SOFT
+                   u8 bit_mask;
+                   u8 recv;
+               
+                   recv = 0U;
+                   for (bit_mask = 0x80U; bit_mask != 0U; bit_mask >>= 1) {
+                       WirelessPort_SoftSpiClock(1U);
+C251 COMPILER V5.60.0,  wireless_port                                                      07/05/26  09:39:32  PAGE 4   
+
+                       WirelessPort_SoftSpiMosi((value & bit_mask) ? 1U : 0U);
+               #if (WIRELESS_SOFT_SPI_DELAY_US > 0)
+                       WirelessPort_DelayUs(WIRELESS_SOFT_SPI_DELAY_US);
+               #endif
+                       WirelessPort_SoftSpiClock(0U);
+                       if (P33 != 0U) {
+                           recv |= bit_mask;
+                       }
+               #if (WIRELESS_SOFT_SPI_DELAY_US > 0)
+                       WirelessPort_DelayUs(WIRELESS_SOFT_SPI_DELAY_US);
+               #endif
+                   }
+                   return recv;
+               #else
+  202   1          SPDAT = value;
+  203   1          while (SPIF == 0) {
+  204   2          }
+  205   1          SPI_ClearFlag();
+  206   1          return SPDAT;
+  207   1      #endif
+  208   1      }
+  209          
+  210          
+  211          
+*** WARNING C174 IN LINE 28 OF ..\Code_boweny\Device\WIRELESS\wireless_port.c: 'WirelessPort_SoftSpiClock': unreferenced
+             - 'static' function
+*** WARNING C174 IN LINE 33 OF ..\Code_boweny\Device\WIRELESS\wireless_port.c: 'WirelessPort_SoftSpiMosi': unreferenced 
+             -'static' function
 
 
 Module Information          Static   Overlayable
 ------------------------------------------------
-  code size            =       327     ------
+  code size            =       412     ------
   ecode size           =    ------     ------
   data size            =    ------     ------
   idata size           =    ------     ------
   pdata size           =    ------     ------
-C251 COMPILER V5.60.0,  wireless_port                                                      27/04/26  00:55:24  PAGE 3   
-
   xdata size           =    ------     ------
   xdata-const size     =    ------     ------
   edata size           =         1          7
@@ -151,4 +255,4 @@ Module Information          Static   Overlayable
 End of Module Information.
 
 
-C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
+C251 COMPILATION COMPLETE.  2 WARNING(S),  0 ERROR(S)

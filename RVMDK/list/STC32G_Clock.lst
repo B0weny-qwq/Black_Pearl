@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  STC32G_Clock                                                       27/04/26  00:55:22  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_Clock                                                       07/05/26  09:39:28  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_Clock
 OBJECT MODULE PLACED IN .\list\STC32G_Clock.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_Clock.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;
-                    -..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_bowe
-                    -ny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\li
-                    -st\STC32G_Clock.lst) TABS(2) OBJECT(.\list\STC32G_Clock.obj) 
+                    -..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_bowen
+                    -y\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Devi
+                    -ce\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_Clock.lst) TABS(2) OBJECT(.\list\STC32G_Clock.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    54          // 函数: void HSPllClkConfig(u8 clksrc, u8 pcki, u8 pllsel, u8 div)
    55          // 描述: 高速IO时钟初始化程序.
    56          // 参数: clksrc: 系统时钟选择, MCLKSEL_HIRC/MCLKSEL_XIRC/MCLKSEL_X32K/MCLKSEL_I32K/MCLKSEL_PLL/MC
-C251 COMPILER V5.60.0,  STC32G_Clock                                                       27/04/26  00:55:22  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_Clock                                                       07/05/26  09:39:28  PAGE 2   
 
              -LKSEL_PLL2/MCLKSEL_I48M.
    57          // 参数: pllsel: PLL时钟选择, PLL_96M/PLL_144M.

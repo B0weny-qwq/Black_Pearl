@@ -31,6 +31,45 @@
 static u8  log_ready = 0;          /* 日志就绪标志: 0=禁用, 1=启用 */
 static u8  log_buf[LOG_BUF_SIZE];  /* 格式化缓冲区 */
 
+static bit log_tag_is(u8 *tag, u8 *name)
+{
+    u8 i;
+
+    if ((tag == 0) || (name == 0)) {
+        return 0;
+    }
+
+    for (i = 0; ; i++) {
+        if (tag[i] != name[i]) {
+            return 0;
+        }
+        if (tag[i] == '\0') {
+            return 1;
+        }
+    }
+}
+
+static bit log_allow_in_ahrs_test(u8 level, u8 *tag)
+{
+    if (level == 'E') {
+        return 1;
+    }
+
+    if (log_tag_is(tag, "AHRS")) {
+        return 1;
+    }
+
+#if QMI8658_DIAG_ENABLE
+    if (log_tag_is(tag, "SYS") ||
+        log_tag_is(tag, "IMU") ||
+        log_tag_is(tag, "MAG")) {
+        return 1;
+    }
+#endif
+
+    return 0;
+}
+
 /*---------------------------------- 内部函数 ----------------------------------*/
 
 /**
@@ -76,9 +115,7 @@ static void log_vtagged(u8 level, u8 *tag, u8 *fmt, va_list args)
     u8  prefix_len;
 
 #if AHRS_TEST_ONLY
-    if ((level != 'E') &&
-        ((tag[0] != 'A') || (tag[1] != 'H') || (tag[2] != 'R') ||
-         (tag[3] != 'S') || (tag[4] != '\0'))) {
+    if (!log_allow_in_ahrs_test(level, tag)) {
         return;
     }
 #endif
@@ -138,7 +175,7 @@ void log_init(void)
 {
     log_ready = 1;
 
-#if !AHRS_TEST_ONLY
+#if !AHRS_TEST_ONLY || QMI8658_DIAG_ENABLE
     PrintString1("\r\n");
     log_printf("[SYS] I: ============== Black Pearl v1.1 ==============");
     log_printf("[SYS] I:   MCU : STC32G  Fosc=%luHz", (u32)MAIN_Fosc);
@@ -234,7 +271,9 @@ void log_printf(u8 *fmt, ...)
 
     if (!log_ready) return;
 #if AHRS_TEST_ONLY
+#if !QMI8658_DIAG_ENABLE
     return;
+#endif
 #endif
 
     va_start(args, fmt);

@@ -1,12 +1,13 @@
-C251 COMPILER V5.60.0,  STC32G_ADC_Isr                                                     27/04/26  00:55:22  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_ADC_Isr                                                     07/05/26  09:39:28  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_ADC_Isr
 OBJECT MODULE PLACED IN .\list\STC32G_ADC_Isr.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\isr\STC32G_ADC_Isr.c XSMALL INTR2 BROWSE INCDIR(..\Driver\in
-                    -c;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_bo
-                    -weny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\
-                    -list\STC32G_ADC_Isr.lst) TABS(2) OBJECT(.\list\STC32G_ADC_Isr.obj) 
+                    -c;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_bow
+                    -eny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\De
+                    -vice\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_ADC_Isr.lst) TABS(2) OBJECT(.\list\STC32G_ADC_Isr.o
+                    -bj) 
 
 stmt  level    source
 

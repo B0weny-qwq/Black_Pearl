@@ -1,0 +1,379 @@
+C251 COMPILER V5.60.0,  QMI8658_port                                                       07/05/26  09:39:31  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE QMI8658_port
+OBJECT MODULE PLACED IN .\list\QMI8658_port.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\QMI8658\QMI8658_port.c XSMALL INTR2 BROWSE INCDI
+                    -R(..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AH
+                    -RS;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\
+                    -Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\QMI8658_port.lst) TABS(2) OBJECT(.\list\QMI8
+                    -658_port.obj) 
+
+stmt  level    source
+
+    1          #include "..\..\..\User\Config.h"
+    2          #include "QMI8658_port.h"
+    3          #include "..\..\..\Driver\inc\STC32G_Delay.h"
+    4          #include "..\..\..\Driver\inc\STC32G_GPIO.h"
+    5          #include "..\..\..\Driver\inc\STC32G_I2C.h"
+    6          #include "..\..\..\Driver\inc\STC32G_NVIC.h"
+    7          #include "..\..\..\Driver\inc\STC32G_Switch.h"
+    8          
+    9          static void QMI8658Port_ConfigPins(void)
+   10          {
+   11   1          EAXSFR();
+   12   1          P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
+   13   1          P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
+   14   1          I2C_SW(I2C_P14_P15);
+   15   1      }
+   16          
+   17          static void QMI8658Port_HardI2cRestore(void)
+   18          {
+   19   1          I2C_InitTypeDef i2c_init;
+   20   1      
+   21   1          QMI8658Port_ConfigPins();
+   22   1          i2c_init.I2C_Mode = I2C_Mode_Master;
+   23   1          i2c_init.I2C_Enable = ENABLE;
+   24   1          i2c_init.I2C_MS_WDTA = DISABLE;
+   25   1          i2c_init.I2C_Speed = SENSOR_I2C_SPEED_CFG;
+   26   1          I2C_Init(&i2c_init);
+   27   1          NVIC_I2C_Init(I2C_Mode_Master, DISABLE, Priority_0);
+   28   1      }
+   29          
+   30          #if QMI8658_I2C_USE_SOFT
+               static void QMI8658Port_SoftEnter(void)
+               {
+                   I2C_Function(DISABLE);
+                   I2C_Master();
+                   QMI8658Port_ConfigPins();
+                   P14 = 1;
+                   P15 = 1;
+               }
+               
+               static void QMI8658Port_SoftLeave(void)
+               {
+                   QMI8658Port_HardI2cRestore();
+               }
+               
+               static void QMI8658Port_SoftDelay(void)
+               {
+                   if (QMI8658_SOFT_I2C_DELAY_US != 0U) {
+                       QMI8658Port_DelayUs(QMI8658_SOFT_I2C_DELAY_US);
+                   }
+               }
+               
+               static void QMI8658Port_SoftStart(void)
+               {
+                   P14 = 1;
+                   P15 = 1;
+C251 COMPILER V5.60.0,  QMI8658_port                                                       07/05/26  09:39:31  PAGE 2   
+
+                   QMI8658Port_SoftDelay();
+                   P14 = 0;
+                   QMI8658Port_SoftDelay();
+                   P15 = 0;
+                   QMI8658Port_SoftDelay();
+               }
+               
+               static void QMI8658Port_SoftStop(void)
+               {
+                   P14 = 0;
+                   QMI8658Port_SoftDelay();
+                   P15 = 1;
+                   QMI8658Port_SoftDelay();
+                   P14 = 1;
+                   QMI8658Port_SoftDelay();
+               }
+               
+               static u8 QMI8658Port_SoftWriteByte(u8 value)
+               {
+                   u8 bit_mask;
+               
+                   for (bit_mask = 0x80U; bit_mask != 0U; bit_mask >>= 1) {
+                       P14 = ((value & bit_mask) != 0U) ? 1 : 0;
+                       QMI8658Port_SoftDelay();
+                       P15 = 1;
+                       QMI8658Port_SoftDelay();
+                       P15 = 0;
+                       QMI8658Port_SoftDelay();
+                   }
+               
+                   P14 = 1;
+                   QMI8658Port_SoftDelay();
+                   P15 = 1;
+                   QMI8658Port_SoftDelay();
+                   bit_mask = (P14 != 0U) ? 1U : 0U;
+                   P15 = 0;
+                   QMI8658Port_SoftDelay();
+                   return bit_mask;
+               }
+               
+               static u8 QMI8658Port_SoftReadByte(u8 send_ack)
+               {
+                   u8 value;
+                   u8 i;
+               
+                   value = 0U;
+                   P14 = 1;
+                   for (i = 0; i < 8U; i++) {
+                       value <<= 1;
+                       P15 = 1;
+                       QMI8658Port_SoftDelay();
+                       if (P14 != 0U) {
+                           value |= 0x01U;
+                       }
+                       P15 = 0;
+                       QMI8658Port_SoftDelay();
+                   }
+               
+                   P14 = (send_ack != 0U) ? 0 : 1;
+                   QMI8658Port_SoftDelay();
+                   P15 = 1;
+                   QMI8658Port_SoftDelay();
+                   P15 = 0;
+                   QMI8658Port_SoftDelay();
+                   P14 = 1;
+                   return value;
+C251 COMPILER V5.60.0,  QMI8658_port                                                       07/05/26  09:39:31  PAGE 3   
+
+               }
+               #endif
+  124          
+  125          s8 QMI8658Port_Init(void)
+  126          {
+  127   1          QMI8658Port_ConfigPins();
+  128   1          QMI8658Port_HardI2cRestore();
+  129   1          return SUCCESS;
+  130   1      }
+  131          
+  132          char *QMI8658Port_BackendName(void)
+  133          {
+  134   1      #if QMI8658_I2C_USE_SOFT
+                   return "soft";
+               #else
+  137   1          return "hard";
+  138   1      #endif
+  139   1      }
+  140          
+  141          void QMI8658Port_DelayMs(u16 ms)
+  142          {
+  143   1          delay_ms(ms);
+  144   1      }
+  145          
+  146          void QMI8658Port_DelayUs(u16 us)
+  147          {
+  148   1          u8 dly;
+  149   1      
+  150   1          while (us > 0U) {
+  151   2              dly = (u8)(MAIN_Fosc / 2000000UL);
+  152   2              while (--dly) {
+  153   3              }
+  154   2              us--;
+  155   2          }
+  156   1      }
+  157          
+  158          u8 QMI8658Port_BusNeedsRecover(void)
+  159          {
+  160   1          if (Get_MSBusy_Status()) {
+  161   2              return 1U;
+  162   2          }
+  163   1          if (P14 == 0) {
+  164   2              return 1U;
+  165   2          }
+  166   1          if (P15 == 0) {
+  167   2              return 1U;
+  168   2          }
+  169   1          return 0U;
+  170   1      }
+  171          
+  172          void QMI8658Port_BusRecover(void)
+  173          {
+  174   1          u8 i;
+  175   1      
+  176   1          I2C_Function(DISABLE);
+  177   1          I2C_Master();
+  178   1          QMI8658Port_ConfigPins();
+  179   1      
+  180   1          P14 = 1;
+  181   1          P15 = 1;
+  182   1          QMI8658Port_DelayUs(5U);
+  183   1          for (i = 0; i < 9U; i++) {
+  184   2              P15 = 0;
+  185   2              QMI8658Port_DelayUs(5U);
+  186   2              P15 = 1;
+  187   2              QMI8658Port_DelayUs(5U);
+C251 COMPILER V5.60.0,  QMI8658_port                                                       07/05/26  09:39:31  PAGE 4   
+
+  188   2              if (P14 != 0U) {
+  189   3                  break;
+  190   3              }
+  191   2          }
+  192   1      
+  193   1          P14 = 0;
+  194   1          QMI8658Port_DelayUs(5U);
+  195   1          P15 = 1;
+  196   1          QMI8658Port_DelayUs(5U);
+  197   1          P14 = 1;
+  198   1          QMI8658Port_DelayUs(5U);
+  199   1      
+  200   1          QMI8658Port_HardI2cRestore();
+  201   1      }
+  202          
+  203          u8 QMI8658Port_WriteReg(u8 addr, u8 reg_addr, u8 reg_val, u8 *err_code)
+  204          {
+  205   1          if (err_code != NULL) {
+  206   2              *err_code = QMI8658_I2C_OK;
+  207   2          }
+  208   1      
+  209   1          if (QMI8658Port_BusNeedsRecover() != 0U) {
+  210   2              QMI8658Port_BusRecover();
+  211   2              if (QMI8658Port_BusNeedsRecover() != 0U) {
+  212   3                  if (err_code != NULL) {
+  213   4                      *err_code = QMI8658_I2C_ERR_BUSY;
+  214   4                  }
+  215   3                  return 1U;
+  216   3              }
+  217   2          }
+  218   1      
+  219   1      #if QMI8658_I2C_USE_SOFT
+                   QMI8658Port_SoftEnter();
+                   QMI8658Port_SoftStart();
+                   if (QMI8658Port_SoftWriteByte(QMI8658_I2C_WRITE(addr)) != 0U) {
+                       if (err_code != NULL) {
+                           *err_code = QMI8658_I2C_ERR_DEVW_NACK;
+                       }
+                       QMI8658Port_SoftStop();
+                       QMI8658Port_SoftLeave();
+                       return 1U;
+                   }
+                   if (QMI8658Port_SoftWriteByte(reg_addr) != 0U) {
+                       if (err_code != NULL) {
+                           *err_code = QMI8658_I2C_ERR_REG_NACK;
+                       }
+                       QMI8658Port_SoftStop();
+                       QMI8658Port_SoftLeave();
+                       return 1U;
+                   }
+                   if (QMI8658Port_SoftWriteByte(reg_val) != 0U) {
+                       if (err_code != NULL) {
+                           *err_code = QMI8658_I2C_ERR_DATA_NACK;
+                       }
+                       QMI8658Port_SoftStop();
+                       QMI8658Port_SoftLeave();
+                       return 1U;
+                   }
+                   QMI8658Port_SoftStop();
+                   QMI8658Port_SoftLeave();
+                   return 0U;
+               #else
+  250   1          I2C_WriteNbyte(QMI8658_I2C_WRITE(addr), reg_addr, &reg_val, 1U);
+  251   1          if (Get_MSBusy_Status() != 0U) {
+  252   2              if (err_code != NULL) {
+  253   3                  *err_code = QMI8658_I2C_ERR_BUSY;
+C251 COMPILER V5.60.0,  QMI8658_port                                                       07/05/26  09:39:31  PAGE 5   
+
+  254   3              }
+  255   2              return 1U;
+  256   2          }
+  257   1          return 0U;
+  258   1      #endif
+  259   1      }
+  260          
+  261          u8 QMI8658Port_ReadN(u8 addr, u8 start_reg, u8 *buf, u8 len, u8 *err_code)
+  262          {
+  263   1      #if QMI8658_I2C_USE_SOFT
+                   u8 i;
+               #endif
+  266   1      
+  267   1          if ((buf == NULL) || (len == 0U)) {
+  268   2              if (err_code != NULL) {
+  269   3                  *err_code = QMI8658_I2C_ERR_PARAM;
+  270   3              }
+  271   2              return 1U;
+  272   2          }
+  273   1      
+  274   1          if (err_code != NULL) {
+  275   2              *err_code = QMI8658_I2C_OK;
+  276   2          }
+  277   1      
+  278   1          if (QMI8658Port_BusNeedsRecover() != 0U) {
+  279   2              QMI8658Port_BusRecover();
+  280   2              if (QMI8658Port_BusNeedsRecover() != 0U) {
+  281   3                  if (err_code != NULL) {
+  282   4                      *err_code = QMI8658_I2C_ERR_BUSY;
+  283   4                  }
+  284   3                  return 1U;
+  285   3              }
+  286   2          }
+  287   1      
+  288   1      #if QMI8658_I2C_USE_SOFT
+                   QMI8658Port_SoftEnter();
+                   QMI8658Port_SoftStart();
+                   if (QMI8658Port_SoftWriteByte(QMI8658_I2C_WRITE(addr)) != 0U) {
+                       if (err_code != NULL) {
+                           *err_code = QMI8658_I2C_ERR_DEVW_NACK;
+                       }
+                       QMI8658Port_SoftStop();
+                       QMI8658Port_SoftLeave();
+                       return 1U;
+                   }
+                   if (QMI8658Port_SoftWriteByte(start_reg) != 0U) {
+                       if (err_code != NULL) {
+                           *err_code = QMI8658_I2C_ERR_REG_NACK;
+                       }
+                       QMI8658Port_SoftStop();
+                       QMI8658Port_SoftLeave();
+                       return 1U;
+                   }
+                   QMI8658Port_SoftStart();
+                   if (QMI8658Port_SoftWriteByte(QMI8658_I2C_READ(addr)) != 0U) {
+                       if (err_code != NULL) {
+                           *err_code = QMI8658_I2C_ERR_DEVR_NACK;
+                       }
+                       QMI8658Port_SoftStop();
+                       QMI8658Port_SoftLeave();
+                       return 1U;
+                   }
+                   for (i = 0U; i < len; i++) {
+                       buf[i] = QMI8658Port_SoftReadByte(((u8)(i + 1U) < len) ? 1U : 0U);
+                   }
+                   QMI8658Port_SoftStop();
+C251 COMPILER V5.60.0,  QMI8658_port                                                       07/05/26  09:39:31  PAGE 6   
+
+                   QMI8658Port_SoftLeave();
+                   return 0U;
+               #else
+  323   1          I2C_ReadNbyte(QMI8658_I2C_WRITE(addr), start_reg, buf, len);
+  324   1          if (Get_MSBusy_Status() != 0U) {
+  325   2              if (err_code != NULL) {
+  326   3                  *err_code = QMI8658_I2C_ERR_BUSY;
+  327   3              }
+  328   2              return 1U;
+  329   2          }
+  330   1          return 0U;
+  331   1      #endif
+  332   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       476     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------         17
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =         5     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

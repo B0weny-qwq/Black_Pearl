@@ -1,12 +1,13 @@
-C251 COMPILER V5.60.0,  STC32G_I2C_Isr                                                     27/04/26  00:55:23  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_I2C_Isr                                                     07/05/26  09:39:29  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_I2C_Isr
 OBJECT MODULE PLACED IN .\list\STC32G_I2C_Isr.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\isr\STC32G_I2C_Isr.c XSMALL INTR2 BROWSE INCDIR(..\Driver\in
-                    -c;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_bo
-                    -weny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\
-                    -list\STC32G_I2C_Isr.lst) TABS(2) OBJECT(.\list\STC32G_I2C_Isr.obj) 
+                    -c;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_bow
+                    -eny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\De
+                    -vice\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_I2C_Isr.lst) TABS(2) OBJECT(.\list\STC32G_I2C_Isr.o
+                    -bj) 
 
 stmt  level    source
 
@@ -65,9 +66,9 @@ stmt  level    source
    53   3            I2CIsr.addr = I2CRXD;
    54   3            I2CTXD = I2C_Buffer[I2CIsr.addr];
    55   3          }
-   56   2          else
-C251 COMPILER V5.60.0,  STC32G_I2C_Isr                                                     27/04/26  00:55:23  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_I2C_Isr                                                     07/05/26  09:39:29  PAGE 2   
 
+   56   2          else
    57   2          {
    58   3            I2C_Buffer[I2CIsr.addr++] = I2CRXD; //处理RECV事件（RECV DATA）
    59   3          }

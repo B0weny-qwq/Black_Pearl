@@ -1,0 +1,139 @@
+C251 COMPILER V5.60.0,  MainLoop                                                           07/05/26  09:39:22  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE MainLoop
+OBJECT MODULE PLACED IN .\list\MainLoop.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\User\MainLoop.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\User;..
+                    -\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Function
+                    -\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELES
+                    -S;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\MainLoop.lst) TABS(2) OBJECT(.\list\MainLoop.obj) 
+
+stmt  level    source
+
+    1          #include "config.h"
+    2          #include "system_init.h"
+    3          #include "Task.h"
+    4          #include "MainLoop.h"
+    5          #include "..\Code_boweny\Device\QMC6309\QMC6309.h"
+    6          #include "..\Code_boweny\Device\GPS\GPS.h"
+    7          #include "..\Code_boweny\Device\WIRELESS\wireless.h"
+    8          #include "..\Code_boweny\Device\WIRELESS\ship_protocol.h"
+    9          #include "..\Code_boweny\Function\Log\Log.h"
+   10          
+   11          #if ENABLE_WIRELESS_MODULE
+   12          static void Wireless_MinimalTestUnit(void)
+   13          {
+   14   1          s8 rc;
+   15   1      
+   16   1          LOGI("SYS", "wireless runtime enabled");
+   17   1          rc = Wireless_RunMinimalTest();
+   18   1          if (rc != SUCCESS) {
+   19   2              LOGE("WL", "minimal test fail rc=%d", rc);
+   20   2          }
+   21   1      }
+   22          #endif
+   23          
+   24          #if ENABLE_MAG_MODULE && ENABLE_MAG_STANDALONE_POLL
+   25          #define MAG_TEST_PERIOD_MS   3000U
+   26          
+   27          static u32 MAG_Abs16ToU32(int16 value)
+   28          {
+   29   1          int32 v;
+   30   1      
+   31   1          v = (int32)value;
+   32   1          if (v < 0) {
+   33   2              return (u32)(-v);
+   34   2          }
+   35   1      
+   36   1          return (u32)v;
+   37   1      }
+   38          
+   39          static void MAG_StandalonePoll(void)
+   40          {
+   41   1          static u8 timing_started = 0;
+   42   1          static u32 last_mag_ms = 0;
+   43   1          static u8 error_latched = 0;
+   44   1          u32 now_ms;
+   45   1          u32 norm1;
+   46   1          int16 mx, my, mz;
+   47   1      
+   48   1          now_ms = Task_GetTickMs();
+   49   1          if (!timing_started) {
+   50   2              timing_started = 1;
+   51   2              last_mag_ms = now_ms;
+   52   2          } else if ((now_ms - last_mag_ms) < MAG_TEST_PERIOD_MS) {
+   53   2              return;
+   54   2          } else {
+   55   2              last_mag_ms = now_ms;
+   56   2          }
+C251 COMPILER V5.60.0,  MainLoop                                                           07/05/26  09:39:22  PAGE 2   
+
+   57   1      
+   58   1          if (QMC6309_ReadXYZ(&mx, &my, &mz) != 0) {
+   59   2              if (!error_latched) {
+   60   3                  LOGW("MAG", "test read fail id=0x%02X", QMC6309_ReadID());
+   61   3                  error_latched = 1;
+   62   3              }
+   63   2              return;
+   64   2          }
+   65   1      
+   66   1          error_latched = 0;
+   67   1          norm1 = MAG_Abs16ToU32(mx) + MAG_Abs16ToU32(my) + MAG_Abs16ToU32(mz);
+   68   1          LOGI("MAG", "test raw=%d %d %d norm1=%lu", mx, my, mz, norm1);
+   69   1      }
+   70          #endif
+   71          
+   72          void MainLoop_Bootstrap(void)
+   73          {
+   74   1      #if ENABLE_WIRELESS_MODULE
+   75   1          Wireless_MinimalTestUnit();
+   76   1      #endif
+   77   1      }
+   78          
+   79          void MainLoop_RunOnce(void)
+   80          {
+   81   1      #if ENABLE_GPS_MODULE
+   82   1          GPS_Poll();
+   83   1      #endif
+   84   1      
+   85   1      #if ENABLE_WIRELESS_MODULE
+   86   1          Wireless_Poll();
+   87   1      #if ENABLE_SHIP_PROTOCOL_SCHED && SHIP_PROTOCOL_POLL_ENABLE
+   88   1          ShipProtocol_RunScheduler();
+   89   1      #endif
+   90   1      #if SHIP_PROTOCOL_COMPAT_ENABLE
+                   ShipProtocol_Poll();
+               #endif
+   93   1          Wireless_SearchSignalPoll();
+   94   1      #endif
+   95   1      
+   96   1      #if ENABLE_MAG_MODULE && ENABLE_MAG_STANDALONE_POLL
+   97   1          MAG_StandalonePoll();
+   98   1      #endif
+   99   1      
+  100   1          Task_Pro_Handler_Callback();
+  101   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       282     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =         6          6
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =       131     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

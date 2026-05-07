@@ -1,12 +1,13 @@
-C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      27/04/26  00:55:21  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      07/05/26  09:39:26  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_EEPROM
 OBJECT MODULE PLACED IN .\list\STC32G_EEPROM.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_EEPROM.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc
-                    -;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_bow
-                    -eny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\l
-                    -ist\STC32G_EEPROM.lst) TABS(2) OBJECT(.\list\STC32G_EEPROM.obj) 
+                    -;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_bowe
+                    -ny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Dev
+                    -ice\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_EEPROM.lst) TABS(2) OBJECT(.\list\STC32G_EEPROM.obj)
+                    - 
 
 stmt  level    source
 
@@ -65,9 +66,9 @@ stmt  level    source
    52          // 返回: non.
    53          // 版本: V1.0, 2012-10-22
    54          //========================================================================
-   55          void EEPROM_read_n(u32 EE_address,u8 *DataAddress,u16 number)
-C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      27/04/26  00:55:21  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      07/05/26  09:39:26  PAGE 2   
 
+   55          void EEPROM_read_n(u32 EE_address,u8 *DataAddress,u16 number)
    56          {
    57   1        IAP_ENABLE();                           //设置等待时间，允许IAP操作，送一次就够
    58   1        IAP_READ();                             //送字节读命令，命令不需改变时，不需重新送�
@@ -133,9 +134,9 @@ stmt  level    source
   109   2          IAP_ADDRH = (u8)(EE_address >> 8);  //送地址中字节（地址需要改变时才需重新送地址�
              -�
   110   2          IAP_ADDRL = (u8)EE_address;         //送地址低字节（地址需要改变时才需重新送地址�
-             -�
-C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      27/04/26  00:55:21  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      07/05/26  09:39:26  PAGE 3   
 
+             -�
   111   2          IAP_DATA  = *DataAddress;         //送数据到IAP_DATA，只有数据改变时才需重新送
   112   2          EEPROM_Trig();                    //触发EEPROM操作
   113   2          EE_address++;                     //下一个地址

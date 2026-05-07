@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  Motor                                                              27/04/26  00:55:24  PAGE 1   
+C251 COMPILER V5.60.0,  Motor                                                              07/05/26  09:39:32  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE Motor
 OBJECT MODULE PLACED IN .\list\Motor.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\MOTOR\Motor.c XSMALL INTR2 BROWSE INCDIR(..\Driv
-                    -er\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Co
-                    -de_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRI
-                    -NT(.\list\Motor.lst) TABS(2) OBJECT(.\list\Motor.obj) 
+                    -er\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Cod
+                    -e_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_bowe
+                    -ny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\Motor.lst) TABS(2) OBJECT(.\list\Motor.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    54   2          } else {
    55   2              PWMA_ENO &= (u8)~(ENO3P | ENO3N);
    56   2              PWMA_CC3E_Disable();
-C251 COMPILER V5.60.0,  Motor                                                              27/04/26  00:55:24  PAGE 2   
+C251 COMPILER V5.60.0,  Motor                                                              07/05/26  09:39:32  PAGE 2   
 
    57   2              PWMA_CC3NE_Disable();
    58   2          }
@@ -134,7 +134,7 @@ stmt  level    source
   120   1      
   121   1          PWMA_OC3_OUT_0();
   122   1          PWMA_OC3N_OUT_0();
-C251 COMPILER V5.60.0,  Motor                                                              27/04/26  00:55:24  PAGE 3   
+C251 COMPILER V5.60.0,  Motor                                                              07/05/26  09:39:32  PAGE 3   
 
   123   1          PWMA_OC4_OUT_0();
   124   1          PWMA_OC4N_OUT_0();
@@ -202,7 +202,7 @@ stmt  level    source
   186   1      }
   187          
   188          void Motor_StopAll(void)
-C251 COMPILER V5.60.0,  Motor                                                              27/04/26  00:55:24  PAGE 4   
+C251 COMPILER V5.60.0,  Motor                                                              07/05/26  09:39:32  PAGE 4   
 
   189          {
   190   1          Motor_Stop(MOTOR_LEFT);

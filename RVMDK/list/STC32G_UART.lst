@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  STC32G_UART                                                        27/04/26  00:55:22  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_UART
 OBJECT MODULE PLACED IN .\list\STC32G_UART.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_UART.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;.
-                    -.\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_bowen
-                    -y\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\lis
-                    -t\STC32G_UART.lst) TABS(2) OBJECT(.\list\STC32G_UART.obj) 
+                    -.\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny
+                    -\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Devic
+                    -e\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_UART.lst) TABS(2) OBJECT(.\list\STC32G_UART.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    54   2          COM1.B_TX_busy  = 0;
    55   2          COM1.RX_Cnt     = 0;
    56   2          COM1.RX_TimeOut = 0;
-C251 COMPILER V5.60.0,  STC32G_UART                                                        27/04/26  00:55:22  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 2   
 
    57   2          
    58   2          for(i=0; i<COM_TX1_Lenth; i++)  TX1_Buffer[i] = 0;
@@ -134,7 +134,7 @@ stmt  level    source
   120   3            if(j >= 65536UL)  return FAIL;  //错误
   121   3            j = 65536UL - j;
   122   3            T2R = 0;    //Timer stop
-C251 COMPILER V5.60.0,  STC32G_UART                                                        27/04/26  00:55:22  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 3   
 
   123   3            T2_CT = 0;  //Timer2 set As Timer
   124   3            T2x12 = 1;  //Timer2 set as 1T mode
@@ -202,7 +202,7 @@ stmt  level    source
   186   2          COM4.RX_Cnt     = 0;
   187   2          COM4.RX_TimeOut = 0;
   188   2          for(i=0; i<COM_TX4_Lenth; i++)  TX4_Buffer[i] = 0;
-C251 COMPILER V5.60.0,  STC32G_UART                                                        27/04/26  00:55:22  PAGE 4   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 4   
 
   189   2          for(i=0; i<COM_RX4_Lenth; i++)  RX4_Buffer[i] = 0;
   190   2      
@@ -270,7 +270,7 @@ stmt  level    source
   251          void PrintString1(u8 *puts)
   252          {
   253   1          for (; *puts != 0;  puts++)  TX1_write2buff(*puts);   //遇到停止符0结束
-C251 COMPILER V5.60.0,  STC32G_UART                                                        27/04/26  00:55:22  PAGE 5   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 5   
 
   254   1      }
   255          
@@ -338,7 +338,7 @@ stmt  level    source
   315          #ifdef UART4
   316          void TX4_write2buff(u8 dat) //串口4发送函数
   317          {
-C251 COMPILER V5.60.0,  STC32G_UART                                                        27/04/26  00:55:22  PAGE 6   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 6   
 
   318   1          #if(UART_QUEUE_MODE == 1)
                  TX4_Buffer[COM4.TX_write] = dat;  //装发送缓冲，使用队列式数据发送，一次性发送数据
@@ -406,7 +406,7 @@ stmt  level    source
                  return c;
                }
                
-C251 COMPILER V5.60.0,  STC32G_UART                                                        27/04/26  00:55:22  PAGE 7   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 7   
 
                #elif(PRINTF_SELECT == 4)
                

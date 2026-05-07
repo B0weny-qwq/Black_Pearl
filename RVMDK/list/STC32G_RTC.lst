@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  STC32G_RTC                                                         27/04/26  00:55:22  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_RTC                                                         07/05/26  09:39:27  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_RTC
 OBJECT MODULE PLACED IN .\list\STC32G_RTC.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_RTC.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..
-                    -\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny
-                    -\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list
-                    -\STC32G_RTC.lst) TABS(2) OBJECT(.\list\STC32G_RTC.obj) 
+                    -\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\
+                    -Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device
+                    -\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\STC32G_RTC.lst) TABS(2) OBJECT(.\list\STC32G_RTC.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    54   1      
    55   1        if(RTCx->RTC_Enable == ENABLE)
    56   1        {
-C251 COMPILER V5.60.0,  STC32G_RTC                                                         27/04/26  00:55:22  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_RTC                                                         07/05/26  09:39:27  PAGE 2   
 
    57   2          RTCCR = 0x01;     //RTC使能
    58   2          while(RTCCFG & 0x01); //等待初始化完成,需要在 "RTC使能" 之后判断. 

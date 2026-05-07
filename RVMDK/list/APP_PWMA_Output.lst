@@ -1,12 +1,13 @@
-C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    27/04/26  00:55:20  PAGE 1   
+C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    07/05/26  09:39:24  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_PWMA_Output
 OBJECT MODULE PLACED IN .\list\APP_PWMA_Output.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_PWMA_Output.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;
-                    -..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_bowe
-                    -ny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\li
-                    -st\APP_PWMA_Output.lst) TABS(2) OBJECT(.\list\APP_PWMA_Output.obj) 
+                    -..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_bowen
+                    -y\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Devi
+                    -ce\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP_PWMA_Output.lst) TABS(2) OBJECT(.\list\APP_PWMA_Output.o
+                    -bj) 
 
 stmt  level    source
 
@@ -65,9 +66,9 @@ stmt  level    source
    52          // 描述: 用户初始化程序.
    53          // 参数: None.
    54          // 返回: None.
-   55          // 版本: V1.0, 2020-09-28
-C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    27/04/26  00:55:20  PAGE 2   
+C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    07/05/26  09:39:24  PAGE 2   
 
+   55          // 版本: V1.0, 2020-09-28
    56          //========================================================================
    57          void PWMA_Output_init(void)
    58          {
@@ -133,9 +134,9 @@ stmt  level    source
   109          //========================================================================
   110          void Sample_PWMA_Output(void)
   111          {
-  112   1        if(!PWM1_Flag)
-C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    27/04/26  00:55:20  PAGE 3   
+C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    07/05/26  09:39:24  PAGE 3   
 
+  112   1        if(!PWM1_Flag)
   113   1        {
   114   2          PWMA_Duty.PWM1_Duty++;
   115   2          if(PWMA_Duty.PWM1_Duty >= 2047) PWM1_Flag = 1;
@@ -202,9 +203,9 @@ Module Information          Static   Overlayable
   ebitaddressable size =    ------     ------
   far data size        =    ------     ------
   huge data size       =    ------     ------
-  const size           =    ------     ------
-C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    27/04/26  00:55:20  PAGE 4   
+C251 COMPILER V5.60.0,  APP_PWMA_Output                                                    07/05/26  09:39:24  PAGE 4   
 
+  const size           =    ------     ------
   hconst size          =    ------     ------
 End of Module Information.
 

@@ -1,0 +1,1057 @@
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE AHRS
+OBJECT MODULE PLACED IN .\list\AHRS.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Function\AHRS\AHRS.c XSMALL INTR2 BROWSE INCDIR(..\Driv
+                    -er\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Cod
+                    -e_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_bowe
+                    -ny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\AHRS.lst) TABS(2) OBJECT(.\list\AHRS.obj) 
+
+stmt  level    source
+
+    1          /**
+    2           * @file    AHRS.c
+    3           * @brief   AHRS 姿态融合模块实现
+    4           * @author  boweny
+    5           * @date    2026-04-27
+    6           * @version v1.0
+    7           *
+    8           * @details
+    9           * - 实现 Q8 定点互补滤波姿态估计
+   10           * - 使用陀螺仪角速度积分获得短期响应
+   11           * - 使用加速度计解算 roll/pitch 并做低频修正，抑制陀螺仪零偏漂移
+   12           * - 使用地磁计低频修正 yaw，默认修正较慢，便于抵抗电机磁干扰和瞬态抖动
+   13           * - 所有三角函数均使用整数近似，不引入浮点库
+   14           *
+   15           * @note
+   16           * 输出角度单位统一为 `deg * 100`，内部姿态状态使用 Q8 小数保存，
+   17           * 避免低速角速度积分时被整数截断。
+   18           *
+   19           * @see     Code_boweny/Function/AHRS/AHRS.h
+   20           */
+   21          
+   22          #include "AHRS.h"
+   23          
+   24          #define AHRS_Q_SHIFT                  8
+   25          #define AHRS_Q_SCALE                  256L
+   26          #define AHRS_ANGLE_FULL_DEG100        36000L
+   27          #define AHRS_ANGLE_HALF_DEG100        18000L
+   28          #define AHRS_ANGLE_QUARTER_DEG100     9000L
+   29          #define AHRS_ATAN_Q                   1024L
+   30          #define AHRS_ACC_MIN_BOOT_NORM        512U
+   31          
+   32          typedef struct
+   33          {
+   34              int32 x;            /**< X 轴 Q8 低通状态 */
+   35              int32 y;            /**< Y 轴 Q8 低通状态 */
+   36              int32 z;            /**< Z 轴 Q8 低通状态 */
+   37              u8 initialized;     /**< 首帧状态标志，0=未初始化，1=已初始化 */
+   38          } AHRS_Lpf3_t;
+   39          
+   40          /**
+   41           * @brief   AHRS 内部运行上下文
+   42           *
+   43           * @details
+   44           * 保存姿态角、传感器低通、加速度 1g 参考、陀螺仪零偏学习和对外状态快照�
+             -�
+   45           * 该结构体仅在本模块内部维护，对外通过 `AHRS_GetState()` 暴露只读快照。
+   46           */
+   47          typedef struct
+   48          {
+   49              int32 roll_q8;                  /**< 横滚角内部 Q8 状态，单位 deg * 100 */
+   50              int32 pitch_q8;                 /**< 俯仰角内部 Q8 状态，单位 deg * 100 */
+   51              int32 yaw_q8;                   /**< 航向角内部 Q8 状态，单位 deg * 100 */
+   52          
+   53              int32 acc_roll_lpf_q8;          /**< 加速度解算横滚角低通状态 */
+   54              int32 acc_pitch_lpf_q8;         /**< 加速度解算俯仰角低通状态 */
+   55              u8 acc_angle_initialized;       /**< 加速度角度低通是否已初始化 */
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 2   
+
+   56          
+   57              int32 mag_yaw_lpf_q8;           /**< 地磁解算航向角低通状态 */
+   58              u8 mag_yaw_initialized;         /**< 地磁航向低通是否已初始化 */
+   59          
+   60              u32 acc_ref_sum;                /**< 启动阶段加速度模长累计值 */
+   61              u16 acc_ref_count;              /**< 启动阶段加速度参考采样计数 */
+   62              u16 acc_1g_ref;                 /**< 自学习得到的 1g 加速度模长参考值 */
+   63          
+   64              int32 gyro_bias_sum_x;          /**< X 轴陀螺仪零偏累计值 */
+   65              int32 gyro_bias_sum_y;          /**< Y 轴陀螺仪零偏累计值 */
+   66              int32 gyro_bias_sum_z;          /**< Z 轴陀螺仪零偏累计值 */
+   67              u16 gyro_bias_count;            /**< 陀螺仪零偏学习计数 */
+   68              int16 gyro_bias_x;              /**< X 轴陀螺仪零偏 */
+   69              int16 gyro_bias_y;              /**< Y 轴陀螺仪零偏 */
+   70              int16 gyro_bias_z;              /**< Z 轴陀螺仪零偏 */
+   71              u8 gyro_bias_ready;             /**< 陀螺仪零偏是否已学习完成 */
+   72          
+   73              AHRS_Lpf3_t gyro_lpf;           /**< 陀螺仪三轴低通状态 */
+   74              AHRS_Lpf3_t mag_lpf;            /**< 地磁计三轴低通状态 */
+   75          
+   76              AHRS_State_t state;             /**< 对外输出状态快照 */
+   77              u8 mag_valid;                   /**< 最近一次地磁数据是否有效 */
+   78              u8 ready;                       /**< AHRS 是否已完成首帧姿态初始化 */
+   79          } AHRS_Context_t;
+   80          
+   81          static AHRS_Context_t ahrs_ctx;
+   82          
+   83          /**
+   84           * @brief      求 int16 绝对值并扩展为 u32
+   85           * @param[in]  value  输入有符号 16 位数
+   86           * @return     输入值的绝对值
+   87           */
+   88          static u32 AHRS_Abs16(int16 value)
+   89          {
+   90   1          if (value < 0) {
+   91   2              return (u32)(-(int32)value);
+   92   2          }
+   93   1          return (u32)value;
+   94   1      }
+   95          
+   96          /**
+   97           * @brief      求 int32 绝对值
+   98           * @param[in]  value  输入有符号 32 位数
+   99           * @return     输入值的绝对值
+  100           */
+  101          static int32 AHRS_Abs32(int32 value)
+  102          {
+  103   1          if (value < 0) {
+  104   2              return -value;
+  105   2          }
+  106   1          return value;
+  107   1      }
+  108          
+  109          /**
+  110           * @brief      将角度约束到 -18000~17999 附近
+  111           * @param[in]  angle  输入角度，单位 deg * 100
+  112           * @return     约束后的角度，单位 deg * 100
+  113           */
+  114          static int16 AHRS_WrapDeg100(int32 angle)
+  115          {
+  116   1          while (angle >= AHRS_ANGLE_HALF_DEG100) {
+  117   2              angle -= AHRS_ANGLE_FULL_DEG100;
+  118   2          }
+  119   1          while (angle < -AHRS_ANGLE_HALF_DEG100) {
+  120   2              angle += AHRS_ANGLE_FULL_DEG100;
+  121   2          }
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 3   
+
+  122   1          return (int16)angle;
+  123   1      }
+  124          
+  125          /**
+  126           * @brief      将角度误差约束到最短方向
+  127           * @param[in]  angle  输入角度误差，单位 deg * 100
+  128           * @return     约束后的角度误差，单位 deg * 100
+  129           */
+  130          static int16 AHRS_WrapDiffDeg100(int32 angle)
+  131          {
+  132   1          return AHRS_WrapDeg100(angle);
+  133   1      }
+  134          
+  135          /**
+  136           * @brief      将 Q8 角度状态约束到 -180~180 度
+  137           * @param[in,out] angle_q8  指向 Q8 角度状态的指针，单位 deg * 100
+  138           * @return     none
+  139           *
+  140           * @details
+  141           * 只做角度回绕，不丢弃 Q8 小数部分，保证低速积分不会被量化截断。
+  142           */
+  143          static void AHRS_WrapAngleQ8(int32 *angle_q8)
+  144          {
+  145   1          int32 half_q8;
+  146   1          int32 full_q8;
+  147   1      
+  148   1          half_q8 = AHRS_ANGLE_HALF_DEG100 * AHRS_Q_SCALE;
+  149   1          full_q8 = AHRS_ANGLE_FULL_DEG100 * AHRS_Q_SCALE;
+  150   1      
+  151   1          while (*angle_q8 >= half_q8) {
+  152   2              *angle_q8 -= full_q8;
+  153   2          }
+  154   1          while (*angle_q8 < -half_q8) {
+  155   2              *angle_q8 += full_q8;
+  156   2          }
+  157   1      }
+  158          
+  159          /**
+  160           * @brief      根据映射配置选择并翻转原始轴
+  161           * @param[in]  raw_x      原始 X 轴数据
+  162           * @param[in]  raw_y      原始 Y 轴数据
+  163           * @param[in]  raw_z      原始 Z 轴数据
+  164           * @param[in]  from_axis  目标轴来自哪个原始轴
+  165           * @param[in]  sign       目标轴符号，1=同向，-1=反向
+  166           * @return     映射后的单轴数据
+  167           */
+  168          static int16 AHRS_SelectMappedAxis(int16 raw_x, int16 raw_y, int16 raw_z,
+  169                                             u8 from_axis, int8 sign)
+  170          {
+  171   1          int16 value;
+  172   1      
+  173   1          value = raw_x;
+  174   1          if (from_axis == AHRS_AXIS_RAW_Y) {
+  175   2              value = raw_y;
+  176   2          } else if (from_axis == AHRS_AXIS_RAW_Z) {
+  177   2              value = raw_z;
+  178   2          }
+  179   1      
+  180   1          if (sign < 0) {
+  181   2              value = (int16)(-value);
+  182   2          }
+  183   1          return value;
+  184   1      }
+  185          
+  186          /**
+  187           * @brief      近似计算二维向量模长
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 4   
+
+  188           * @param[in]  a  第一轴绝对值
+  189           * @param[in]  b  第二轴绝对值
+  190           * @return     二维模长近似值
+  191           *
+  192           * @details
+  193           * 使用 `max + 3/8 * min` 的整数近似，避免平方根运算。
+  194           */
+  195          static u32 AHRS_Norm2Approx(u32 a, u32 b)
+  196          {
+  197   1          u32 max_v;
+  198   1          u32 min_v;
+  199   1      
+  200   1          if (a >= b) {
+  201   2              max_v = a;
+  202   2              min_v = b;
+  203   2          } else {
+  204   2              max_v = b;
+  205   2              min_v = a;
+  206   2          }
+  207   1      
+  208   1          return max_v + ((min_v * 3U) >> 3);
+  209   1      }
+  210          
+  211          /**
+  212           * @brief      近似计算三维向量模长
+  213           * @param[in]  x  X 轴输入
+  214           * @param[in]  y  Y 轴输入
+  215           * @param[in]  z  Z 轴输入
+  216           * @return     三维模长近似值
+  217           *
+  218           * @details
+  219           * 使用排序后的 `max + 3/8 * mid + 1/4 * min`，用于加速度和地磁有效性判断。
+  220           */
+  221          static u32 AHRS_Norm3Approx(int16 x, int16 y, int16 z)
+  222          {
+  223   1          u32 a;
+  224   1          u32 b;
+  225   1          u32 c;
+  226   1          u32 t;
+  227   1      
+  228   1          a = AHRS_Abs16(x);
+  229   1          b = AHRS_Abs16(y);
+  230   1          c = AHRS_Abs16(z);
+  231   1      
+  232   1          if (a < b) {
+  233   2              t = a; a = b; b = t;
+  234   2          }
+  235   1          if (a < c) {
+  236   2              t = a; a = c; c = t;
+  237   2          }
+  238   1          if (b < c) {
+  239   2              t = b; b = c; c = t;
+  240   2          }
+  241   1      
+  242   1          return a + ((b * 3U) >> 3) + (c >> 2);
+  243   1      }
+  244          
+  245          /**
+  246           * @brief      计算 0~1 范围内 atan 的整数近似
+  247           * @param[in]  z_q10  输入比例，Q10 格式，1024 表示 1.0
+  248           * @return     atan(z) 近似角度，单位 deg * 100
+  249           */
+  250          static int16 AHRS_Atan01Q10ToDeg100(u16 z_q10)
+  251          {
+  252   1          int32 z;
+  253   1          int32 curve;
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 5   
+
+  254   1          int32 angle;
+  255   1      
+  256   1          if (z_q10 > AHRS_ATAN_Q) {
+  257   2              z_q10 = (u16)AHRS_ATAN_Q;
+  258   2          }
+  259   1      
+  260   1          z = (int32)z_q10;
+  261   1          curve = 4500L + ((1564L * (AHRS_ATAN_Q - z)) / AHRS_ATAN_Q);
+  262   1          angle = (z * curve) / AHRS_ATAN_Q;
+  263   1          return (int16)angle;
+  264   1      }
+  265          
+  266          /**
+  267           * @brief      整数近似 atan2
+  268           * @param[in]  y  atan2 的 y 输入
+  269           * @param[in]  x  atan2 的 x 输入
+  270           * @return     角度，单位 deg * 100，范围约为 -18000~17999
+  271           *
+  272           * @details
+  273           * 该函数用于加速度姿态角和地磁航向角解算。精度不是数学库级别，
+  274           * 但足够用于低成本船体姿态调试和互补滤波慢修正。
+  275           */
+  276          static int16 AHRS_Atan2Deg100(int32 y, int32 x)
+  277          {
+  278   1          u32 ax;
+  279   1          u32 ay;
+  280   1          u16 z_q10;
+  281   1          int32 base;
+  282   1          int32 angle;
+  283   1      
+  284   1          ax = (u32)AHRS_Abs32(x);
+  285   1          ay = (u32)AHRS_Abs32(y);
+  286   1      
+  287   1          if ((ax == 0U) && (ay == 0U)) {
+  288   2              return 0;
+  289   2          }
+  290   1      
+  291   1          if (ax >= ay) {
+  292   2              z_q10 = (u16)((ay * AHRS_ATAN_Q) / ax);
+  293   2              base = AHRS_Atan01Q10ToDeg100(z_q10);
+  294   2              if (x >= 0) {
+  295   3                  angle = base;
+  296   3              } else {
+  297   3                  angle = AHRS_ANGLE_HALF_DEG100 - base;
+  298   3              }
+  299   2          } else {
+  300   2              z_q10 = (u16)((ax * AHRS_ATAN_Q) / ay);
+  301   2              base = AHRS_Atan01Q10ToDeg100(z_q10);
+  302   2              if (x >= 0) {
+  303   3                  angle = AHRS_ANGLE_QUARTER_DEG100 - base;
+  304   3              } else {
+  305   3                  angle = AHRS_ANGLE_QUARTER_DEG100 + base;
+  306   3              }
+  307   2          }
+  308   1      
+  309   1          if (y < 0) {
+  310   2              angle = -angle;
+  311   2          }
+  312   1      
+  313   1          return AHRS_WrapDeg100(angle);
+  314   1      }
+  315          
+  316          /**
+  317           * @brief      复位三轴低通状态
+  318           * @param[out] lpf  指向三轴低通状态的指针
+  319           * @return     none
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 6   
+
+  320           */
+  321          static void AHRS_Lpf3Reset(AHRS_Lpf3_t *lpf)
+  322          {
+  323   1          if (lpf == 0) {
+  324   2              return;
+  325   2          }
+  326   1      
+  327   1          lpf->x = 0;
+  328   1          lpf->y = 0;
+  329   1          lpf->z = 0;
+  330   1          lpf->initialized = 0;
+  331   1      }
+  332          
+  333          /**
+  334           * @brief      更新单轴一阶低通状态
+  335           * @param[in,out] state  指向单轴 Q8 状态的指针
+  336           * @param[in]     input  当前输入值
+  337           * @param[in]     shift  低通强度，值越大响应越慢
+  338           * @return        低通后的 int16 输出
+  339           *
+  340           * @details
+  341           * 滤波公式：`state += ((input << Q) - state) >> shift`。
+  342           */
+  343          static int16 AHRS_LpfAxisUpdate(int32 *state, int16 input, u8 shift)
+  344          {
+  345   1          int32 target;
+  346   1      
+  347   1          target = (int32)input * AHRS_Q_SCALE;
+  348   1          if (shift == 0U) {
+  349   2              *state = target;
+  350   2          } else {
+  351   2              *state += ((target - *state) >> shift);
+  352   2          }
+  353   1          return (int16)(*state >> AHRS_Q_SHIFT);
+  354   1      }
+  355          
+  356          /**
+  357           * @brief      对三轴数据执行一阶低通
+  358           * @param[in,out] lpf    指向三轴低通状态的指针
+  359           * @param[in]     shift  低通强度，值越大响应越慢
+  360           * @param[in]     in_x   X 轴输入
+  361           * @param[in]     in_y   Y 轴输入
+  362           * @param[in]     in_z   Z 轴输入
+  363           * @param[out]    out_x  X 轴输出
+  364           * @param[out]    out_y  Y 轴输出
+  365           * @param[out]    out_z  Z 轴输出
+  366           * @return        none
+  367           *
+  368           * @details
+  369           * 首帧有效数据直接灌入状态，避免低通启动瞬间从 0 慢慢爬升造成姿态突跳。
+  370           */
+  371          static void AHRS_Lpf3Apply(AHRS_Lpf3_t *lpf, u8 shift,
+  372                                     int16 in_x, int16 in_y, int16 in_z,
+  373                                     int16 *out_x, int16 *out_y, int16 *out_z)
+  374          {
+  375   1          if (!lpf->initialized) {
+  376   2              lpf->x = (int32)in_x * AHRS_Q_SCALE;
+  377   2              lpf->y = (int32)in_y * AHRS_Q_SCALE;
+  378   2              lpf->z = (int32)in_z * AHRS_Q_SCALE;
+  379   2              lpf->initialized = 1;
+  380   2              *out_x = in_x;
+  381   2              *out_y = in_y;
+  382   2              *out_z = in_z;
+  383   2              return;
+  384   2          }
+  385   1      
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 7   
+
+  386   1          *out_x = AHRS_LpfAxisUpdate(&lpf->x, in_x, shift);
+  387   1          *out_y = AHRS_LpfAxisUpdate(&lpf->y, in_y, shift);
+  388   1          *out_z = AHRS_LpfAxisUpdate(&lpf->z, in_z, shift);
+  389   1      }
+  390          
+  391          /**
+  392           * @brief      更新加速度 1g 模长参考值
+  393           * @param[in]  acc_norm  当前加速度模长近似值
+  394           * @return     none
+  395           *
+  396           * @details
+  397           * 启动阶段使用前 `AHRS_ACC_REF_SAMPLE_COUNT` 帧建立 1g 参考。建立后仅在模长
+  398           * 接近参考值时做慢速跟踪，避免船体加速或撞击时污染 1g 参考。
+  399           */
+  400          static void AHRS_UpdateAccReference(u32 acc_norm)
+  401          {
+  402   1          int32 diff;
+  403   1      
+  404   1          if (acc_norm < AHRS_ACC_MIN_BOOT_NORM) {
+  405   2              return;
+  406   2          }
+  407   1      
+  408   1          if (ahrs_ctx.acc_ref_count < AHRS_ACC_REF_SAMPLE_COUNT) {
+  409   2              ahrs_ctx.acc_ref_sum += acc_norm;
+  410   2              ahrs_ctx.acc_ref_count++;
+  411   2              if (ahrs_ctx.acc_ref_count >= AHRS_ACC_REF_SAMPLE_COUNT) {
+  412   3                  ahrs_ctx.acc_1g_ref =
+  413   3                      (u16)(ahrs_ctx.acc_ref_sum / AHRS_ACC_REF_SAMPLE_COUNT);
+  414   3              }
+  415   2              return;
+  416   2          }
+  417   1      
+  418   1          if (ahrs_ctx.acc_1g_ref == 0U) {
+  419   2              return;
+  420   2          }
+  421   1      
+  422   1          diff = (int32)acc_norm - (int32)ahrs_ctx.acc_1g_ref;
+  423   1          if (AHRS_Abs32(diff) <
+  424   1              (((int32)ahrs_ctx.acc_1g_ref * AHRS_ACC_NORM_TOLERANCE_PERCENT) / 100L)) {
+  425   2              ahrs_ctx.acc_1g_ref =
+  426   2                  (u16)((((u32)ahrs_ctx.acc_1g_ref * 255U) + acc_norm) >> 8);
+  427   2          }
+  428   1      }
+  429          
+  430          /**
+  431           * @brief      判断加速度模长是否可信
+  432           * @param[in]  acc_norm  当前加速度模长近似值
+  433           * @return     1=可信，0=不可信
+  434           *
+  435           * @details
+  436           * 当模长明显偏离 1g 参考值时，说明当前加速度中可能包含船体线加速度或冲�
+             -�，
+  437           * 此时暂停加速度对 roll/pitch 的修正，主要依赖陀螺仪短时积分。
+  438           */
+  439          static u8 AHRS_IsAccNormValid(u32 acc_norm)
+  440          {
+  441   1          u32 min_norm;
+  442   1          u32 max_norm;
+  443   1      
+  444   1          if (acc_norm < AHRS_ACC_MIN_BOOT_NORM) {
+  445   2              return 0;
+  446   2          }
+  447   1      
+  448   1          if (ahrs_ctx.acc_1g_ref == 0U) {
+  449   2              return 1;
+  450   2          }
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 8   
+
+  451   1      
+  452   1          min_norm =
+  453   1              ((u32)ahrs_ctx.acc_1g_ref * (100U - AHRS_ACC_NORM_TOLERANCE_PERCENT)) /
+  454   1              100U;
+  455   1          max_norm =
+  456   1              ((u32)ahrs_ctx.acc_1g_ref * (100U + AHRS_ACC_NORM_TOLERANCE_PERCENT)) /
+  457   1              100U;
+  458   1      
+  459   1          if ((acc_norm < min_norm) || (acc_norm > max_norm)) {
+  460   2              return 0;
+  461   2          }
+  462   1          return 1;
+  463   1      }
+  464          
+  465          /**
+  466           * @brief      判断陀螺仪是否处于近似静止状态
+  467           * @param[in]  gx  X 轴陀螺仪原始值
+  468           * @param[in]  gy  Y 轴陀螺仪原始值
+  469           * @param[in]  gz  Z 轴陀螺仪原始值
+  470           * @return     1=近似静止，0=正在运动
+  471           */
+  472          static u8 AHRS_IsGyroStill(int16 gx, int16 gy, int16 gz)
+  473          {
+  474   1          int32 threshold;
+  475   1      
+  476   1          threshold =
+  477   1              (AHRS_GYRO_LSB_PER_DPS * AHRS_GYRO_STILL_DPS100) / 100L;
+  478   1      
+  479   1          if (AHRS_Abs16(gx) > (u32)threshold) {
+  480   2              return 0;
+  481   2          }
+  482   1          if (AHRS_Abs16(gy) > (u32)threshold) {
+  483   2              return 0;
+  484   2          }
+  485   1          if (AHRS_Abs16(gz) > (u32)threshold) {
+  486   2              return 0;
+  487   2          }
+  488   1          return 1;
+  489   1      }
+  490          
+  491          /**
+  492           * @brief   清空陀螺仪零偏累计状态
+  493           * @return  none
+  494           */
+  495          static void AHRS_ResetGyroBiasAccum(void)
+  496          {
+  497   1          ahrs_ctx.gyro_bias_sum_x = 0;
+  498   1          ahrs_ctx.gyro_bias_sum_y = 0;
+  499   1          ahrs_ctx.gyro_bias_sum_z = 0;
+  500   1          ahrs_ctx.gyro_bias_count = 0;
+  501   1      }
+  502          
+  503          /**
+  504           * @brief      更新陀螺仪静止零偏学习状态
+  505           * @param[in]  gx         X 轴陀螺仪原始值
+  506           * @param[in]  gy         Y 轴陀螺仪原始值
+  507           * @param[in]  gz         Z 轴陀螺仪原始值
+  508           * @param[in]  acc_valid  当前加速度是否可信
+  509           * @return     none
+  510           *
+  511           * @details
+  512           * 只有在加速度可信且陀螺仪近似静止时才累计零偏。若中途检测到运动，
+  513           * 立即清空累计，等待下一段静止窗口。
+  514           */
+  515          static void AHRS_UpdateGyroBias(int16 gx, int16 gy, int16 gz, u8 acc_valid)
+  516          {
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 9   
+
+  517   1          if (ahrs_ctx.gyro_bias_ready) {
+  518   2              return;
+  519   2          }
+  520   1      
+  521   1          if ((!acc_valid) || (!AHRS_IsGyroStill(gx, gy, gz))) {
+  522   2              AHRS_ResetGyroBiasAccum();
+  523   2              return;
+  524   2          }
+  525   1      
+  526   1          ahrs_ctx.gyro_bias_sum_x += gx;
+  527   1          ahrs_ctx.gyro_bias_sum_y += gy;
+  528   1          ahrs_ctx.gyro_bias_sum_z += gz;
+  529   1          ahrs_ctx.gyro_bias_count++;
+  530   1      
+  531   1          if (ahrs_ctx.gyro_bias_count >= AHRS_GYRO_BIAS_SAMPLE_COUNT) {
+  532   2              ahrs_ctx.gyro_bias_x =
+  533   2                  (int16)(ahrs_ctx.gyro_bias_sum_x / AHRS_GYRO_BIAS_SAMPLE_COUNT);
+  534   2              ahrs_ctx.gyro_bias_y =
+  535   2                  (int16)(ahrs_ctx.gyro_bias_sum_y / AHRS_GYRO_BIAS_SAMPLE_COUNT);
+  536   2              ahrs_ctx.gyro_bias_z =
+  537   2                  (int16)(ahrs_ctx.gyro_bias_sum_z / AHRS_GYRO_BIAS_SAMPLE_COUNT);
+  538   2              ahrs_ctx.gyro_bias_ready = 1;
+  539   2          }
+  540   1      }
+  541          
+  542          /**
+  543           * @brief      对陀螺仪原始值应用死区
+  544           * @param[in]  gyro  陀螺仪原始输入
+  545           * @return     应用死区后的陀螺仪值
+  546           */
+  547          static int16 AHRS_ApplyGyroDeadband(int16 gyro)
+  548          {
+  549   1          int32 deadband;
+  550   1          int32 value;
+  551   1      
+  552   1          deadband =
+  553   1              (AHRS_GYRO_LSB_PER_DPS * AHRS_GYRO_DEADBAND_DPS100) / 100L;
+  554   1          if (deadband < 1L) {
+  555   2              deadband = 1L;
+  556   2          }
+  557   1      
+  558   1          value = gyro;
+  559   1          if (AHRS_Abs32(value) <= deadband) {
+  560   2              return 0;
+  561   2          }
+  562   1      
+  563   1          if (value > 0) {
+  564   2              value -= deadband;
+  565   2          } else {
+  566   2              value += deadband;
+  567   2          }
+  568   1      
+  569   1          return (int16)value;
+  570   1      }
+  571          
+  572          /**
+  573           * @brief      将陀螺仪原始值换算为 deg/s * 100
+  574           * @param[in]  gyro  陀螺仪原始输入
+  575           * @return     角速度，单位 deg/s * 100
+  576           */
+  577          static int16 AHRS_GyroToDps100(int16 gyro)
+  578          {
+  579   1          return (int16)(((int32)gyro * 100L) / AHRS_GYRO_LSB_PER_DPS);
+  580   1      }
+  581          
+  582          /**
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 10  
+
+  583           * @brief      计算单轴陀螺仪在 dt 内的角度增量
+  584           * @param[in]  gyro   陀螺仪原始输入
+  585           * @param[in]  dt_ms  时间间隔，单位 ms
+  586           * @return     Q8 角度增量，单位 deg * 100
+  587           */
+  588          static int32 AHRS_GyroDeltaQ8(int16 gyro, u16 dt_ms)
+  589          {
+  590   1          return ((int32)gyro * (int32)dt_ms * AHRS_Q_SCALE) /
+  591   1                 (AHRS_GYRO_LSB_PER_DPS * 10L);
+  592   1      }
+  593          
+  594          /**
+  595           * @brief      对角度状态执行互补修正
+  596           * @param[in,out] angle_q8       待修正的 Q8 角度状态
+  597           * @param[in]     target_deg100  修正目标角，单位 deg * 100
+  598           * @param[in]     shift          修正强度，值越大修正越慢
+  599           * @return        none
+  600           *
+  601           * @details
+  602           * 使用最短角度误差进行修正，避免跨越 -180/180 度时出现大角度跳变。
+  603           */
+  604          static void AHRS_BlendAngleQ8(int32 *angle_q8, int16 target_deg100, u8 shift)
+  605          {
+  606   1          int16 current_deg100;
+  607   1          int16 diff_deg100;
+  608   1      
+  609   1          current_deg100 = AHRS_WrapDeg100(*angle_q8 >> AHRS_Q_SHIFT);
+  610   1          diff_deg100 =
+  611   1              AHRS_WrapDiffDeg100((int32)target_deg100 - (int32)current_deg100);
+  612   1      
+  613   1          if (shift == 0U) {
+  614   2              *angle_q8 += (int32)diff_deg100 * AHRS_Q_SCALE;
+  615   2          } else {
+  616   2              *angle_q8 += (((int32)diff_deg100 * AHRS_Q_SCALE) >> shift);
+  617   2          }
+  618   1      }
+  619          
+  620          /**
+  621           * @brief      刷新对外 AHRS 状态快照
+  622           * @param[in]  dt_ms     最近一次融合使用的时间间隔
+  623           * @param[in]  acc_norm  当前加速度模长近似值
+  624           * @param[in]  flags     当前帧状态标志
+  625           * @return     none
+  626           */
+  627          static void AHRS_UpdateOutput(u16 dt_ms, u32 acc_norm, u8 flags)
+  628          {
+  629   1          if (ahrs_ctx.mag_valid) {
+  630   2              flags |= AHRS_FLAG_MAG_VALID;
+  631   2          }
+  632   1      
+  633   1          AHRS_WrapAngleQ8(&ahrs_ctx.roll_q8);
+  634   1          AHRS_WrapAngleQ8(&ahrs_ctx.pitch_q8);
+  635   1          AHRS_WrapAngleQ8(&ahrs_ctx.yaw_q8);
+  636   1      
+  637   1          ahrs_ctx.state.roll_deg100 =
+  638   1              AHRS_WrapDeg100(ahrs_ctx.roll_q8 >> AHRS_Q_SHIFT);
+  639   1          ahrs_ctx.state.pitch_deg100 =
+  640   1              AHRS_WrapDeg100(ahrs_ctx.pitch_q8 >> AHRS_Q_SHIFT);
+  641   1          ahrs_ctx.state.yaw_deg100 =
+  642   1              AHRS_WrapDeg100(ahrs_ctx.yaw_q8 >> AHRS_Q_SHIFT);
+  643   1      
+  644   1          ahrs_ctx.state.acc_norm = (acc_norm > 65535U) ? 65535U : (u16)acc_norm;
+  645   1          ahrs_ctx.state.dt_ms = dt_ms;
+  646   1          ahrs_ctx.state.flags = flags;
+  647   1          ahrs_ctx.state.update_count++;
+  648   1      }
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 11  
+
+  649          
+  650          /**
+  651           * @brief   复位 AHRS 姿态融合器
+  652           * @return  none
+  653           *
+  654           * @details
+  655           * 清空全部内部状态，下一帧有效加速度数据会重新初始化 roll/pitch，
+  656           * yaw 默认从 0 开始，随后由陀螺积分和地磁慢修正更新。
+  657           */
+  658          void AHRS_Reset(void)
+  659          {
+  660   1          ahrs_ctx.roll_q8 = 0;
+  661   1          ahrs_ctx.pitch_q8 = 0;
+  662   1          ahrs_ctx.yaw_q8 = 0;
+  663   1          ahrs_ctx.acc_roll_lpf_q8 = 0;
+  664   1          ahrs_ctx.acc_pitch_lpf_q8 = 0;
+  665   1          ahrs_ctx.acc_angle_initialized = 0;
+  666   1          ahrs_ctx.mag_yaw_lpf_q8 = 0;
+  667   1          ahrs_ctx.mag_yaw_initialized = 0;
+  668   1          ahrs_ctx.acc_ref_sum = 0;
+  669   1          ahrs_ctx.acc_ref_count = 0;
+  670   1          ahrs_ctx.acc_1g_ref = 0;
+  671   1          ahrs_ctx.gyro_bias_x = 0;
+  672   1          ahrs_ctx.gyro_bias_y = 0;
+  673   1          ahrs_ctx.gyro_bias_z = 0;
+  674   1          ahrs_ctx.gyro_bias_ready = 0;
+  675   1          AHRS_ResetGyroBiasAccum();
+  676   1          AHRS_Lpf3Reset(&ahrs_ctx.gyro_lpf);
+  677   1          AHRS_Lpf3Reset(&ahrs_ctx.mag_lpf);
+  678   1          ahrs_ctx.state.roll_deg100 = 0;
+  679   1          ahrs_ctx.state.pitch_deg100 = 0;
+  680   1          ahrs_ctx.state.yaw_deg100 = 0;
+  681   1          ahrs_ctx.state.gyro_x_dps100 = 0;
+  682   1          ahrs_ctx.state.gyro_y_dps100 = 0;
+  683   1          ahrs_ctx.state.gyro_z_dps100 = 0;
+  684   1          ahrs_ctx.state.acc_norm = 0;
+  685   1          ahrs_ctx.state.dt_ms = 0;
+  686   1          ahrs_ctx.state.update_count = 0;
+  687   1          ahrs_ctx.state.flags = 0;
+  688   1          ahrs_ctx.mag_valid = 0;
+  689   1          ahrs_ctx.ready = 0;
+  690   1      }
+  691          
+  692          /**
+  693           * @brief      使用船体系 6 轴数据执行一次姿态融合
+  694           * @param[in]  ax     船体系 X 轴加速度原始值
+  695           * @param[in]  ay     船体系 Y 轴加速度原始值
+  696           * @param[in]  az     船体系 Z 轴加速度原始值
+  697           * @param[in]  gx     船体系 X 轴陀螺仪原始值
+  698           * @param[in]  gy     船体系 Y 轴陀螺仪原始值
+  699           * @param[in]  gz     船体系 Z 轴陀螺仪原始值
+  700           * @param[in]  dt_ms  与上次融合间隔，单位 ms
+  701           * @return     0=融合成功，-1=参数无效或首帧尚未建立姿态
+  702           *
+  703           * @details
+  704           * 处理顺序：
+  705           * 1. 估算加速度模长并判断当前加速度是否可信
+  706           * 2. 在静止窗口内学习陀螺仪零偏
+  707           * 3. 对陀螺仪做零偏扣除、死区和低通
+  708           * 4. 陀螺仪积分预测姿态
+  709           * 5. 加速度慢速修正 roll/pitch
+  710           */
+  711          s8 AHRS_Update6Axis(int16 ax, int16 ay, int16 az,
+  712                              int16 gx, int16 gy, int16 gz,
+  713                              u16 dt_ms)
+  714          {
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 12  
+
+  715   1          u32 acc_norm;
+  716   1          u32 pitch_den;
+  717   1          int16 acc_roll;
+  718   1          int16 acc_pitch;
+  719   1          int16 fgx;
+  720   1          int16 fgy;
+  721   1          int16 fgz;
+  722   1          u8 flags;
+  723   1          u8 acc_valid;
+  724   1      
+  725   1          if (dt_ms == 0U) {
+  726   2              return -1;
+  727   2          }
+  728   1      
+  729   1          flags = 0;
+  730   1          if (dt_ms > AHRS_DT_MAX_MS) {
+  731   2              dt_ms = AHRS_DT_MAX_MS;
+  732   2              flags |= AHRS_FLAG_DT_CLAMPED;
+  733   2          }
+  734   1      
+  735   1          acc_norm = AHRS_Norm3Approx(ax, ay, az);
+  736   1          AHRS_UpdateAccReference(acc_norm);
+  737   1          acc_valid = AHRS_IsAccNormValid(acc_norm);
+  738   1          if (acc_valid) {
+  739   2              flags |= AHRS_FLAG_ACC_VALID;
+  740   2          }
+  741   1          if (ahrs_ctx.acc_1g_ref != 0U) {
+  742   2              flags |= AHRS_FLAG_ACC_REF_READY;
+  743   2          }
+  744   1      
+  745   1          AHRS_UpdateGyroBias(gx, gy, gz, acc_valid);
+  746   1          if (ahrs_ctx.gyro_bias_ready) {
+  747   2              flags |= AHRS_FLAG_GYRO_BIAS_READY;
+  748   2          }
+  749   1      
+  750   1          gx = (int16)(gx - ahrs_ctx.gyro_bias_x);
+  751   1          gy = (int16)(gy - ahrs_ctx.gyro_bias_y);
+  752   1          gz = (int16)(gz - ahrs_ctx.gyro_bias_z);
+  753   1      
+  754   1          gx = AHRS_ApplyGyroDeadband(gx);
+  755   1          gy = AHRS_ApplyGyroDeadband(gy);
+  756   1          gz = AHRS_ApplyGyroDeadband(gz);
+  757   1      
+  758   1          AHRS_Lpf3Apply(&ahrs_ctx.gyro_lpf, AHRS_GYRO_LPF_SHIFT,
+  759   1                         gx, gy, gz, &fgx, &fgy, &fgz);
+  760   1      
+  761   1          ahrs_ctx.state.gyro_x_dps100 = AHRS_GyroToDps100(fgx);
+  762   1          ahrs_ctx.state.gyro_y_dps100 = AHRS_GyroToDps100(fgy);
+  763   1          ahrs_ctx.state.gyro_z_dps100 = AHRS_GyroToDps100(fgz);
+  764   1      
+  765   1          pitch_den = AHRS_Norm2Approx(AHRS_Abs16(ay), AHRS_Abs16(az));
+  766   1          acc_roll = AHRS_Atan2Deg100(-(int32)ay, (int32)az);
+  767   1          acc_pitch = AHRS_Atan2Deg100((int32)ax, (int32)pitch_den);
+  768   1      
+  769   1          if (acc_valid) {
+  770   2              if (!ahrs_ctx.acc_angle_initialized) {
+  771   3                  ahrs_ctx.acc_roll_lpf_q8 = (int32)acc_roll * AHRS_Q_SCALE;
+  772   3                  ahrs_ctx.acc_pitch_lpf_q8 = (int32)acc_pitch * AHRS_Q_SCALE;
+  773   3                  ahrs_ctx.acc_angle_initialized = 1;
+  774   3              } else {
+  775   3                  AHRS_BlendAngleQ8(&ahrs_ctx.acc_roll_lpf_q8,
+  776   3                                    acc_roll, AHRS_ACC_ANGLE_LPF_SHIFT);
+  777   3                  AHRS_BlendAngleQ8(&ahrs_ctx.acc_pitch_lpf_q8,
+  778   3                                    acc_pitch, AHRS_ACC_ANGLE_LPF_SHIFT);
+  779   3              }
+  780   2          }
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 13  
+
+  781   1      
+  782   1          if (!ahrs_ctx.ready) {
+  783   2              if (!ahrs_ctx.acc_angle_initialized) {
+  784   3                  AHRS_UpdateOutput(dt_ms, acc_norm, flags);
+  785   3                  return -1;
+  786   3              }
+  787   2              ahrs_ctx.roll_q8 = ahrs_ctx.acc_roll_lpf_q8;
+  788   2              ahrs_ctx.pitch_q8 = ahrs_ctx.acc_pitch_lpf_q8;
+  789   2              ahrs_ctx.yaw_q8 = 0;
+  790   2              ahrs_ctx.ready = 1;
+  791   2          } else {
+  792   2              ahrs_ctx.roll_q8 += AHRS_GyroDeltaQ8(fgx, dt_ms);
+  793   2              ahrs_ctx.pitch_q8 += AHRS_GyroDeltaQ8(fgy, dt_ms);
+  794   2              ahrs_ctx.yaw_q8 += AHRS_GyroDeltaQ8(fgz, dt_ms);
+  795   2          }
+  796   1      
+  797   1          if (acc_valid && ahrs_ctx.acc_angle_initialized) {
+  798   2              AHRS_BlendAngleQ8(&ahrs_ctx.roll_q8,
+  799   2                                AHRS_WrapDeg100(ahrs_ctx.acc_roll_lpf_q8 >>
+  800   2                                                AHRS_Q_SHIFT),
+  801   2                                AHRS_ACC_BLEND_SHIFT);
+  802   2              AHRS_BlendAngleQ8(&ahrs_ctx.pitch_q8,
+  803   2                                AHRS_WrapDeg100(ahrs_ctx.acc_pitch_lpf_q8 >>
+  804   2                                                AHRS_Q_SHIFT),
+  805   2                                AHRS_ACC_BLEND_SHIFT);
+  806   2          }
+  807   1      
+  808   1          flags |= AHRS_FLAG_READY;
+  809   1          AHRS_UpdateOutput(dt_ms, acc_norm, flags);
+  810   1          return 0;
+  811   1      }
+  812          
+  813          /**
+  814           * @brief      使用 IMU 原始 6 轴数据执行一次姿态融合
+  815           * @param[in]  raw_ax  IMU 原始 X 轴加速度
+  816           * @param[in]  raw_ay  IMU 原始 Y 轴加速度
+  817           * @param[in]  raw_az  IMU 原始 Z 轴加速度
+  818           * @param[in]  raw_gx  IMU 原始 X 轴陀螺仪
+  819           * @param[in]  raw_gy  IMU 原始 Y 轴陀螺仪
+  820           * @param[in]  raw_gz  IMU 原始 Z 轴陀螺仪
+  821           * @param[in]  dt_ms   与上次融合间隔，单位 ms
+  822           * @return     0=融合成功，-1=参数无效或首帧尚未建立姿态
+  823           *
+  824           * @details
+  825           * 本函数会先调用 `AHRS_MapRawToBody()` 完成原始传感器轴到船体系轴的转换。
+  826           */
+  827          s8 AHRS_UpdateRaw6Axis(int16 raw_ax, int16 raw_ay, int16 raw_az,
+  828                                 int16 raw_gx, int16 raw_gy, int16 raw_gz,
+  829                                 u16 dt_ms)
+  830          {
+  831   1          int16 ax;
+  832   1          int16 ay;
+  833   1          int16 az;
+  834   1          int16 gx;
+  835   1          int16 gy;
+  836   1          int16 gz;
+  837   1      
+  838   1          AHRS_MapRawToBody(raw_ax, raw_ay, raw_az, &ax, &ay, &az);
+  839   1          AHRS_MapRawToBody(raw_gx, raw_gy, raw_gz, &gx, &gy, &gz);
+  840   1      
+  841   1          return AHRS_Update6Axis(ax, ay, az, gx, gy, gz, dt_ms);
+  842   1      }
+  843          
+  844          /**
+  845           * @brief      使用船体系地磁数据执行航向慢修正
+  846           * @param[in]  mx  船体系 X 轴地磁原始值
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 14  
+
+  847           * @param[in]  my  船体系 Y 轴地磁原始值
+  848           * @param[in]  mz  船体系 Z 轴地磁原始值
+  849           * @return     0=修正成功，-1=地磁数据无效
+  850           *
+  851           * @details
+  852           * 当前实现只做水平面 `atan2(my, mx)` 航向修正，未做倾斜补偿。
+  853           * 对小船调试而言，这能保持参数简单；后续若需要大倾角航向，可在此处扩展
+             -倾斜补偿。
+  854           */
+  855          s8 AHRS_UpdateMag(int16 mx, int16 my, int16 mz)
+  856          {
+  857   1          u32 mag_norm;
+  858   1          int16 fmx;
+  859   1          int16 fmy;
+  860   1          int16 fmz;
+  861   1          int16 mag_yaw;
+  862   1      
+  863   1          mag_norm = AHRS_Norm3Approx(mx, my, mz);
+  864   1          if (mag_norm < AHRS_MAG_MIN_NORM) {
+  865   2              ahrs_ctx.mag_valid = 0;
+  866   2              ahrs_ctx.state.flags &= (u8)(~AHRS_FLAG_MAG_VALID);
+  867   2              return -1;
+  868   2          }
+  869   1      
+  870   1          AHRS_Lpf3Apply(&ahrs_ctx.mag_lpf, AHRS_MAG_LPF_SHIFT,
+  871   1                         mx, my, mz, &fmx, &fmy, &fmz);
+  872   1          mag_yaw = AHRS_Atan2Deg100((int32)fmy, (int32)fmx);
+  873   1      
+  874   1          if (!ahrs_ctx.mag_yaw_initialized) {
+  875   2              ahrs_ctx.mag_yaw_lpf_q8 = (int32)mag_yaw * AHRS_Q_SCALE;
+  876   2              ahrs_ctx.mag_yaw_initialized = 1;
+  877   2          } else {
+  878   2              AHRS_BlendAngleQ8(&ahrs_ctx.mag_yaw_lpf_q8,
+  879   2                                mag_yaw, AHRS_MAG_LPF_SHIFT);
+  880   2          }
+  881   1      
+  882   1      #if AHRS_MAG_ENABLE
+  883   1          if (ahrs_ctx.ready) {
+  884   2              AHRS_BlendAngleQ8(&ahrs_ctx.yaw_q8,
+  885   2                                AHRS_WrapDeg100(ahrs_ctx.mag_yaw_lpf_q8 >>
+  886   2                                                AHRS_Q_SHIFT),
+  887   2                                AHRS_MAG_BLEND_SHIFT);
+  888   2              AHRS_WrapAngleQ8(&ahrs_ctx.yaw_q8);
+  889   2              ahrs_ctx.state.yaw_deg100 =
+  890   2                  AHRS_WrapDeg100(ahrs_ctx.yaw_q8 >> AHRS_Q_SHIFT);
+  891   2          }
+  892   1      #endif
+  893   1      
+  894   1          ahrs_ctx.mag_valid = 1;
+  895   1          ahrs_ctx.state.flags |= AHRS_FLAG_MAG_VALID;
+  896   1          return 0;
+  897   1      }
+  898          
+  899          /**
+  900           * @brief      使用地磁计原始数据执行航向慢修正
+  901           * @param[in]  raw_mx  地磁计原始 X 轴数据
+  902           * @param[in]  raw_my  地磁计原始 Y 轴数据
+  903           * @param[in]  raw_mz  地磁计原始 Z 轴数据
+  904           * @return     0=修正成功，-1=地磁数据无效
+  905           */
+  906          s8 AHRS_UpdateRawMag(int16 raw_mx, int16 raw_my, int16 raw_mz)
+  907          {
+  908   1          int16 mx;
+  909   1          int16 my;
+  910   1          int16 mz;
+  911   1      
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 15  
+
+  912   1          AHRS_MapRawMagToBody(raw_mx, raw_my, raw_mz, &mx, &my, &mz);
+  913   1          return AHRS_UpdateMag(mx, my, mz);
+  914   1      }
+  915          
+  916          /**
+  917           * @brief   获取 AHRS 当前状态
+  918           * @return  指向内部 `AHRS_State_t` 状态快照的指针
+  919           */
+  920          const AHRS_State_t *AHRS_GetState(void)
+  921          {
+  922   1          return &ahrs_ctx.state;
+  923   1      }
+  924          
+  925          /**
+  926           * @brief   判断 AHRS 是否就绪
+  927           * @return  1=已就绪，0=未就绪
+  928           */
+  929          u8 AHRS_IsReady(void)
+  930          {
+  931   1          return ahrs_ctx.ready;
+  932   1      }
+  933          
+  934          /**
+  935           * @brief      将 IMU 原始三轴数据映射到船体系
+  936           * @param[in]  raw_x   原始 X 轴数据
+  937           * @param[in]  raw_y   原始 Y 轴数据
+  938           * @param[in]  raw_z   原始 Z 轴数据
+  939           * @param[out] body_x  船体系 X 轴输出
+  940           * @param[out] body_y  船体系 Y 轴输出
+  941           * @param[out] body_z  船体系 Z 轴输出
+  942           * @return     none
+  943           */
+  944          void AHRS_MapRawToBody(int16 raw_x, int16 raw_y, int16 raw_z,
+  945                                 int16 *body_x, int16 *body_y, int16 *body_z)
+  946          {
+  947   1          if ((body_x == 0) || (body_y == 0) || (body_z == 0)) {
+  948   2              return;
+  949   2          }
+  950   1      
+  951   1          *body_x = AHRS_SelectMappedAxis(raw_x, raw_y, raw_z,
+  952   1                                          AHRS_IMU_BODY_X_FROM,
+  953   1                                          AHRS_IMU_BODY_X_SIGN);
+  954   1          *body_y = AHRS_SelectMappedAxis(raw_x, raw_y, raw_z,
+  955   1                                          AHRS_IMU_BODY_Y_FROM,
+  956   1                                          AHRS_IMU_BODY_Y_SIGN);
+  957   1          *body_z = AHRS_SelectMappedAxis(raw_x, raw_y, raw_z,
+  958   1                                          AHRS_IMU_BODY_Z_FROM,
+  959   1                                          AHRS_IMU_BODY_Z_SIGN);
+  960   1      }
+  961          
+  962          /**
+  963           * @brief      将地磁计原始三轴数据映射到船体系
+  964           * @param[in]  raw_x   原始 X 轴地磁数据
+  965           * @param[in]  raw_y   原始 Y 轴地磁数据
+  966           * @param[in]  raw_z   原始 Z 轴地磁数据
+  967           * @param[out] body_x  船体系 X 轴输出
+  968           * @param[out] body_y  船体系 Y 轴输出
+  969           * @param[out] body_z  船体系 Z 轴输出
+  970           * @return     none
+  971           */
+  972          void AHRS_MapRawMagToBody(int16 raw_x, int16 raw_y, int16 raw_z,
+  973                                    int16 *body_x, int16 *body_y, int16 *body_z)
+  974          {
+  975   1          if ((body_x == 0) || (body_y == 0) || (body_z == 0)) {
+  976   2              return;
+  977   2          }
+C251 COMPILER V5.60.0,  AHRS                                                               07/05/26  09:39:32  PAGE 16  
+
+  978   1      
+  979   1          *body_x = AHRS_SelectMappedAxis(raw_x, raw_y, raw_z,
+  980   1                                          AHRS_MAG_BODY_X_FROM,
+  981   1                                          AHRS_MAG_BODY_X_SIGN);
+  982   1          *body_y = AHRS_SelectMappedAxis(raw_x, raw_y, raw_z,
+  983   1                                          AHRS_MAG_BODY_Y_FROM,
+  984   1                                          AHRS_MAG_BODY_Y_SIGN);
+  985   1          *body_z = AHRS_SelectMappedAxis(raw_x, raw_y, raw_z,
+  986   1                                          AHRS_MAG_BODY_Z_FROM,
+  987   1                                          AHRS_MAG_BODY_Z_SIGN);
+  988   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      3098     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =       102        150
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =    ------     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

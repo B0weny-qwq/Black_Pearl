@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  APP_EEPROM                                                         27/04/26  00:55:19  PAGE 1   
+C251 COMPILER V5.60.0,  APP_EEPROM                                                         07/05/26  09:39:23  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_EEPROM
 OBJECT MODULE PLACED IN .\list\APP_EEPROM.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_EEPROM.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\Us
-                    -er;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\De
-                    -vice\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\AP
-                    -P_EEPROM.lst) TABS(2) OBJECT(.\list\APP_EEPROM.obj) 
+                    -er;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Fun
+                    -ction\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WI
+                    -RELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\APP_EEPROM.lst) TABS(2) OBJECT(.\list\APP_EEPROM.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    54          
    55          //========================================================================
    56          // 函数: EEPROM_init
-C251 COMPILER V5.60.0,  APP_EEPROM                                                         27/04/26  00:55:19  PAGE 2   
+C251 COMPILER V5.60.0,  APP_EEPROM                                                         07/05/26  09:39:23  PAGE 2   
 
    57          // 描述: 用户初始化程序.
    58          // 参数: None.
@@ -134,7 +134,7 @@ stmt  level    source
   113   3            j = CheckData(RX2_Buffer[i]);
   114   3            if(j >= 0x10)   return 0xffffffff;   //error
   115   3            address = (address << 4) + j;
-C251 COMPILER V5.60.0,  APP_EEPROM                                                         27/04/26  00:55:19  PAGE 3   
+C251 COMPILER V5.60.0,  APP_EEPROM                                                         07/05/26  09:39:23  PAGE 3   
 
   116   3          }
   117   2          return (address);
@@ -202,7 +202,7 @@ stmt  level    source
   177   6                  PrintString2("擦除成功！\r\n");
   178   6                  status = 0; //命令正确
   179   6                }
-C251 COMPILER V5.60.0,  APP_EEPROM                                                         27/04/26  00:55:19  PAGE 4   
+C251 COMPILER V5.60.0,  APP_EEPROM                                                         07/05/26  09:39:23  PAGE 4   
 
   180   5      
   181   5                else if((RX2_Buffer[0] == 'W') && (RX2_Buffer[10] == ' '))    //写入N个字节

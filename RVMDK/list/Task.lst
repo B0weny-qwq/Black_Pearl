@@ -1,12 +1,12 @@
-C251 COMPILER V5.60.0,  Task                                                               27/04/26  00:55:18  PAGE 1   
+C251 COMPILER V5.60.0,  Task                                                               07/05/26  09:39:22  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE Task
 OBJECT MODULE PLACED IN .\list\Task.obj
 COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\User\Task.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\User;..\App
-                    -\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8
-                    -658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\Task.lst) T
-                    -ABS(2) OBJECT(.\list\Task.obj) 
+                    -\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Function\PID
+                    -;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..
+                    -\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\Task.lst) TABS(2) OBJECT(.\list\Task.obj) 
 
 stmt  level    source
 
@@ -66,7 +66,7 @@ stmt  level    source
    54          //  {0, 1, 1, Sample_DMA_LCM},        /* task 16 Period： 1ms */
    55          //  {0, 1, 1, Sample_DMA_I2C},        /* task 17 Period： 1ms */
    56          //  {0, 1, 1, Sample_CAN},            /* task 18 Period： 1ms */
-C251 COMPILER V5.60.0,  Task                                                               27/04/26  00:55:18  PAGE 2   
+C251 COMPILER V5.60.0,  Task                                                               07/05/26  09:39:22  PAGE 2   
 
    57          //  {0, 1, 1, Sample_LIN},            /* task 19 Period： 1ms */
    58          //  {0, 1, 1, Sample_USART_LIN},      /* task 20 Period： 1ms */
@@ -77,67 +77,98 @@ stmt  level    source
    63          };
    64          
    65          u8 Tasks_Max = sizeof(Task_Comps)/sizeof(Task_Comps[0]);
-   66          
-   67          //========================================================================
-   68          // 函数: Task_Handler_Callback
-   69          // 描述: 任务标记回调函数.
-   70          // 参数: None.
-   71          // 返回: None.
-   72          // 版本: V1.0, 2012-10-22
-   73          //========================================================================
-   74          void Task_Marks_Handler_Callback(void)
-   75          {
-   76   1        u8 i;
-   77   1        for(i=0; i<Tasks_Max; i++)
-   78   1        {
-   79   2          if(Task_Comps[i].TIMCount)    /* If the time is not 0 */
-   80   2          {
-   81   3            Task_Comps[i].TIMCount--;  /* Time counter decrement */
-   82   3            if(Task_Comps[i].TIMCount == 0)  /* If time arrives */
-   83   3            {
-   84   4              /*Resume the timer value and try again */
-   85   4              Task_Comps[i].TIMCount = Task_Comps[i].TRITime;  
-   86   4              Task_Comps[i].Run = 1;    /* The task can be run */
-   87   4            }
-   88   3          }
-   89   2        }
-   90   1      }
-   91          
-   92          //========================================================================
-   93          // 函数: Task_Pro_Handler_Callback
-   94          // 描述: 任务处理回调函数.
-   95          // 参数: None.
-   96          // 返回: None.
-   97          // 版本: V1.0, 2012-10-22
-   98          //========================================================================
-   99          void Task_Pro_Handler_Callback(void)
-  100          {
-  101   1        u8 i;
-  102   1        for(i=0; i<Tasks_Max; i++)
-  103   1        {
-  104   2          if(Task_Comps[i].Run) /* If task can be run */
-  105   2          {
-  106   3            Task_Comps[i].Run = 0;    /* Flag clear 0 */
-  107   3            Task_Comps[i].TaskHook();  /* Run task */
-  108   3          }
-  109   2        }
-  110   1      }
-  111          
-  112          
+   66          static volatile u32 g_task_tick_ms = 0;
+   67          
+   68          //========================================================================
+   69          // 函数: Task_Handler_Callback
+   70          // 描述: 任务标记回调函数.
+   71          // 参数: None.
+   72          // 返回: None.
+   73          // 版本: V1.0, 2012-10-22
+   74          //========================================================================
+   75          /**
+   76           * @brief   Timer0 1ms 任务标记回调
+   77           * @return  none
+   78           *
+   79           * @details
+   80           * 在 Timer0 ISR 中调用。函数会递增全局毫秒 tick，并递减各任务的软件计数器；
+   81           * 当任务计数归零时置 `Run=1`，由主循环中的 `Task_Pro_Handler_Callback()` 执行。
+   82           */
+   83          void Task_Marks_Handler_Callback(void)
+   84          {
+   85   1        u8 i;
+   86   1        g_task_tick_ms++;
+   87   1        for(i=0; i<Tasks_Max; i++)
+   88   1        {
+   89   2          if(Task_Comps[i].TIMCount)    /* If the time is not 0 */
+   90   2          {
+   91   3            Task_Comps[i].TIMCount--;  /* Time counter decrement */
+   92   3            if(Task_Comps[i].TIMCount == 0)  /* If time arrives */
+   93   3            {
+   94   4              /*Resume the timer value and try again */
+   95   4              Task_Comps[i].TIMCount = Task_Comps[i].TRITime;  
+   96   4              Task_Comps[i].Run = 1;    /* The task can be run */
+   97   4            }
+   98   3          }
+   99   2        }
+  100   1      }
+  101          
+  102          /**
+  103           * @brief   获取系统毫秒 tick
+  104           * @return  系统启动后的毫秒计数，32 位自然回绕
+  105           *
+  106           * @details
+  107           * `g_task_tick_ms` 在 Timer0 中断中更新。读取 32 位变量时短暂关闭总中断，
+  108           * 避免 8/16 位 MCU 上多字节读取被中断打断。
+  109           */
+  110          u32 Task_GetTickMs(void)
+  111          {
+  112   1        u32 tick;
+  113   1        u8 ea_bak;
+  114   1      
+  115   1        ea_bak = EA;
+  116   1        EA = 0;
+  117   1        tick = g_task_tick_ms;
+  118   1        EA = ea_bak;
+  119   1      
+  120   1        return tick;
+  121   1      }
+  122          
+C251 COMPILER V5.60.0,  Task                                                               07/05/26  09:39:22  PAGE 3   
+
+  123          //========================================================================
+  124          // 函数: Task_Pro_Handler_Callback
+  125          // 描述: 任务处理回调函数.
+  126          // 参数: None.
+  127          // 返回: None.
+  128          // 版本: V1.0, 2012-10-22
+  129          //========================================================================
+  130          void Task_Pro_Handler_Callback(void)
+  131          {
+  132   1        u8 i;
+  133   1        for(i=0; i<Tasks_Max; i++)
+  134   1        {
+  135   2          if(Task_Comps[i].Run) /* If task can be run */
+  136   2          {
+  137   3            Task_Comps[i].Run = 0;    /* Flag clear 0 */
+  138   3            Task_Comps[i].TaskHook();  /* Run task */
+  139   3          }
+  140   2        }
+  141   1      }
+  142          
+  143          
 
 
 Module Information          Static   Overlayable
 ------------------------------------------------
-  code size            =       102     ------
+  code size            =       130     ------
   ecode size           =    ------     ------
   data size            =    ------     ------
   idata size           =    ------     ------
   pdata size           =    ------     ------
   xdata size           =    ------     ------
   xdata-const size     =    ------     ------
-C251 COMPILER V5.60.0,  Task                                                               27/04/26  00:55:18  PAGE 3   
-
-  edata size           =         8     ------
+  edata size           =        12     ------
   bit size             =    ------     ------
   ebit size            =    ------     ------
   bitaddressable size  =    ------     ------
@@ -145,7 +176,7 @@ Module Information          Static   Overlayable
   far data size        =    ------     ------
   huge data size       =    ------     ------
   const size           =    ------     ------
-  hconst size          =        16     ------
+  hconst size          =        24     ------
 End of Module Information.
 
 

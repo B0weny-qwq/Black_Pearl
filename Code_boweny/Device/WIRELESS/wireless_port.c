@@ -1,21 +1,21 @@
 /**
  * @file    wireless_port.c
- * @brief   æ— çº¿æ¨¡å—æ¿çº§ç«¯å£é€‚é…å®ç°ã€‚
+ * @brief   ÎŞÏßÄ£¿é°å¼¶¶Ë¿ÚÊÊÅäÊµÏÖ¡£
  * @author  boweny
  * @date    2026-05-06
  * @version v1.1
  *
  * @details
- * æœ¬æ–‡ä»¶é›†ä¸­ç®¡ç† LT8920/KCT8206L æ‰€éœ€ GPIOã€SPIã€å¤ä½ã€å¤©çº¿é€‰æ‹©ã€
- * RXEN/TXEN å’Œå»¶æ—¶æ¥å£ã€‚èŠ¯ç‰‡å±‚åªé€šè¿‡æœ¬æ–‡ä»¶è®¿é—®ç¡¬ä»¶å¼•è„šï¼Œé¿å…
- * ä¸šåŠ¡åè®®ä»£ç ç›´æ¥æ“ä½œ `Pxx` ç«¯å£ã€‚
+ * ±¾ÎÄ¼ş¼¯ÖĞ¹ÜÀí LT8920/KCT8206L ËùĞèµÄ GPIO¡¢SPI¡¢¸´Î»¡¢ÌìÏßÑ¡Ôñ¡¢
+ * RXEN/TXEN ºÍÑÓÊ±½Ó¿Ú¡£Ğ¾Æ¬²ãÖ»Í¨¹ı±¾ÎÄ¼ş·ÃÎÊÓ²¼şÒı½Å£¬±ÜÃâ
+ * ÒµÎñĞ­Òé´úÂëÖ±½Ó²Ù×÷ `Pxx` ¶Ë¿Ú¡£
  *
  * @note
- * é»˜è®¤å¼•è„šä»¥å½“å‰ Black Pearl v1.1 ç¡¬ä»¶ä¸ºå‡†ï¼šSCLK=P3.2ã€MISO=P3.3ã€
- * MOSI=P3.4ã€CS=P3.5ã€RST=P5.0ã€ANT_SEL=P5.1ã€RXEN=P1.3ã€TXEN=P5.4ã€‚
+ * Ä¬ÈÏÒı½ÅÒÔµ±Ç° Black Pearl v1.1 Ó²¼şÎª×¼£º
+ * SCLK=P3.2¡¢MISO=P3.3¡¢MOSI=P3.4¡¢CS=P3.5¡¢
+ * RST=P5.0¡¢ANT_SEL=P5.1¡¢RXEN=P1.3¡¢TXEN=P5.4¡£
  */
 #include "wireless_port.h"
-
 #include "..\..\..\Driver\inc\STC32G_Delay.h"
 #include "..\..\..\Driver\inc\STC32G_GPIO.h"
 #include "..\..\..\Driver\inc\STC32G_NVIC.h"
@@ -24,17 +24,6 @@
 
 static u8 g_wireless_port_initialized = 0U;
 
-#ifndef WIRELESS_FRONTEND_BYPASS_TEST
-#define WIRELESS_FRONTEND_BYPASS_TEST 0
-#endif
-
-#ifndef WIRELESS_SOFT_SPI_TEST
-#define WIRELESS_SOFT_SPI_TEST 1
-#endif
-
-#ifndef WIRELESS_SOFT_SPI_DELAY_US
-#define WIRELESS_SOFT_SPI_DELAY_US 5
-#endif
 
 static void WirelessPort_SoftSpiClock(u8 level)
 {
@@ -48,7 +37,7 @@ static void WirelessPort_SoftSpiMosi(u8 level)
 
 s8 WirelessPort_Init(void)
 {
-#if !WIRELESS_SOFT_SPI_TEST
+#if !WIRELESS_SPI_USE_SOFT
     SPI_InitTypeDef spi_init;
 #endif
 
@@ -82,7 +71,7 @@ s8 WirelessPort_Init(void)
     WirelessPort_SetAntSel(WIRELESS_PORT_ANT1);
 #endif
 
-#if WIRELESS_SOFT_SPI_TEST
+#if WIRELESS_SPI_USE_SOFT
     WirelessPort_SoftSpiClock(0U);
     WirelessPort_SoftSpiMosi(0U);
 #else
@@ -94,7 +83,7 @@ s8 WirelessPort_Init(void)
     spi_init.SPI_Mode = SPI_Mode_Master;
     spi_init.SPI_CPOL = SPI_CPOL_Low;
     spi_init.SPI_CPHA = SPI_CPHA_2Edge;
-    spi_init.SPI_Speed = SPI_Speed_16;
+    spi_init.SPI_Speed = WIRELESS_HW_SPI_SPEED_CFG;
     SPI_Init(&spi_init);
     NVIC_SPI_Init(DISABLE, Priority_0);
 #endif
@@ -189,7 +178,7 @@ void WirelessPort_DelayUs(u16 us)
 
 u8 WirelessPort_SpiTransfer(u8 value)
 {
-#if WIRELESS_SOFT_SPI_TEST
+#if WIRELESS_SPI_USE_SOFT
     u8 bit_mask;
     u8 recv;
 
@@ -217,3 +206,6 @@ u8 WirelessPort_SpiTransfer(u8 value)
     return SPDAT;
 #endif
 }
+
+
+
