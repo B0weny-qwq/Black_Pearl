@@ -567,10 +567,10 @@ static void ShipProtocol_ToLegacyNmeaCoord(u32 abs_deg1e7, u16 *coord1, u16 *coo
     *coord2 = (u16)(minutes_scaled1e4 % 10000UL);
 }
 
-static void ShipProtocol_WriteU16LE(u8 *dst, u16 value)
+static void ShipProtocol_WriteU16Legacy(u8 *dst, u16 value)
 {
-    dst[0] = (u8)(value & 0xFFU);
-    dst[1] = (u8)(value >> 8);
+    dst[0] = (u8)(value >> 8);
+    dst[1] = (u8)(value & 0xFFU);
 }
 
 static void ShipProtocol_LogCoordBE(const u8 *buf, u8 len)
@@ -844,47 +844,68 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
     u16 lon_coord2;
     u16 lat_coord1;
     u16 lat_coord2;
+    u8 sat_report;
     s8 rc;
     char lon_dir;
     char lat_dir;
+    char payload_lon_dir;
+    char payload_lat_dir;
 
     gps = GPS_GetState();
     idx = 0U;
 
-    payload[idx++] = gps->satellites_used;
-
-    angle = gps->course_deg_x100;
-    payload[idx++] = (u8)(angle & 0xFFU);
-    payload[idx++] = (u8)(angle >> 8);
-
-    if (gps->lon_deg1e7 < 0) {
-        lon_dir = 'W';
-        payload[idx++] = (u8)lon_dir;
-        abs_lon = (u32)(-gps->lon_deg1e7);
-    } else {
-        lon_dir = 'E';
-        payload[idx++] = (u8)lon_dir;
-        abs_lon = (u32)gps->lon_deg1e7;
+    sat_report = (gps->satellites_used_gsa > 0U) ? gps->satellites_used_gsa : gps->satellites_used;
+    if (sat_report > 24U) {
+        sat_report = 24U;
     }
-    ShipProtocol_ToLegacyNmeaCoord(abs_lon, &lon_coord1, &lon_coord2);
-    ShipProtocol_WriteU16LE(&payload[idx], lon_coord1);
-    idx += 2U;
-    ShipProtocol_WriteU16LE(&payload[idx], lon_coord2);
+    payload[idx++] = sat_report;
+
+    angle = (u16)(gps->course_deg_x100 / 100U);
+    ShipProtocol_WriteU16Legacy(&payload[idx], angle);
     idx += 2U;
 
-    if (gps->lat_deg1e7 < 0) {
-        lat_dir = 'S';
-        payload[idx++] = (u8)lat_dir;
-        abs_lat = (u32)(-gps->lat_deg1e7);
+    if (gps->legacy_coord_valid != 0U) {
+        lon_dir = (char)gps->legacy_lon_dir;
+        lat_dir = (char)gps->legacy_lat_dir;
+        lon_coord1 = gps->legacy_lon1;
+        lon_coord2 = gps->legacy_lon2;
+        lat_coord1 = gps->legacy_lat1;
+        lat_coord2 = gps->legacy_lat2;
+        abs_lon = (gps->lon_deg1e7 < 0) ? (u32)(-gps->lon_deg1e7) : (u32)gps->lon_deg1e7;
+        abs_lat = (gps->lat_deg1e7 < 0) ? (u32)(-gps->lat_deg1e7) : (u32)gps->lat_deg1e7;
     } else {
-        lat_dir = 'N';
-        payload[idx++] = (u8)lat_dir;
-        abs_lat = (u32)gps->lat_deg1e7;
+        if (gps->lon_deg1e7 < 0) {
+            lon_dir = 'W';
+            abs_lon = (u32)(-gps->lon_deg1e7);
+        } else {
+            lon_dir = 'E';
+            abs_lon = (u32)gps->lon_deg1e7;
+        }
+        ShipProtocol_ToLegacyNmeaCoord(abs_lon, &lon_coord1, &lon_coord2);
+
+        if (gps->lat_deg1e7 < 0) {
+            lat_dir = 'S';
+            abs_lat = (u32)(-gps->lat_deg1e7);
+        } else {
+            lat_dir = 'N';
+            abs_lat = (u32)gps->lat_deg1e7;
+        }
+        ShipProtocol_ToLegacyNmeaCoord(abs_lat, &lat_coord1, &lat_coord2);
     }
-    ShipProtocol_ToLegacyNmeaCoord(abs_lat, &lat_coord1, &lat_coord2);
-    ShipProtocol_WriteU16LE(&payload[idx], lat_coord1);
+
+    payload_lon_dir = 'E';
+    payload_lat_dir = 'W';
+
+    payload[idx++] = (u8)payload_lon_dir;
+    ShipProtocol_WriteU16Legacy(&payload[idx], lon_coord1);
     idx += 2U;
-    ShipProtocol_WriteU16LE(&payload[idx], lat_coord2);
+    ShipProtocol_WriteU16Legacy(&payload[idx], lon_coord2);
+    idx += 2U;
+
+    payload[idx++] = (u8)payload_lat_dir;
+    ShipProtocol_WriteU16Legacy(&payload[idx], lat_coord1);
+    idx += 2U;
+    ShipProtocol_WriteU16Legacy(&payload[idx], lat_coord2);
     idx += 2U;
 
     ShipProtocol_ReadPowerSample(&power);
@@ -903,28 +924,51 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
              (u16)g_ship_rt.rf_channel[0],
              (u16)idx,
              (u16)payload[0],
-             (u16)(((u16)payload[2] << 8) | payload[1]),
+             (u16)(((u16)payload[1] << 8) | payload[2]),
              (u16)payload[13],
              (u16)payload[14]);
         LOGI(SHIP_TAG,
-             "gps state fix=%u sat=%u lon=%c%lu lat=%c%lu angle=%u power=0x%02X seq=%lu",
+             "gps state fix=%u legacy=%u sat=%u lon=%c%lu lat=%c%lu angle=%u power=0x%02X seq=%lu",
              (u16)gps->fix_valid,
-             (u16)gps->satellites_used,
+             (u16)gps->legacy_coord_valid,
+             (u16)sat_report,
              lon_dir,
              (u32)abs_lon,
              lat_dir,
              (u32)abs_lat,
-             (u16)gps->course_deg_x100,
+             (u16)angle,
              (u16)payload[13],
              (u32)gps->update_sequence);
         LOGI(SHIP_TAG,
+             "gps sat source gsa=%u gga=%u report=%u",
+             (u16)gps->satellites_used_gsa,
+             (u16)gps->satellites_used,
+             (u16)sat_report);
+        LOGI(SHIP_TAG,
              "gps payload oldfmt ew=%c lon1=%u lon2=%u ns=%c lat1=%u lat2=%u",
-             lon_dir,
+             payload_lon_dir,
              (u16)lon_coord1,
              (u16)lon_coord2,
-             lat_dir,
+             payload_lat_dir,
              (u16)lat_coord1,
              (u16)lat_coord2);
+        LOGI(SHIP_TAG,
+             "gps payload bytes=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+             (u16)payload[0],
+             (u16)payload[1],
+             (u16)payload[2],
+             (u16)payload[3],
+             (u16)payload[4],
+             (u16)payload[5],
+             (u16)payload[6],
+             (u16)payload[7],
+             (u16)payload[8],
+             (u16)payload[9],
+             (u16)payload[10],
+             (u16)payload[11],
+             (u16)payload[12],
+             (u16)payload[13],
+             (u16)payload[14]);
         ShipProtocol_LogPayloadBrief("tx frame", SHIP_CMD_GPS_REPORT, payload, idx);
     }
 

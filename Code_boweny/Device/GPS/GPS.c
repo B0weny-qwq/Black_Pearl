@@ -80,6 +80,7 @@ static u8   GPS_ParseDecimalScaled(const char *text, u8 frac_digits, int32 *valu
 static u8   GPS_ParseUtc(const char *text, u8 *hour, u8 *minute, u8 *second, u16 *msec);
 static u8   GPS_ParseDate(const char *text, u8 *day, u8 *month, u8 *year);
 static u8   GPS_ParseCoordinate1e7(const char *text, char hemi, int32 *value);
+static u8   GPS_ParseLegacyCoordParts(const char *text, u8 whole_len, u16 *coord1, u16 *coord2);
 static u8   GPS_IsNewRmcTimestamp(u8 hour, u8 minute, u8 second, u16 msec,
                                   u8 day, u8 month, u8 year);
 static u32  GPS_KnotsX100ToKmhX100(u32 speed_knots_x100);
@@ -508,6 +509,10 @@ static u8 GPS_ParseRMC(char **fields, u8 field_count)
     int32 lon_deg1e7;
     int32 speed_knots_x100;
     int32 course_deg_x100;
+    u16 legacy_lat1;
+    u16 legacy_lat2;
+    u16 legacy_lon1;
+    u16 legacy_lon2;
     u8 fix_valid;
     u8 has_speed;
     u8 has_course;
@@ -554,6 +559,10 @@ static u8 GPS_ParseRMC(char **fields, u8 field_count)
             (GPS_ParseCoordinate1e7(fields[5], hemi_ew, &lon_deg1e7) == 0)) {
             return 0;
         }
+        if ((GPS_ParseLegacyCoordParts(fields[3], 4U, &legacy_lat1, &legacy_lat2) == 0) ||
+            (GPS_ParseLegacyCoordParts(fields[5], 5U, &legacy_lon1, &legacy_lon2) == 0)) {
+            return 0;
+        }
     }
 
     has_speed = 0U;
@@ -589,10 +598,25 @@ static u8 GPS_ParseRMC(char **fields, u8 field_count)
     if (fix_valid) {
         g_gps_state.lat_deg1e7 = lat_deg1e7;
         g_gps_state.lon_deg1e7 = lon_deg1e7;
+        g_gps_state.legacy_coord_valid = 1U;
+        g_gps_state.legacy_lat_dir = (u8)hemi_ns;
+        g_gps_state.legacy_lon_dir = (u8)hemi_ew;
+        g_gps_state.legacy_lat1 = legacy_lat1;
+        g_gps_state.legacy_lat2 = legacy_lat2;
+        g_gps_state.legacy_lon1 = legacy_lon1;
+        g_gps_state.legacy_lon2 = legacy_lon2;
 #if (GPS_DIAG_LOG_ENABLE != 0U)
         LOGI("GPS", "rmc valid lat=%ld lon=%ld",
              (long)lat_deg1e7,
              (long)lon_deg1e7);
+        LOGI("GPS",
+             "rmc oldfmt ew=%c lon1=%u lon2=%u ns=%c lat1=%u lat2=%u",
+             hemi_ew,
+             (u16)legacy_lon1,
+             (u16)legacy_lon2,
+             hemi_ns,
+             (u16)legacy_lat1,
+             (u16)legacy_lat2);
         LOGI("GPS", "rmc move spd=%ld course=%ld time=%u:%u:%u",
              (long)(has_speed ? speed_knots_x100 : 0L),
              (long)(has_course ? course_deg_x100 : 0L),
@@ -612,6 +636,7 @@ static u8 GPS_ParseRMC(char **fields, u8 field_count)
              (u16)month,
              (u16)year);
 #endif
+        g_gps_state.legacy_coord_valid = 0U;
     }
 
     if (has_speed) {
@@ -670,6 +695,7 @@ static u8 GPS_ParseGGA(char **fields, u8 field_count)
     }
 
     g_gps_state.fix_quality = quality;
+    g_gps_state.satellites_used_gsa = 0U;
     if (quality == 0U) {
         g_gps_state.fix_valid = 0U;
     }
@@ -698,6 +724,9 @@ static u8 GPS_ParseGGA(char **fields, u8 field_count)
 static u8 GPS_ParseGSA(char **fields, u8 field_count)
 {
     u8 fix_mode;
+    u8 prn_count;
+    u8 prn_index;
+    u8 prn_complete;
     int32 pdop_x100;
     int32 hdop_x100;
     int32 vdop_x100;
@@ -713,6 +742,16 @@ static u8 GPS_ParseGSA(char **fields, u8 field_count)
     }
     if (GPS_ParseU8(fields[2], &fix_mode) == 0) {
         return 0;
+    }
+
+    prn_count = 0U;
+    prn_complete = 1U;
+    for (prn_index = 3U; prn_index <= 14U; prn_index++) {
+        if ((prn_index < field_count) && GPS_FieldPresent(fields[prn_index])) {
+            prn_count++;
+        } else {
+            prn_complete = 0U;
+        }
     }
 
     has_pdop = 0U;
@@ -740,6 +779,7 @@ static u8 GPS_ParseGSA(char **fields, u8 field_count)
     }
 
     g_gps_state.fix_mode = fix_mode;
+    g_gps_state.satellites_used_gsa = (prn_complete != 0U) ? prn_count : 0U;
     if (has_pdop) {
         g_gps_state.pdop_x100 = GPS_ToU16NonNegative(pdop_x100);
     }
@@ -1259,13 +1299,73 @@ static u8 GPS_ParseCoordinate1e7(const char *text, char hemi, int32 *value)
         ((degrees > 180UL) || ((degrees == 180UL) && (minutes_scaled1e4 != 0UL)))) {
         return 0;
     }
-    deg1e7 = degrees * 10000000UL + (minutes_scaled1e4 * 1000UL + 3UL) / 6UL;
+    deg1e7 = degrees * 10000000UL + (minutes_scaled1e4 * 100UL + 3UL) / 6UL;
 
     if ((hemi == 'S') || (hemi == 'W')) {
         *value = -((int32)deg1e7);
     } else {
         *value = (int32)deg1e7;
     }
+    return 1;
+}
+
+static u8 GPS_ParseLegacyCoordParts(const char *text, u8 whole_len, u16 *coord1, u16 *coord2)
+{
+    const char *dot;
+    char whole_buf[6];
+    char frac_buf[5];
+    u8 i;
+    u8 frac_len;
+    u32 whole_part;
+    u32 frac_part;
+
+    if ((text == 0) || (coord1 == 0) || (coord2 == 0) ||
+        ((whole_len != 4U) && (whole_len != 5U))) {
+        return 0;
+    }
+
+    dot = text;
+    while ((*dot != 0) && (*dot != '.')) {
+        dot++;
+    }
+    if ((u8)(dot - text) != whole_len) {
+        return 0;
+    }
+
+    for (i = 0U; i < whole_len; i++) {
+        if ((text[i] < '0') || (text[i] > '9')) {
+            return 0;
+        }
+        whole_buf[i] = text[i];
+    }
+    whole_buf[whole_len] = 0;
+    if (GPS_ParseU32(whole_buf, &whole_part) == 0) {
+        return 0;
+    }
+
+    frac_len = 0U;
+    if (*dot == '.') {
+        dot++;
+        while (*dot != 0) {
+            if ((*dot < '0') || (*dot > '9')) {
+                return 0;
+            }
+            if (frac_len < 4U) {
+                frac_buf[frac_len++] = *dot;
+            }
+            dot++;
+        }
+    }
+    while (frac_len < 4U) {
+        frac_buf[frac_len++] = '0';
+    }
+    frac_buf[4] = 0;
+    if (GPS_ParseU32(frac_buf, &frac_part) == 0) {
+        return 0;
+    }
+
+    *coord1 = (u16)whole_part;
+    *coord2 = (u16)frac_part;
     return 1;
 }
 

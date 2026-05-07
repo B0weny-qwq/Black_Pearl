@@ -920,33 +920,52 @@
         state.last.txValue = `${txCmd[1]} / ch ${txCmd[2]}`;
         state.last.txMeta = `sat=${txCmd[4]} angle=${txCmd[5]} power=${txCmd[6]} auto=${txCmd[7]}`;
         state.last.gpsTxInfo = `ch=${txCmd[2]} payload=${txCmd[3]} sat=${txCmd[4]} angle=${txCmd[5]} power=${txCmd[6]}`;
-        state.last.gpsAngle = `${txCmd[5]} / 100 deg`;
+        state.last.gpsAngle = `${txCmd[5]} deg`;
         pushTimeline(`发送 0x12：sat=${txCmd[4]} angle=${txCmd[5]} power=${txCmd[6]} ch=${txCmd[2]}`);
         important = true;
       }
 
-      const gpsState = line.match(/\[SHIP\] I: gps state fix=(\d+) sat=(\d+) lon=([EW])(\d+) lat=([NS])(\d+) angle=(\d+) power=(0x[0-9A-Fa-f]{2}) seq=(\d+)/);
+      const gpsState = line.match(/\[SHIP\] I: gps state fix=(\d+)(?: legacy=(\d+))? sat=(\d+) lon=([EW])(\d+) lat=([NS])(\d+) angle=(\d+) power=(0x[0-9A-Fa-f]{2}) seq=(\d+)/);
       if (gpsState) {
         const fixText = gpsState[1] === "1" ? "有效" : "无效";
+        const legacyText = gpsState[2] || "--";
         state.last.gpsFix = fixText;
-        state.last.gpsFixMeta = `fix=${gpsState[1]} power=${gpsState[8]}`;
-        state.last.gpsSat = gpsState[2];
-        state.last.gpsSatMeta = `seq=${gpsState[9]}`;
-        state.last.gpsLon = formatDeg1e7(gpsState[3], gpsState[4]);
-        state.last.gpsLonMeta = `${gpsState[3]} / raw=${gpsState[4]}`;
-        state.last.gpsLat = formatDeg1e7(gpsState[5], gpsState[6]);
-        state.last.gpsLatMeta = `${gpsState[5]} / raw=${gpsState[6]}`;
-        state.last.gpsAngle = `${gpsState[7]} / 100 deg`;
-        state.last.gpsRawInfo = `fix=${gpsState[1]} sat=${gpsState[2]} lon=${gpsState[3]}${gpsState[4]} lat=${gpsState[5]}${gpsState[6]} angle=${gpsState[7]} seq=${gpsState[9]}`;
-        pushTimeline(`GPS：fix=${gpsState[1]} sat=${gpsState[2]} lon=${gpsState[3]}${gpsState[4]} lat=${gpsState[5]}${gpsState[6]} angle=${gpsState[7]} seq=${gpsState[9]}`);
+        state.last.gpsFixMeta = `fix=${gpsState[1]} legacy=${legacyText} power=${gpsState[9]}`;
+        state.last.gpsSat = gpsState[3];
+        state.last.gpsSatMeta = `seq=${gpsState[10]}`;
+        state.last.gpsLon = formatDeg1e7(gpsState[4], gpsState[5]);
+        state.last.gpsLonMeta = `${gpsState[4]} / raw=${gpsState[5]}`;
+        state.last.gpsLat = formatDeg1e7(gpsState[6], gpsState[7]);
+        state.last.gpsLatMeta = `${gpsState[6]} / raw=${gpsState[7]}`;
+        state.last.gpsAngle = `${gpsState[8]} deg`;
+        state.last.gpsRawInfo = `fix=${gpsState[1]} legacy=${legacyText} sat=${gpsState[3]} lon=${gpsState[4]}${gpsState[5]} lat=${gpsState[6]}${gpsState[7]} angle=${gpsState[8]} seq=${gpsState[10]}`;
+        pushTimeline(`GPS：fix=${gpsState[1]} legacy=${legacyText} sat=${gpsState[3]} lon=${gpsState[4]}${gpsState[5]} lat=${gpsState[6]}${gpsState[7]} angle=${gpsState[8]} seq=${gpsState[10]}`);
         important = true;
       }
 
-      const gpsOld = line.match(/\[SHIP\] I: gps payload oldfmt ew=([EW]) lon1=(\d+) lon2=(\d+) ns=([NS]) lat1=(\d+) lat2=(\d+)/);
+      const gpsSatSource = line.match(/\[SHIP\] I: gps sat source gsa=(\d+) gga=(\d+) report=(\d+)/);
+      if (gpsSatSource) {
+        state.last.gpsSat = gpsSatSource[3];
+        state.last.gpsSatMeta = `GSA=${gpsSatSource[1]} GGA=${gpsSatSource[2]} report=${gpsSatSource[3]}`;
+        state.last.gpsTxInfo = `sat source GSA=${gpsSatSource[1]} GGA=${gpsSatSource[2]} report=${gpsSatSource[3]}`;
+        important = true;
+      }
+
+      const gpsOld = line.match(/\[SHIP\] I: gps payload oldfmt ew=([EW]) lon1=(\d+) lon2=(\d+) ns=([NSEW]) lat1=(\d+) lat2=(\d+)/);
       if (gpsOld) {
         state.last.gpsOldInfo =
           `lon=${formatOldCoord(gpsOld[1], gpsOld[2], gpsOld[3])} lat=${formatOldCoord(gpsOld[4], gpsOld[5], gpsOld[6])}`;
         pushTimeline(`GPS 旧格式：${state.last.gpsOldInfo}`);
+        important = true;
+      }
+
+      const gpsBytes = line.match(/\[SHIP\] I: gps payload bytes=((?:[0-9A-Fa-f]{2}\s*){15})/);
+      if (gpsBytes) {
+        const b = gpsBytes[1].trim().split(/\s+/).map((x) => parseInt(x, 16));
+        const u16be = (i) => ((b[i] << 8) | b[i + 1]);
+        state.last.gpsOldInfo =
+          `payload=${gpsBytes[1].trim()} | lon=${formatOldCoord(String.fromCharCode(b[3]), u16be(4), u16be(6))} lat=${formatOldCoord(String.fromCharCode(b[8]), u16be(9), u16be(11))}`;
+        state.last.gpsTxInfo = `bytes sat=${b[0]} angle=${u16be(1)} power=0x${b[13].toString(16).padStart(2, "0").toUpperCase()}`;
         important = true;
       }
 

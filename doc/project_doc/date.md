@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-07
- * @version v1.7.52
+ * @version v1.7.54
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,28 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-07] - v1.7.54 GPS 0x12 老版格式复核修正
+
+### Bug 修复
+- **[GPS 坐标格式不兼容]** 复核老版 `ship_Gps_V2.1_20260406-115200/App/Wireless/wirelessProtocal.c::RF_Send_Gps_Data()` 与 `App/Gps/nmea41_protocal.c` 后确认，遥控器端期望的不是 `deg1e7`，而是 RMC 原始 NMEA 的 `dddmm.mmmm/ddmm.mmmm` 拆分字段。修复：`0x12` 优先使用 RMC 原始字符串拆出的 `lon1/lon2/lat1/lat2`。
+- **[GPS 经纬度定点换算错误]** `GPS_ParseCoordinate1e7()` 中分钟转度的小数比例多乘了 10，导致 `gps state` 的 `deg1e7` 观测值偏大。修复：改为 `minutes_scaled1e4 * 100 / 6`。
+- **[GPS 航向角单位不一致]** 老版 `GPS_DK2_RMC` 下 `nmea41_Get_Angel()` 返回整数度。修复：`0x12` 航向角回传整数度，不再发送 `deg * 100`。
+- **[GPS 卫星数来源不一致]** 老版 `nmea41_Get_GPS_Num()` 优先使用完整 GSA PRN 计数，GSA 不完整或为 0 才回退 GGA 卫星数，并限制最大 24。修复：新增老版语义的 GSA PRN 完整计数并用于 `0x12` 的 `sat` 字段。
+
+### 优化改进
+- **[GPS 现场核对日志]** `ShipProtocol_SendGpsOnce()` 增加 `gps sat source` 与 `gps payload bytes` 日志，现场可直接核对遥控器收到的 15 字节旧格式 payload。
+- **[上位机 GPS 解析]** 上位机新增 `gps payload bytes` 解析，按旧格式展示遥控器端应看到的坐标字段。
+
+### 变更记录
+- **[0x12 payload]** 当前 15 字节顺序固定为 `sat, angle_u16, E, lon1_u16, lon2_u16, W, lat1_u16, lat2_u16, power, auto`。
+- **[老版常量方向字节]** `0x12` payload 中方向字节继续按老版 `nmea41_Get_EW()='E'`、`nmea41_Get_NS()='W'` 保持兼容；真实半球只用于 `gps state` 日志。
+
+### 开发者备注
+- 如果现场 `fix=0 legacy=0`，说明当前 RMC 无有效定位，`0x12` 坐标为 0 是预期表现；此时优先排查 GPS 天线、室外环境、UART2 数据与波特率。
+- 本次再次核对老版 `GPS_DK2_RMC` 编译分支和 `RF_Send_Gps_Data()` 15 字节顺序，未新增协议字段。
 
 ---
 

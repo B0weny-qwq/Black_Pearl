@@ -1,155 +1,89 @@
 # Black Pearl v1.1
 
-这个工程当前现场最重要的不是底层引脚说明，而是：
+这个工程现场使用时，重点不是底层引脚表，而是怎么打开上位机、怎么看无线遥控、油门、按键、GPS 和状态回包。
 
-- 怎么打开上位机页面
-- 怎么连串口
-- 怎么看配对、遥控在线、油门、GPS 和磁力计
-- 出问题时先看什么日志
+## 1. 打开上位机
 
-## 1. 先打开上位机
-
-在仓库根目录直接运行：
+在仓库根目录运行：
 
 ```text
 start_ship_log_viewer.bat
 ```
 
-如果你用 PowerShell，也可以：
+PowerShell 也可以运行：
 
 ```powershell
 .\start_ship_log_viewer.ps1
 ```
 
-它会自动：
-
-- 启动本地 HTTP 服务
-- 打开浏览器
-- 跳到串口日志解析页面
-
-根入口地址是：
-
-```text
-http://127.0.0.1:8000/
-```
-
-实际页面地址是：
+脚本会启动本地 HTTP 服务并打开页面。浏览器地址是：
 
 ```text
 http://127.0.0.1:8000/doc/tools/ship_log_viewer.html
 ```
 
-不要直接双击 HTML 文件。Web Serial 必须跑在 `http://127.0.0.1`、`http://localhost` 或 `https://` 下。
+不要直接双击 HTML 文件。Web Serial 必须在 `http://127.0.0.1`、`http://localhost` 或 `https://` 环境下运行。
 
-## 2. 上位机能看什么
+## 2. 上位机怎么看
 
-页面当前重点看这些信息：
+页面重点看这些卡片：
 
-- 配对状态
-- 遥控链路是否在线
-- 油门数值
-- 动作判定
-- `0x12` 状态回包
-- GPS 状态
-- 电量采样
-- 磁力计原始值
+- 配对状态：只表示已经进入工作信道。
+- 遥控在线：只看最近是否收到 `0x11`，关闭遥控器后应在超时后变离线。
+- 油门数值：看 `throttle_raw / steering_raw / throttle_val / steering_val`。
+- 动作判定：看 `manual motion` 的 forward/backward/left/right/stop。
+- 按键状态：解析 A/B/C/D/E 和固件 `key action` 日志。
+- GPS：同时显示 `gps state`、老版 `0x12` 字段和 15 字节 payload。
 
-关键日志会被自动解析，例如：
-
-- `[SHIP] I: pair req sent ...`
-- `[SHIP] I: pair ok, enter work channel ...`
-- `[SHIP] I: pair success paired=1 ...`
-- `[SHIP] I: rc cmd=0x11 ...`
-- `[SHIP] I: throttle_raw=...`
-- `[SHIP] I: manual parse cmd=0x11 ...`
-- `[SHIP] I: manual motion=...`
-- `[SHIP] I: tx cmd=0x12 ...`
-- `[SHIP] I: gps state fix=... sat=... lon=... lat=... angle=... seq=...`
-- `[SHIP] W: remote link timeout by cmd=0x11 ...`
-- `[MAG] I: test raw=...`
-
-## 3. 正确理解页面状态
-
-页面里有两个很容易混淆的状态：
-
-- 已配对
-- 遥控在线
-
-它们不是一回事。
-
-- “已配对”表示配对成功，已经进入工作信道
-- “遥控在线”表示最近持续收到了 `0x11`
-
-所以：
-
-- 遥控器关机后，页面应该在超时后显示“离线”
-- 但配对状态不一定会立刻回到“未配对”
-
-## 4. GPS 现在怎么看
-
-当前页面会显示正式 GPS 状态摘要：
-
-- `fix`
-- `sat`
-- `lon`
-- `lat`
-- `angle`
-- `seq`
-
-固件里也会打印类似日志：
+关键日志示例：
 
 ```text
-[SHIP] I: gps state fix=1 sat=8 lon=E1212345678 lat=N312345678 angle=1234 power=0xAE seq=56
+[SHIP] I: rc cmd=0x11 lr=100 ud=179 key=0xA0(NONE) paired=1
+[SHIP] I: throttle_raw=179 steering_raw=100 throttle_val=79 steering_val=0 key=0xA0(NONE)
+[SHIP] I: manual motion=forward left=790 right=-790
+[SHIP] I: tx cmd=0x12 ch=13 payload_len=15 sat=8 angle=1 power=0xAE auto=0x00
+[SHIP] I: gps state fix=1 legacy=1 sat=8 lon=E121940096 lat=N373696970 angle=1 power=0xAE seq=56
+[SHIP] I: gps sat source gsa=8 gga=10 report=8
+[SHIP] I: gps payload oldfmt ew=E lon1=12156 lon2=4607 ns=W lat1=3724 lat2=2182
+[SHIP] I: gps payload bytes=08 00 01 45 2F 7C 11 FF 57 0E 8C 08 86 AE 00
 ```
 
-如果页面没有 GPS 数据，先看两件事：
+## 3. GPS 格式说明
 
-1. 是否有下面这两条初始化日志
+`0x12` 继续保持老版遥控器兼容格式，payload 固定 15 字节，不新增字段：
 
 ```text
-[SYS] I: gps init start
-[GPS] I: init uart=2 route=P1.0/P1.1 baud=115200
+sat, angle_u16, 'E', lon1_u16, lon2_u16, 'W', lat1_u16, lat2_u16, power, auto
 ```
 
-2. 是否真的收到了 GPS 语句并更新了 `gps state`
+坐标不是 `deg1e7` 直接发给遥控器，而是按老版 RMC 原始字符串拆分：
 
-如果初始化有，但 `gps state` 一直没有，通常说明：
+- 经度 `12156.4607500` 发成 `lon1=12156`、`lon2=4607`。
+- 纬度 `3724.2182068` 发成 `lat1=3724`、`lat2=2182`。
+- 航向角按老版发整数度，不发 `deg * 100`。
+- 卫星数按老版优先使用完整 GSA PRN 计数；GSA 不完整时回退 GGA 卫星数，并限制最大 24。
+- 方向字节按老版保持 `E/W` 常量；真实半球只在 `gps state` 日志中显示。
 
-- GPS 模块没输出数据
-- 线没通
-- 波特率不对
-- 还没有锁定，`fix=0`
+如果现场看到 `fix=0 legacy=0 lon=E0 lat=N0`，说明 GPS 当前没有有效 RMC 定位。此时 `0x12` 坐标为 0 是预期现象，需要先看 GPS 天线、室外环境、波特率和 UART2 数据是否正常。
 
-## 5. 现场联调建议顺序
+## 4. 现场检查顺序
 
-建议现场按这个顺序看：
+1. 打开上位机并连接串口。
+2. 看 `[SYS] I: gps init start` 和 `[GPS] I: init uart=2 route=P1.0/P1.1 baud=115200`。
+3. 看无线配对 `pair req / pair success`。
+4. 配对成功后看 `rc cmd=0x11` 是否持续出现。
+5. 看油门数值和动作判定是否跟遥杆一致。
+6. 关遥控器，看“遥控在线”是否超时变离线。
+7. 看 `gps payload oldfmt` 和 `gps payload bytes` 是否与遥控器端显示一致。
 
-1. 先打开上位机页面并连上串口
-2. 看有没有无线初始化日志
-3. 看有没有 GPS 初始化日志
-4. 看配对请求和配对响应
-5. 配对成功后，看 `rc cmd=0x11`
-6. 看油门数值和动作判定是否跟遥杆一致
-7. 关掉遥控器，看页面是否自动掉线
-8. 再看 `0x12` 和 `gps state` 是否持续回传
+## 5. 当前版本重点
 
-## 6. 当前常用文件
+当前联调版本保持无线、GPS、磁力计开启；IMU、AHRS、数据融合关闭。电机 PWM 现在按宏关闭，主要用于串口观察油门、动作、按键和 GPS 回包。
 
-- 上位机说明：[doc/tools/README.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/tools/README.md)
-- 上位机页面：[doc/tools/ship_log_viewer.html](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/tools/ship_log_viewer.html)
-- 固件无线主逻辑：[Code_boweny/Device/WIRELESS/ship_protocol.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/ship_protocol.c)
-- 工程总览：[doc/project_doc/total.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/total.md)
-- 变更记录：[doc/project_doc/date.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/date.md)
+常用文件：
 
-## 7. 当前版本重点
-
-当前联调重点是：
-
-- 无线配对成功
-- 遥控器手动链路跑通
-- 关遥控后能正确判定离线
-- `0x12` 状态回包可见
-- GPS 状态可见
-- 磁力计可见
-
-IMU / AHRS / 数据融合不是当前现场主目标。
+- [上位机页面](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/tools/ship_log_viewer.html)
+- [无线协议主逻辑](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/ship_protocol.c)
+- [GPS 解析](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/GPS/GPS.c)
+- [工程总览](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/total.md)
+- [变更记录](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/date.md)

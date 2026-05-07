@@ -67,12 +67,20 @@ typedef struct
 
     int32 lat_deg1e7;             /**< 纬度，单位 `deg * 1e7`，北纬为正。 */
     int32 lon_deg1e7;             /**< 经度，单位 `deg * 1e7`，东经为正。 */
+    u8    legacy_coord_valid;     /**< 老版 `0x12` 坐标字段有效标志，来自 RMC 原始 NMEA 字符串。 */
+    u8    legacy_lat_dir;         /**< RMC 纬度半球字符，通常为 `N` 或 `S`。 */
+    u8    legacy_lon_dir;         /**< RMC 经度半球字符，通常为 `E` 或 `W`。 */
+    u16   legacy_lat1;            /**< 老版纬度整数段，格式为 `ddmm`。 */
+    u16   legacy_lat2;            /**< 老版纬度小数段，格式为小数点后 4 位。 */
+    u16   legacy_lon1;            /**< 老版经度整数段，格式为 `dddmm`。 */
+    u16   legacy_lon2;            /**< 老版经度小数段，格式为小数点后 4 位。 */
 
     u32   speed_knots_x100;       /**< 地速，单位 `knot * 100`。 */
     u32   speed_kmh_x100;         /**< 地速，单位 `km/h * 100`。 */
     u16   course_deg_x100;        /**< 航向角，单位 `deg * 100`。 */
 
-    u8    satellites_used;        /**< 参与定位的卫星数。 */
+    u8    satellites_used;        /**< 参与定位的卫星数，来自 GGA 第 7 字段。 */
+    u8    satellites_used_gsa;    /**< 老版 `0x12` 优先使用的 GSA PRN 计数，为 0 时回退到 GGA 卫星数。 */
     u8    satellites_view;        /**< 可见卫星数。 */
     u16   hdop_x100;              /**< 水平精度因子，单位 `HDOP * 100`。 */
     u16   pdop_x100;              /**< 三维精度因子，单位 `PDOP * 100`。 */
