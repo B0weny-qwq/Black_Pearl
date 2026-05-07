@@ -67,7 +67,7 @@
 #define SHIP_PAIR_CHANNEL_DEFAULT      ((u8)(PAIR_CHANNEL))
 
 /* 遥控油门 PWM 总开关。 */
-#define SHIP_THROTTLE_PWM_ENABLE       0
+#define SHIP_THROTTLE_PWM_ENABLE       1
 
 /* 电池采样打印参数。 */
 #define SHIP_ADC_REF_MV                3300UL
