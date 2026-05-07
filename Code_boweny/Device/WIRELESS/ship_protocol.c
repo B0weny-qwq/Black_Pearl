@@ -811,6 +811,8 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
     u16 coord1;
     u16 coord2;
     s8 rc;
+    char lon_dir;
+    char lat_dir;
 
     gps = GPS_GetState();
     idx = 0U;
@@ -822,10 +824,12 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
     payload[idx++] = (u8)(angle >> 8);
 
     if (gps->lon_deg1e7 < 0) {
-        payload[idx++] = 'W';
+        lon_dir = 'W';
+        payload[idx++] = (u8)lon_dir;
         abs_lon = (u32)(-gps->lon_deg1e7);
     } else {
-        payload[idx++] = 'E';
+        lon_dir = 'E';
+        payload[idx++] = (u8)lon_dir;
         abs_lon = (u32)gps->lon_deg1e7;
     }
     coord1 = ShipProtocol_ToCoord1(abs_lon);
@@ -836,10 +840,12 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
     idx += 2U;
 
     if (gps->lat_deg1e7 < 0) {
-        payload[idx++] = 'S';
+        lat_dir = 'S';
+        payload[idx++] = (u8)lat_dir;
         abs_lat = (u32)(-gps->lat_deg1e7);
     } else {
-        payload[idx++] = 'N';
+        lat_dir = 'N';
+        payload[idx++] = (u8)lat_dir;
         abs_lat = (u32)gps->lat_deg1e7;
     }
     coord1 = ShipProtocol_ToCoord1(abs_lat);
@@ -868,6 +874,17 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
              (u16)(((u16)payload[2] << 8) | payload[1]),
              (u16)payload[13],
              (u16)payload[14]);
+        LOGI(SHIP_TAG,
+             "gps state fix=%u sat=%u lon=%c%lu lat=%c%lu angle=%u power=0x%02X seq=%lu",
+             (u16)gps->fix_valid,
+             (u16)gps->satellites_used,
+             lon_dir,
+             (u32)abs_lon,
+             lat_dir,
+             (u32)abs_lat,
+             (u16)gps->course_deg_x100,
+             (u16)payload[13],
+             (u32)gps->update_sequence);
         ShipProtocol_LogPayloadBrief("tx frame", SHIP_CMD_GPS_REPORT, payload, idx);
     }
 

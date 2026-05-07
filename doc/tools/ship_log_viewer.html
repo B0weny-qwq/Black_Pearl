@@ -1,0 +1,1194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Black Pearl 串口日志解析</title>
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --panel: #fffaf2;
+      --panel-soft: #f5ead6;
+      --line: #dbc6a4;
+      --text: #2c2418;
+      --muted: #786b57;
+      --accent: #9b5f25;
+      --accent-deep: #6d4017;
+      --good: #2f7b4c;
+      --warn: #b87419;
+      --bad: #b23a30;
+      --mono: "Cascadia Code", Consolas, monospace;
+      --sans: "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      --shadow: 0 14px 30px rgba(73, 45, 14, 0.09);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top right, rgba(155, 95, 37, 0.12), transparent 24%),
+        linear-gradient(180deg, #f8f5ef 0%, var(--bg) 100%);
+      color: var(--text);
+      font-family: var(--sans);
+    }
+
+    .shell {
+      width: min(1520px, calc(100vw - 24px));
+      margin: 12px auto 24px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 18px 20px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 28px; line-height: 1.1; }
+    h2 { font-size: 18px; }
+    .subtitle { color: var(--muted); font-size: 14px; }
+
+    .status-chip {
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--accent-deep);
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .field label {
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .field input,
+    .field select,
+    .field textarea,
+    .field button {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+      padding: 11px 12px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      grid-column: span 3;
+    }
+
+    button {
+      cursor: pointer;
+      padding: 11px 14px;
+      font-weight: 700;
+      transition: transform 120ms ease;
+    }
+
+    button:hover:enabled { transform: translateY(-1px); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .btn-primary {
+      background: linear-gradient(180deg, #b57138 0%, var(--accent) 100%);
+      border-color: var(--accent-deep);
+      color: #fff8f0;
+    }
+
+    .btn-secondary { background: #fff; color: var(--accent-deep); }
+    .btn-danger {
+      background: linear-gradient(180deg, #ca5b4d 0%, var(--bad) 100%);
+      border-color: #8f261f;
+      color: #fff8f6;
+    }
+    .btn-ghost { background: #f8f0e1; color: var(--text); }
+
+    .tips {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .tip {
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px dashed var(--line);
+      background: #faf2e4;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.22fr 0.78fr;
+      gap: 12px;
+    }
+
+    .panel-body { padding: 16px; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .card {
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #fffdf8 0%, #f8efdf 100%);
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .value {
+      margin-top: 8px;
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1.12;
+    }
+
+    .meta {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      min-height: 18px;
+      word-break: break-word;
+    }
+
+    .subhead {
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .inline-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .table td {
+      padding: 10px 8px;
+      border-top: 1px solid #ead9bc;
+      vertical-align: top;
+    }
+
+    .table td:first-child {
+      width: 148px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .timeline,
+    .rawlog,
+    .pastebox {
+      width: 100%;
+      border: 1px solid #23190e;
+      border-radius: 14px;
+      background: #20180f;
+      color: #f8e0ad;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow: auto;
+    }
+
+    .timeline {
+      min-height: 260px;
+      max-height: 380px;
+      padding: 14px;
+    }
+
+    .rawlog {
+      min-height: 300px;
+      max-height: 500px;
+      padding: 14px;
+    }
+
+    .pastebox {
+      min-height: 150px;
+      padding: 12px;
+      resize: vertical;
+    }
+
+    .footnote {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .gps-block {
+      display: grid;
+      gap: 10px;
+    }
+
+    .gps-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .gps-item {
+      padding: 12px;
+      border-radius: 14px;
+      background: #fbf3e5;
+      border: 1px solid #ebd8b5;
+    }
+
+    .gps-item .value {
+      font-size: 18px;
+      margin-top: 6px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 1180px) {
+      .toolbar { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .actions { grid-column: span 4; }
+      .grid { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 720px) {
+      .shell { width: min(100vw, calc(100vw - 12px)); }
+      .toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .actions { grid-column: span 2; }
+      .cards,
+      .split,
+      .gps-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="panel hero">
+      <div class="title-row">
+        <div>
+          <h1>Black Pearl 串口日志解析</h1>
+          <p class="subtitle">用于现场查看配对、遥控在线、油门解析、动作判定、GPS 状态回传、电量和磁力计摘要。</p>
+        </div>
+        <div id="statusChip" class="status-chip">未连接串口</div>
+      </div>
+
+      <div class="toolbar">
+        <div class="field">
+          <label for="baudRate">波特率</label>
+          <select id="baudRate">
+            <option>9600</option>
+            <option>19200</option>
+            <option>38400</option>
+            <option selected>115200</option>
+            <option>230400</option>
+            <option>460800</option>
+            <option>921600</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="dataBits">数据位</label>
+          <select id="dataBits">
+            <option>7</option>
+            <option selected>8</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="stopBits">停止位</label>
+          <select id="stopBits">
+            <option selected>1</option>
+            <option>2</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="parity">校验</label>
+          <select id="parity">
+            <option selected value="none">none</option>
+            <option value="even">even</option>
+            <option value="odd">odd</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="timelineLimit">事件条数</label>
+          <input id="timelineLimit" type="number" min="100" max="20000" step="100" value="20000">
+        </div>
+
+        <div class="field">
+          <label for="rawLimit">原始日志条数</label>
+          <input id="rawLimit" type="number" min="500" max="20000" step="100" value="20000">
+        </div>
+
+        <div class="actions">
+          <button id="pickPortBtn" class="btn-secondary">选择串口</button>
+          <button id="connectBtn" class="btn-primary" disabled>连接</button>
+          <button id="disconnectBtn" class="btn-danger" disabled>断开</button>
+          <button id="clearBtn" class="btn-ghost">清空</button>
+        </div>
+      </div>
+
+      <div class="tips">
+        <div class="tip">Web Serial 需要在 `http://127.0.0.1` 或 `http://localhost` 下打开。</div>
+        <div class="tip">“已配对”不代表“遥控在线”，遥控在线只以最近收到 `0x11` 和超时日志为准。</div>
+        <div class="tip">当前页支持在线串口解析，也支持离线粘贴 `.log/.txt` 日志。</div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="panel panel-body">
+        <div class="subhead">
+          <h2>联调摘要</h2>
+        </div>
+        <div class="cards">
+          <div class="card">
+            <div class="label">配对状态</div>
+            <div id="pairValue" class="value">未配对</div>
+            <div id="pairMeta" class="meta">等待串口数据</div>
+          </div>
+          <div class="card">
+            <div class="label">遥控链路</div>
+            <div id="rcValue" class="value">离线</div>
+            <div id="rcMeta" class="meta">等待 0x11 手动帧</div>
+          </div>
+          <div class="card">
+            <div class="label">动作判定</div>
+            <div id="motionValue" class="value">--</div>
+            <div id="motionMeta" class="meta">等待 0x11</div>
+          </div>
+          <div class="card">
+            <div class="label">状态回包</div>
+            <div id="txValue" class="value">--</div>
+            <div id="txMeta" class="meta">0x12 / sat / angle / power</div>
+          </div>
+          <div class="card">
+            <div class="label">电量采样</div>
+            <div id="powerValue" class="value">--</div>
+            <div id="powerMeta" class="meta">ADC / mV / power byte</div>
+          </div>
+          <div class="card">
+            <div class="label">磁力计</div>
+            <div id="magValue" class="value">--</div>
+            <div id="magMeta" class="meta">X / Y / Z / norm</div>
+          </div>
+        </div>
+
+        <table class="table" style="margin-top:12px;">
+          <tbody>
+            <tr>
+              <td>串口状态</td>
+              <td id="portInfo">未选择</td>
+            </tr>
+            <tr>
+              <td>遥控在线状态</td>
+              <td id="remoteInfo">离线</td>
+            </tr>
+            <tr>
+              <td>最近收到命令</td>
+              <td id="lastRxCmd">--</td>
+            </tr>
+            <tr>
+              <td>最近发送命令</td>
+              <td id="lastTxCmd">--</td>
+            </tr>
+            <tr>
+              <td>信道状态</td>
+              <td id="channelInfo">--</td>
+            </tr>
+            <tr>
+              <td>告警 / 错误</td>
+              <td id="warnInfo">--</td>
+            </tr>
+            <tr>
+              <td>计数</td>
+              <td id="counterInfo">行数 0 / 事件 0 / 手动帧 0 / 0x12 0</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="panel panel-body">
+        <div class="subhead">
+          <h2>GPS 摘要</h2>
+        </div>
+        <div class="gps-block">
+          <div class="gps-grid">
+            <div class="gps-item">
+              <div class="label">定位有效</div>
+              <div id="gpsFix" class="value">--</div>
+              <div id="gpsFixMeta" class="meta">等待 gps state 日志</div>
+            </div>
+            <div class="gps-item">
+              <div class="label">卫星数</div>
+              <div id="gpsSat" class="value">--</div>
+              <div id="gpsSatMeta" class="meta">sat / seq</div>
+            </div>
+            <div class="gps-item">
+              <div class="label">经度</div>
+              <div id="gpsLon" class="value">--</div>
+              <div id="gpsLonMeta" class="meta">E/W + deg1e7</div>
+            </div>
+            <div class="gps-item">
+              <div class="label">纬度</div>
+              <div id="gpsLat" class="value">--</div>
+              <div id="gpsLatMeta" class="meta">N/S + deg1e7</div>
+            </div>
+          </div>
+          <table class="table">
+            <tbody>
+              <tr>
+                <td>航向角</td>
+                <td id="gpsAngle">--</td>
+              </tr>
+              <tr>
+                <td>最近 0x12</td>
+                <td id="gpsTxInfo">--</td>
+              </tr>
+              <tr>
+                <td>GPS 源数据</td>
+                <td id="gpsRawInfo">等待 `gps state` 正式日志</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div class="grid">
+      <section class="panel panel-body">
+        <div class="subhead">
+          <h2>事件时间线</h2>
+          <div class="inline-actions">
+            <label><input id="autoScrollTimeline" type="checkbox" checked> 自动滚动</label>
+          </div>
+        </div>
+        <div id="timeline" class="timeline"></div>
+        <p class="footnote">优先保留配对、0x11、动作判定、0x12、GPS、遥控在线/超时、电量、磁力计、告警与错误。</p>
+      </section>
+
+      <section class="panel panel-body">
+        <div class="subhead">
+          <h2>离线日志解析</h2>
+        </div>
+        <div class="field">
+          <label for="pasteBox">粘贴日志</label>
+          <textarea id="pasteBox" class="pastebox" placeholder="把串口日志粘贴到这里，然后点“解析粘贴内容”。"></textarea>
+        </div>
+        <div class="actions" style="grid-column:auto; margin-top:10px;">
+          <button id="parsePasteBtn" class="btn-primary">解析粘贴内容</button>
+          <button id="loadFileBtn" class="btn-secondary">选择日志文件</button>
+          <input id="fileInput" type="file" accept=".log,.txt,.csv" hidden>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel panel-body">
+      <div class="subhead">
+        <h2>原始日志</h2>
+        <div class="inline-actions">
+          <label><input id="autoScrollRaw" type="checkbox" checked> 自动滚动</label>
+          <label><input id="showParsedOnly" type="checkbox"> 只看关键事件</label>
+        </div>
+      </div>
+      <div id="rawLog" class="rawlog"></div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      port: null,
+      reader: null,
+      reading: false,
+      lineBuffer: "",
+      lineCount: 0,
+      eventCount: 0,
+      manualCount: 0,
+      gpsTxCount: 0,
+      timeline: [],
+      rawLines: [],
+      last: {
+        pair: "未配对",
+        pairMeta: "等待串口数据",
+        rcValue: "离线",
+        rcMeta: "等待 0x11 手动帧",
+        motionValue: "--",
+        motionMeta: "等待 0x11",
+        txValue: "--",
+        txMeta: "0x12 / sat / angle / power",
+        powerValue: "--",
+        powerMeta: "ADC / mV / power byte",
+        magValue: "--",
+        magMeta: "X / Y / Z / norm",
+        portInfo: "未选择",
+        lastRxCmd: "--",
+        lastTxCmd: "--",
+        remoteInfo: "离线",
+        channelInfo: "--",
+        warnInfo: "--",
+        gpsFix: "--",
+        gpsFixMeta: "等待 gps state 日志",
+        gpsSat: "--",
+        gpsSatMeta: "sat / seq",
+        gpsLon: "--",
+        gpsLonMeta: "E/W + deg1e7",
+        gpsLat: "--",
+        gpsLatMeta: "N/S + deg1e7",
+        gpsAngle: "--",
+        gpsTxInfo: "--",
+        gpsRawInfo: "等待 `gps state` 正式日志"
+      }
+    };
+
+    const el = {
+      baudRate: document.getElementById("baudRate"),
+      dataBits: document.getElementById("dataBits"),
+      stopBits: document.getElementById("stopBits"),
+      parity: document.getElementById("parity"),
+      timelineLimit: document.getElementById("timelineLimit"),
+      rawLimit: document.getElementById("rawLimit"),
+      pickPortBtn: document.getElementById("pickPortBtn"),
+      connectBtn: document.getElementById("connectBtn"),
+      disconnectBtn: document.getElementById("disconnectBtn"),
+      clearBtn: document.getElementById("clearBtn"),
+      statusChip: document.getElementById("statusChip"),
+      pairValue: document.getElementById("pairValue"),
+      pairMeta: document.getElementById("pairMeta"),
+      rcValue: document.getElementById("rcValue"),
+      rcMeta: document.getElementById("rcMeta"),
+      motionValue: document.getElementById("motionValue"),
+      motionMeta: document.getElementById("motionMeta"),
+      txValue: document.getElementById("txValue"),
+      txMeta: document.getElementById("txMeta"),
+      powerValue: document.getElementById("powerValue"),
+      powerMeta: document.getElementById("powerMeta"),
+      magValue: document.getElementById("magValue"),
+      magMeta: document.getElementById("magMeta"),
+      portInfo: document.getElementById("portInfo"),
+      remoteInfo: document.getElementById("remoteInfo"),
+      lastRxCmd: document.getElementById("lastRxCmd"),
+      lastTxCmd: document.getElementById("lastTxCmd"),
+      channelInfo: document.getElementById("channelInfo"),
+      warnInfo: document.getElementById("warnInfo"),
+      counterInfo: document.getElementById("counterInfo"),
+      gpsFix: document.getElementById("gpsFix"),
+      gpsFixMeta: document.getElementById("gpsFixMeta"),
+      gpsSat: document.getElementById("gpsSat"),
+      gpsSatMeta: document.getElementById("gpsSatMeta"),
+      gpsLon: document.getElementById("gpsLon"),
+      gpsLonMeta: document.getElementById("gpsLonMeta"),
+      gpsLat: document.getElementById("gpsLat"),
+      gpsLatMeta: document.getElementById("gpsLatMeta"),
+      gpsAngle: document.getElementById("gpsAngle"),
+      gpsTxInfo: document.getElementById("gpsTxInfo"),
+      gpsRawInfo: document.getElementById("gpsRawInfo"),
+      timeline: document.getElementById("timeline"),
+      rawLog: document.getElementById("rawLog"),
+      autoScrollTimeline: document.getElementById("autoScrollTimeline"),
+      autoScrollRaw: document.getElementById("autoScrollRaw"),
+      showParsedOnly: document.getElementById("showParsedOnly"),
+      pasteBox: document.getElementById("pasteBox"),
+      parsePasteBtn: document.getElementById("parsePasteBtn"),
+      loadFileBtn: document.getElementById("loadFileBtn"),
+      fileInput: document.getElementById("fileInput")
+    };
+
+    function nowTag() {
+      return new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    }
+
+    function clampNumber(value, min, max, fallback) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return fallback;
+      }
+      return Math.max(min, Math.min(max, num));
+    }
+
+    function setStatus(text, tone = "normal") {
+      el.statusChip.textContent = text;
+      if (tone === "good") {
+        el.statusChip.style.background = "#e4f4e9";
+        el.statusChip.style.color = "var(--good)";
+      } else if (tone === "warn") {
+        el.statusChip.style.background = "#fff0d9";
+        el.statusChip.style.color = "var(--warn)";
+      } else if (tone === "bad") {
+        el.statusChip.style.background = "#fde7e4";
+        el.statusChip.style.color = "var(--bad)";
+      } else {
+        el.statusChip.style.background = "var(--panel-soft)";
+        el.statusChip.style.color = "var(--accent-deep)";
+      }
+    }
+
+    function pushTimeline(message) {
+      state.eventCount += 1;
+      state.timeline.push(`[${nowTag()}] ${message}`);
+      const limit = clampNumber(el.timelineLimit.value, 100, 20000, 20000);
+      if (state.timeline.length > limit) {
+        state.timeline.splice(0, state.timeline.length - limit);
+      }
+      renderTimeline();
+      updateCounters();
+    }
+
+    function addRawLine(line, important = false) {
+      state.rawLines.push({ line, important });
+      const limit = clampNumber(el.rawLimit.value, 500, 20000, 20000);
+      if (state.rawLines.length > limit) {
+        state.rawLines.splice(0, state.rawLines.length - limit);
+      }
+      renderRaw();
+    }
+
+    function renderTimeline() {
+      el.timeline.textContent = state.timeline.join("\n");
+      if (el.autoScrollTimeline.checked) {
+        el.timeline.scrollTop = el.timeline.scrollHeight;
+      }
+    }
+
+    function renderRaw() {
+      const showParsedOnly = el.showParsedOnly.checked;
+      const lines = showParsedOnly
+        ? state.rawLines.filter(item => item.important).map(item => item.line)
+        : state.rawLines.map(item => item.line);
+      el.rawLog.textContent = lines.join("\n");
+      if (el.autoScrollRaw.checked) {
+        el.rawLog.scrollTop = el.rawLog.scrollHeight;
+      }
+    }
+
+    function updateCounters() {
+      el.counterInfo.textContent =
+        `行数 ${state.lineCount} / 事件 ${state.eventCount} / 手动帧 ${state.manualCount} / 0x12 ${state.gpsTxCount}`;
+    }
+
+    function updateCards() {
+      el.pairValue.textContent = state.last.pair;
+      el.pairMeta.textContent = state.last.pairMeta;
+      el.rcValue.textContent = state.last.rcValue;
+      el.rcMeta.textContent = state.last.rcMeta;
+      el.motionValue.textContent = state.last.motionValue;
+      el.motionMeta.textContent = state.last.motionMeta;
+      el.txValue.textContent = state.last.txValue;
+      el.txMeta.textContent = state.last.txMeta;
+      el.powerValue.textContent = state.last.powerValue;
+      el.powerMeta.textContent = state.last.powerMeta;
+      el.magValue.textContent = state.last.magValue;
+      el.magMeta.textContent = state.last.magMeta;
+      el.portInfo.textContent = state.last.portInfo;
+      el.remoteInfo.textContent = state.last.remoteInfo;
+      el.lastRxCmd.textContent = state.last.lastRxCmd;
+      el.lastTxCmd.textContent = state.last.lastTxCmd;
+      el.channelInfo.textContent = state.last.channelInfo;
+      el.warnInfo.textContent = state.last.warnInfo;
+      el.gpsFix.textContent = state.last.gpsFix;
+      el.gpsFixMeta.textContent = state.last.gpsFixMeta;
+      el.gpsSat.textContent = state.last.gpsSat;
+      el.gpsSatMeta.textContent = state.last.gpsSatMeta;
+      el.gpsLon.textContent = state.last.gpsLon;
+      el.gpsLonMeta.textContent = state.last.gpsLonMeta;
+      el.gpsLat.textContent = state.last.gpsLat;
+      el.gpsLatMeta.textContent = state.last.gpsLatMeta;
+      el.gpsAngle.textContent = state.last.gpsAngle;
+      el.gpsTxInfo.textContent = state.last.gpsTxInfo;
+      el.gpsRawInfo.textContent = state.last.gpsRawInfo;
+      updateCounters();
+    }
+
+    function clearAll() {
+      state.lineBuffer = "";
+      state.lineCount = 0;
+      state.eventCount = 0;
+      state.manualCount = 0;
+      state.gpsTxCount = 0;
+      state.timeline = [];
+      state.rawLines = [];
+      state.last = {
+        pair: "未配对",
+        pairMeta: "等待串口数据",
+        rcValue: "离线",
+        rcMeta: "等待 0x11 手动帧",
+        motionValue: "--",
+        motionMeta: "等待 0x11",
+        txValue: "--",
+        txMeta: "0x12 / sat / angle / power",
+        powerValue: "--",
+        powerMeta: "ADC / mV / power byte",
+        magValue: "--",
+        magMeta: "X / Y / Z / norm",
+        portInfo: state.port ? state.last.portInfo : "未选择",
+        lastRxCmd: "--",
+        lastTxCmd: "--",
+        remoteInfo: "离线",
+        channelInfo: "--",
+        warnInfo: "--",
+        gpsFix: "--",
+        gpsFixMeta: "等待 gps state 日志",
+        gpsSat: "--",
+        gpsSatMeta: "sat / seq",
+        gpsLon: "--",
+        gpsLonMeta: "E/W + deg1e7",
+        gpsLat: "--",
+        gpsLatMeta: "N/S + deg1e7",
+        gpsAngle: "--",
+        gpsTxInfo: "--",
+        gpsRawInfo: "等待 `gps state` 正式日志"
+      };
+      renderTimeline();
+      renderRaw();
+      updateCards();
+    }
+
+    function cmdName(cmd) {
+      const map = {
+        "0x0F": "0x0F 配对响应",
+        "0x10": "0x10 配对请求",
+        "0x11": "0x11 手动控制",
+        "0x12": "0x12 状态回传",
+        "0x13": "0x13 返航点",
+        "0x14": "0x14 目标点",
+        "0x15": "0x15 返航开关"
+      };
+      return map[cmd] || cmd;
+    }
+
+    function formatDeg1e7(dir, raw) {
+      const value = Number(raw);
+      if (!Number.isFinite(value)) {
+        return `${dir}${raw}`;
+      }
+      return `${dir}${(value / 1e7).toFixed(7)} (${raw})`;
+    }
+
+    function parseLine(rawLine) {
+      const line = rawLine.trimEnd();
+      if (!line) {
+        return;
+      }
+
+      state.lineCount += 1;
+      let important = false;
+
+      const pairReq = line.match(/\[SHIP\] I: pair req sent seq=(\d+)\/(\d+) retry=(\d+) ch=0x([0-9A-Fa-f]+)/);
+      if (pairReq) {
+        state.last.pair = "配对中";
+        state.last.pairMeta = `第 ${pairReq[1]}/${pairReq[2]} 次，retry=${pairReq[3]}，ch=0x${pairReq[4]}`;
+        pushTimeline(`发送配对请求 ${pairReq[1]}/${pairReq[2]}，信道 0x${pairReq[4]}`);
+        important = true;
+      }
+
+      const pairOk = line.match(/\[SHIP\] I: pair ok, enter work channel rx_ch=(\d+) tx_ch=(\d+)/);
+      if (pairOk) {
+        state.last.pair = "已配对";
+        state.last.pairMeta = `RX ${pairOk[1]} / TX ${pairOk[2]}，这里只代表已配对`;
+        state.last.channelInfo = `工作信道 ${pairOk[1]}`;
+        pushTimeline(`配对成功，进入工作信道 ch=${pairOk[1]}`);
+        important = true;
+      }
+
+      const pairSuccess = line.match(/\[SHIP\] I: pair success paired=1 work_rx=(\d+) work_tx=(\d+) key=(\d+)\/(\d+)/);
+      if (pairSuccess) {
+        state.last.pair = "已配对";
+        state.last.pairMeta = `work_rx=${pairSuccess[1]} work_tx=${pairSuccess[2]} key=${pairSuccess[3]}/${pairSuccess[4]}`;
+        state.last.channelInfo = `工作信道 ${pairSuccess[1]} / key ${pairSuccess[3]}/${pairSuccess[4]}`;
+        important = true;
+      }
+
+      const rxFrame = line.match(/\[SHIP\] I: rx frame ok cmd=(0x[0-9A-Fa-f]{2})\(([^)]+)\) len=(\d+)/);
+      if (rxFrame) {
+        state.last.lastRxCmd = `${cmdName(rxFrame[1])} len=${rxFrame[3]}`;
+        important = true;
+      }
+
+      const dispatch = line.match(/\[SHIP\] I: dispatch cmd=(0x[0-9A-Fa-f]{2})\(([^)]+)\) payload_len=(\d+)/);
+      if (dispatch) {
+        state.last.lastRxCmd = `${cmdName(dispatch[1])} payload=${dispatch[3]}`;
+      }
+
+      const remoteOnline = line.match(/\[SHIP\] I: remote link online by cmd=0x11/);
+      if (remoteOnline) {
+        state.last.rcValue = "在线";
+        state.last.remoteInfo = "在线，已开始收到 0x11";
+        pushTimeline("遥控链路上线，开始收到 0x11");
+        important = true;
+      }
+
+      const timeout = line.match(/\[SHIP\] W: remote link timeout by cmd=0x11, dt=(\d+)ms/);
+      if (timeout) {
+        state.last.rcValue = "离线";
+        state.last.rcMeta = `超时 ${timeout[1]}ms`;
+        state.last.remoteInfo = `离线，0x11 超时 ${timeout[1]}ms`;
+        state.last.warnInfo = `遥控超时 ${timeout[1]}ms`;
+        pushTimeline(`遥控超时 ${timeout[1]}ms`);
+        important = true;
+      }
+
+      const rc = line.match(/\[SHIP\] I: rc cmd=0x11 lr=(\d+) ud=(\d+) key=(0x[0-9A-Fa-f]{2})\(([^)]+)\) paired=(\d+)/);
+      if (rc) {
+        state.manualCount += 1;
+        state.last.rcValue = "在线";
+        state.last.rcMeta = `lr=${rc[1]} ud=${rc[2]} key=${rc[3]}(${rc[4]}) paired=${rc[5]}`;
+        state.last.remoteInfo = `在线，最近 0x11：lr=${rc[1]} ud=${rc[2]} key=${rc[4]}`;
+        pushTimeline(`收到 0x11：lr=${rc[1]} ud=${rc[2]} key=${rc[4]} paired=${rc[5]}`);
+        important = true;
+      }
+
+      const throttle = line.match(/\[SHIP\] I: throttle_raw=(\d+) steering_raw=(\d+) throttle_val=([-\d]+) steering_val=([-\d]+) key=(0x[0-9A-Fa-f]{2})\(([^)]+)\)/);
+      if (throttle) {
+        state.last.rcMeta = `throttle=${throttle[3]} steering=${throttle[4]} key=${throttle[5]}(${throttle[6]})`;
+        important = true;
+      }
+
+      const manualParse = line.match(/\[SHIP\] I: manual parse cmd=0x11 throttle_raw=(\d+) steering_raw=(\d+) throttle_val=([-\d]+) steering_val=([-\d]+) key=(0x[0-9A-Fa-f]{2})\(([^)]+)\) target=([a-zA-Z-]+) speed=([-\d]+)/);
+      if (manualParse) {
+        state.last.motionValue = manualParse[7];
+        state.last.motionMeta = `speed=${manualParse[8]} throttle=${manualParse[3]} steering=${manualParse[4]}`;
+        pushTimeline(`动作判定：${manualParse[7]}，speed=${manualParse[8]}，throttle=${manualParse[3]} steering=${manualParse[4]}`);
+        important = true;
+      }
+
+      const motion = line.match(/\[SHIP\] I: manual motion=([a-zA-Z-]+) left=([-\d]+) right=([-\d]+)/);
+      if (motion) {
+        state.last.motionValue = motion[1];
+        state.last.motionMeta = `left=${motion[2]} right=${motion[3]}`;
+        pushTimeline(`电机目标：${motion[1]}，left=${motion[2]} right=${motion[3]}`);
+        important = true;
+      }
+
+      const stopReason = line.match(/\[SHIP\] I: manual motion=stop reason=(.+)$/);
+      if (stopReason) {
+        state.last.motionValue = "stop";
+        state.last.motionMeta = `reason=${stopReason[1]}`;
+        pushTimeline(`停机：${stopReason[1]}`);
+        important = true;
+      }
+
+      const pwmDisabled = line.match(/\[SHIP\] I: pwm disabled by SHIP_THROTTLE_PWM_ENABLE=0/);
+      if (pwmDisabled) {
+        state.last.motionMeta = `${state.last.motionMeta} / PWM已关闭`;
+        pushTimeline("当前仅打印油门，PWM 已关闭");
+        important = true;
+      }
+
+      const txCmd = line.match(/\[SHIP\] I: tx cmd=(0x[0-9A-Fa-f]{2}) ch=(\d+) payload_len=(\d+) sat=(\d+) angle=(\d+) power=(0x[0-9A-Fa-f]{2}) auto=(0x[0-9A-Fa-f]{2})/);
+      if (txCmd) {
+        state.gpsTxCount += 1;
+        state.last.lastTxCmd = `${cmdName(txCmd[1])} ch=${txCmd[2]}`;
+        state.last.txValue = `${txCmd[1]} / ch ${txCmd[2]}`;
+        state.last.txMeta = `sat=${txCmd[4]} angle=${txCmd[5]} power=${txCmd[6]} auto=${txCmd[7]}`;
+        state.last.gpsTxInfo = `ch=${txCmd[2]} payload=${txCmd[3]} sat=${txCmd[4]} angle=${txCmd[5]} power=${txCmd[6]}`;
+        state.last.gpsAngle = `${txCmd[5]} / 100 deg`;
+        pushTimeline(`发送 0x12：sat=${txCmd[4]} angle=${txCmd[5]} power=${txCmd[6]} ch=${txCmd[2]}`);
+        important = true;
+      }
+
+      const gpsState = line.match(/\[SHIP\] I: gps state fix=(\d+) sat=(\d+) lon=([EW])(\d+) lat=([NS])(\d+) angle=(\d+) power=(0x[0-9A-Fa-f]{2}) seq=(\d+)/);
+      if (gpsState) {
+        const fixText = gpsState[1] === "1" ? "有效" : "无效";
+        state.last.gpsFix = fixText;
+        state.last.gpsFixMeta = `fix=${gpsState[1]} power=${gpsState[8]}`;
+        state.last.gpsSat = gpsState[2];
+        state.last.gpsSatMeta = `seq=${gpsState[9]}`;
+        state.last.gpsLon = formatDeg1e7(gpsState[3], gpsState[4]);
+        state.last.gpsLonMeta = `${gpsState[3]} / raw=${gpsState[4]}`;
+        state.last.gpsLat = formatDeg1e7(gpsState[5], gpsState[6]);
+        state.last.gpsLatMeta = `${gpsState[5]} / raw=${gpsState[6]}`;
+        state.last.gpsAngle = `${gpsState[7]} / 100 deg`;
+        state.last.gpsRawInfo = `fix=${gpsState[1]} sat=${gpsState[2]} lon=${gpsState[3]}${gpsState[4]} lat=${gpsState[5]}${gpsState[6]} angle=${gpsState[7]} seq=${gpsState[9]}`;
+        pushTimeline(`GPS：fix=${gpsState[1]} sat=${gpsState[2]} lon=${gpsState[3]}${gpsState[4]} lat=${gpsState[5]}${gpsState[6]} angle=${gpsState[7]} seq=${gpsState[9]}`);
+        important = true;
+      }
+
+      const power = line.match(/\[SHIP\] I: adc p0\.0 raw=(\d+) adc_mv=(\d+) bat_mv=(\d+) power=(0x[0-9A-Fa-f]{2})/);
+      if (power) {
+        state.last.powerValue = `${power[3]} mV`;
+        state.last.powerMeta = `raw=${power[1]} adc=${power[2]}mV power=${power[4]}`;
+        important = true;
+      }
+
+      const mag = line.match(/\[MAG\] I: test raw=([-\d]+) ([-\d]+) ([-\d]+) norm1=(\d+)/);
+      if (mag) {
+        state.last.magValue = `${mag[1]}, ${mag[2]}, ${mag[3]}`;
+        state.last.magMeta = `norm1=${mag[4]}`;
+        pushTimeline(`磁力计：X=${mag[1]} Y=${mag[2]} Z=${mag[3]} norm=${mag[4]}`);
+        important = true;
+      }
+
+      const reopen = line.match(/\[SHIP\] I: work-rx reopen reason=(.+) ch=(\d+)/);
+      if (reopen) {
+        state.last.channelInfo = `工作信道 ${reopen[2]} / ${reopen[1]}`;
+        pushTimeline(`重开工作 RX：${reopen[1]}，ch=${reopen[2]}`);
+        important = true;
+      }
+
+      const enterWork = line.match(/\[SHIP\] I: enter work-state rx_ch=(\d+) tx_ch=(\d+)/);
+      if (enterWork) {
+        state.last.channelInfo = `工作态 RX=${enterWork[1]} TX=${enterWork[2]}`;
+        important = true;
+      }
+
+      const pairExpired = line.match(/\[SHIP\] W: pair rsp window expired, no rsp/);
+      if (pairExpired) {
+        state.last.warnInfo = "配对窗口超时";
+        pushTimeline("配对窗口超时，没有收到 0x0F");
+        important = true;
+      }
+
+      const warn = line.match(/\[(WL|SHIP|MAG|GPS)\] W: (.+)$/);
+      if (warn) {
+        state.last.warnInfo = `[${warn[1]}] ${warn[2]}`;
+        important = true;
+      }
+
+      const err = line.match(/\[(WL|SHIP|MAG|GPS)\] E: (.+)$/);
+      if (err) {
+        state.last.warnInfo = `[${err[1]}] ${err[2]}`;
+        pushTimeline(`错误：${err[2]}`);
+        important = true;
+      }
+
+      addRawLine(line, important);
+      updateCards();
+    }
+
+    function hexOrUnknown(value) {
+      if (value === undefined || value === null) {
+        return "unknown";
+      }
+      return `0x${Number(value).toString(16).toUpperCase()}`;
+    }
+
+    async function pickPort() {
+      if (!("serial" in navigator)) {
+        alert("当前浏览器不支持 Web Serial，请使用 Chrome 或 Edge。");
+        return;
+      }
+      try {
+        state.port = await navigator.serial.requestPort();
+        const info = state.port.getInfo ? state.port.getInfo() : {};
+        state.last.portInfo = `已选择 VID=${hexOrUnknown(info.usbVendorId)} PID=${hexOrUnknown(info.usbProductId)}`;
+        el.connectBtn.disabled = false;
+        setStatus("已选择串口，等待连接");
+        updateCards();
+      } catch (error) {
+        setStatus("未选择串口", "warn");
+      }
+    }
+
+    async function connectPort() {
+      if (!state.port) {
+        alert("请先选择串口。");
+        return;
+      }
+
+      try {
+        await state.port.open({
+          baudRate: Number(el.baudRate.value),
+          dataBits: Number(el.dataBits.value),
+          stopBits: Number(el.stopBits.value),
+          parity: el.parity.value,
+          flowControl: "none"
+        });
+        state.reading = true;
+        el.connectBtn.disabled = true;
+        el.disconnectBtn.disabled = false;
+        el.pickPortBtn.disabled = true;
+        setStatus("串口已连接", "good");
+        pushTimeline(`串口连接成功，波特率 ${el.baudRate.value}`);
+        readLoop();
+      } catch (error) {
+        alert(`串口打开失败：${error.message}`);
+        setStatus("连接失败", "bad");
+      }
+    }
+
+    async function disconnectPort() {
+      state.reading = false;
+
+      try {
+        if (state.reader) {
+          await state.reader.cancel();
+        }
+      } catch (error) {
+      }
+
+      try {
+        if (state.port) {
+          await state.port.close();
+        }
+      } catch (error) {
+      }
+
+      state.reader = null;
+      el.disconnectBtn.disabled = true;
+      el.connectBtn.disabled = !state.port;
+      el.pickPortBtn.disabled = false;
+      setStatus("串口已断开", "warn");
+      pushTimeline("串口已断开");
+    }
+
+    async function readLoop() {
+      const decoder = new TextDecoder();
+
+      try {
+        while (state.port && state.port.readable && state.reading) {
+          state.reader = state.port.readable.getReader();
+          try {
+            while (state.reading) {
+              const { value, done } = await state.reader.read();
+              if (done) {
+                break;
+              }
+              state.lineBuffer += decoder.decode(value, { stream: true });
+              const parts = state.lineBuffer.split(/\r?\n/);
+              state.lineBuffer = parts.pop() || "";
+              for (const line of parts) {
+                parseLine(line);
+              }
+            }
+          } finally {
+            state.reader.releaseLock();
+            state.reader = null;
+          }
+        }
+      } catch (error) {
+        if (state.reading) {
+          pushTimeline(`串口读取异常：${error.message}`);
+          setStatus("读取异常", "bad");
+        }
+      }
+    }
+
+    function parseBulkText(text) {
+      clearAll();
+      const lines = text.split(/\r?\n/);
+      for (const line of lines) {
+        parseLine(line);
+      }
+      pushTimeline(`离线解析完成，共 ${lines.length} 行`);
+    }
+
+    function bindEvents() {
+      el.pickPortBtn.addEventListener("click", pickPort);
+      el.connectBtn.addEventListener("click", connectPort);
+      el.disconnectBtn.addEventListener("click", disconnectPort);
+      el.clearBtn.addEventListener("click", clearAll);
+      el.showParsedOnly.addEventListener("change", renderRaw);
+      el.timelineLimit.addEventListener("change", renderTimeline);
+      el.rawLimit.addEventListener("change", renderRaw);
+
+      el.parsePasteBtn.addEventListener("click", () => {
+        const text = el.pasteBox.value.trim();
+        if (!text) {
+          alert("请先粘贴日志。");
+          return;
+        }
+        parseBulkText(text);
+      });
+
+      el.loadFileBtn.addEventListener("click", () => {
+        el.fileInput.click();
+      });
+
+      el.fileInput.addEventListener("change", async (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (!file) {
+          return;
+        }
+        const text = await file.text();
+        el.pasteBox.value = text;
+        parseBulkText(text);
+      });
+    }
+
+    function boot() {
+      bindEvents();
+      updateCards();
+
+      if (!("serial" in navigator)) {
+        el.pickPortBtn.disabled = true;
+        el.connectBtn.disabled = true;
+        pushTimeline("提示：当前浏览器不支持 Web Serial，请换 Chrome/Edge。");
+        setStatus("浏览器不支持 Web Serial", "bad");
+      } else {
+        pushTimeline("页面已就绪，可选择串口或粘贴日志解析。");
+      }
+    }
+
+    window.addEventListener("beforeunload", () => {
+      if (state.port) {
+        disconnectPort();
+      }
+    });
+
+    boot();
+  </script>
+</body>
+</html>

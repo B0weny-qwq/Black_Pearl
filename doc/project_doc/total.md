@@ -218,6 +218,15 @@ MainLoop_RunOnce()
 - 启用
 - 路由：UART2 `P1.0/P1.1`
 - 用于无线 `0x12` 状态包回传
+- 当前 `ShipProtocol_SendGpsOnce()` 除了保留老版 `0x12` 15 字节 payload 外，还会打印正式 `gps state` 日志：
+  - `fix`
+  - `sat`
+  - `lon`
+  - `lat`
+  - `angle`
+  - `power`
+  - `seq`
+- 该日志仅用于联调观测和上位机解析，不改变空口协议格式
 
 ### 7.2 QMC6309
 
