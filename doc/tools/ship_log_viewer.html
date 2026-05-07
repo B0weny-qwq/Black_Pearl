@@ -417,6 +417,11 @@
             <div id="rcMeta" class="meta">等待 0x11 手动帧</div>
           </div>
           <div class="card">
+            <div class="label">油门数值</div>
+            <div id="throttleValue" class="value">--</div>
+            <div id="throttleMeta" class="meta">等待 throttle_raw 日志</div>
+          </div>
+          <div class="card">
             <div class="label">动作判定</div>
             <div id="motionValue" class="value">--</div>
             <div id="motionMeta" class="meta">等待 0x11</div>
@@ -576,6 +581,8 @@
         pairMeta: "等待串口数据",
         rcValue: "离线",
         rcMeta: "等待 0x11 手动帧",
+        throttleValue: "--",
+        throttleMeta: "等待 throttle_raw 日志",
         motionValue: "--",
         motionMeta: "等待 0x11",
         txValue: "--",
@@ -620,6 +627,8 @@
       pairMeta: document.getElementById("pairMeta"),
       rcValue: document.getElementById("rcValue"),
       rcMeta: document.getElementById("rcMeta"),
+      throttleValue: document.getElementById("throttleValue"),
+      throttleMeta: document.getElementById("throttleMeta"),
       motionValue: document.getElementById("motionValue"),
       motionMeta: document.getElementById("motionMeta"),
       txValue: document.getElementById("txValue"),
@@ -734,6 +743,8 @@
       el.pairMeta.textContent = state.last.pairMeta;
       el.rcValue.textContent = state.last.rcValue;
       el.rcMeta.textContent = state.last.rcMeta;
+      el.throttleValue.textContent = state.last.throttleValue;
+      el.throttleMeta.textContent = state.last.throttleMeta;
       el.motionValue.textContent = state.last.motionValue;
       el.motionMeta.textContent = state.last.motionMeta;
       el.txValue.textContent = state.last.txValue;
@@ -775,6 +786,8 @@
         pairMeta: "等待串口数据",
         rcValue: "离线",
         rcMeta: "等待 0x11 手动帧",
+        throttleValue: "--",
+        throttleMeta: "等待 throttle_raw 日志",
         motionValue: "--",
         motionMeta: "等待 0x11",
         txValue: "--",
@@ -902,6 +915,8 @@
 
       const throttle = line.match(/\[SHIP\] I: throttle_raw=(\d+) steering_raw=(\d+) throttle_val=([-\d]+) steering_val=([-\d]+) key=(0x[0-9A-Fa-f]{2})\(([^)]+)\)/);
       if (throttle) {
+        state.last.throttleValue = `${throttle[3]}`;
+        state.last.throttleMeta = `raw=${throttle[1]} steering=${throttle[4]} raw_lr=${throttle[2]} key=${throttle[6]}`;
         state.last.rcMeta = `throttle=${throttle[3]} steering=${throttle[4]} key=${throttle[5]}(${throttle[6]})`;
         important = true;
       }
