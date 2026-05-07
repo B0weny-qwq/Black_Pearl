@@ -1331,22 +1331,21 @@ static void ShipProtocol_StepPairSend(void)
         }
         g_ship_rt.pair_left = left_after_send;
 
-        rc = ShipProtocol_ArmPairRspWindow((u8)((g_ship_rt.pair_left == 0U) ? 1U : 0U));
-        if (rc != SUCCESS) {
-            LOGE(SHIP_TAG, "pair rsp window arm fail rc=%d", rc);
-            g_ship_rt.pair_retry_count++;
-            g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
-            g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
-            g_ship_rt.pair_wait_rsp_time = 0U;
-            g_ship_rt.pair_wait_start_ms = 0UL;
-            return;
-        }
-
         if (g_ship_rt.pair_left == 0U) {
+            rc = ShipProtocol_ArmPairRspWindow(1U);
+            if (rc != SUCCESS) {
+                LOGE(SHIP_TAG, "pair rsp window arm fail rc=%d", rc);
+                g_ship_rt.pair_retry_count++;
+                g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
+                g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
+                g_ship_rt.pair_wait_rsp_time = 0U;
+                g_ship_rt.pair_wait_start_ms = 0UL;
+                return;
+            }
             g_ship_rt.state = SHIP_STATE_WORK_RX;
             LOGI(SHIP_TAG, "pair req burst done, enter rsp wait on work-rx");
         } else {
-            LOGI(SHIP_TAG, "pair req sent, open rsp window seq_left=%u wait=%u",
+            LOGI(SHIP_TAG, "pair req sent seq_left=%u wait=%u",
                  (u16)g_ship_rt.pair_left,
                  (u16)g_ship_rt.wait_ticks);
         }
