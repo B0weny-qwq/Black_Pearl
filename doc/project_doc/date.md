@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-07
- * @version v1.7.54
+ * @version v1.7.55
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -50,6 +50,23 @@
 ---
 
 ## 变更日志
+
+---
+
+## [2026-05-07] - v1.7.55 半桥电机 PWM 中点模型修正
+
+### Bug 修复
+- **[半桥 PWM 控制模型错误]** 之前 `Motor` 层把速度 0 直接映射为 `0%` 占空比，并在停机/换向时撤销 `PWMA CH3/CH4` 输出使能，导致 `P2.4~P2.7` 掉回 GPIO 上拉态，现场表现为 `MLA/MLB` 或 `MRA/MRB` 一起顶到 `3.3V`。修复：`Motor_Stop()` 改为回 `50%` 中点，占空比始终围绕中点偏移，PWM 不再退回 GPIO 上拉态。
+- **[CH3/CH4 极性与板级接法不匹配]** 复核原理图后确认左/右电机的 `PWMxP/PWMxN` 分别接到半桥驱动的 `HIN/LIN#`，两侧并非完全对称。修复：`Motor_LeftSetForwardPolarity()` 与 `Motor_RightSetForwardPolarity()` 改为按板级固定极性映射，不再按“速度正负切 P/N 极性”的旧思路处理。
+
+### 变更记录
+- **[Motor]** `Code_boweny/Device/MOTOR/Motor.c` 将速度映射改为 `-1000~+1000 -> 0~1000`，其中 `500` 为静止中点；初始化默认 duty 设为 `50%`，停机同样回到 `50%`。
+- **[GPIO/PWM 接管]** `P2.4~P2.7` 维持在 PWM 接管路径下工作，并关闭内部上拉，避免停机时被 GPIO 上拉错误拉高。
+- **[文档同步]** 更新根 `README.md`、`Code_boweny/Device/MOTOR/README.md`、`doc/project_doc/total.md`，统一说明当前真实电机模型。
+
+### 当前效果
+- 油门值变化时，PWM 已不再按“0% 关断、正负切极性”输出，而是按半桥驱动常见的“50% 中点 + 差分偏移”方式工作。
+- 本轮未改 `Driver/src/STC32G_PWM.c`，修复全部集中在 `Motor` 层，便于继续现场联调和回退。
 
 ---
 
