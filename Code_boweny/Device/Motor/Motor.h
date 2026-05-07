@@ -37,6 +37,15 @@ typedef enum
     MOTOR_RIGHT = 1   /**< 右侧电机。 */
 } Motor_Id_t;
 
+typedef struct
+{
+    u16 mla_duty;
+    u16 mlb_duty;
+    u16 mra_duty;
+    u16 mrb_duty;
+    u16 period;
+} Motor_PwmSnapshot_t;
+
 /**
  * @brief   初始化电机 PWM 输出和内部速度状态。
  * @return  none
@@ -78,5 +87,7 @@ void Motor_StopAll(void);
  * @return     当前速度；电机编号非法时返回 0。
  */
 int16 Motor_GetSpeed(Motor_Id_t motor);
+
+void Motor_GetPwmSnapshot(Motor_PwmSnapshot_t *snapshot);
 
 #endif

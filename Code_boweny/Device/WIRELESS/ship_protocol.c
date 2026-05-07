@@ -121,6 +121,7 @@ static void ShipProtocol_LogManualDecision(u8 left_right, u8 front_back, u8 key,
 static void ShipProtocol_LogRxDebug(const u8 *stage);
 static void ShipProtocol_LogPayloadBrief(const u8 *stage, u8 cmd, const u8 *payload, u8 payload_len);
 static void ShipProtocol_LogFrameBrief(const u8 *stage, u8 channel, const u8 *frame, u8 frame_len);
+static void ShipProtocol_LogPwmSnapshot(u8 force_log);
 
 static u8 ShipProtocol_AbsDelta(u8 value)
 {
@@ -316,6 +317,28 @@ static void ShipProtocol_LogMotion(ShipMotion_t motion, int16 left_speed, int16 
          right_speed);
 }
 
+static void ShipProtocol_LogPwmSnapshot(u8 force_log)
+{
+#if SHIP_THROTTLE_PWM_ENABLE
+    Motor_PwmSnapshot_t snapshot;
+
+    if (force_log == 0U) {
+        return;
+    }
+
+    Motor_GetPwmSnapshot(&snapshot);
+    LOGI(SHIP_TAG,
+         "pwm pins mla=%u mlb=%u mra=%u mrb=%u period=%u",
+         snapshot.mla_duty,
+         snapshot.mlb_duty,
+         snapshot.mra_duty,
+         snapshot.mrb_duty,
+         snapshot.period);
+#else
+    (void)force_log;
+#endif
+}
+
 static void ShipProtocol_ApplyMotion(ShipMotion_t motion, int16 speed, u8 force_log)
 {
     int16 left_speed;
@@ -360,6 +383,7 @@ static void ShipProtocol_ApplyMotion(ShipMotion_t motion, int16 speed, u8 force_
     g_ship_rt.motion = motion;
     if ((prev_motion != motion) || (force_log != 0U)) {
         ShipProtocol_LogMotion(motion, left_speed, right_speed);
+        ShipProtocol_LogPwmSnapshot(1U);
     }
 }
 
@@ -378,6 +402,7 @@ static void ShipProtocol_StopMotion(const u8 *reason, u8 force_log)
     g_ship_rt.pulse_expire_ms = 0UL;
     if ((prev_motion != SHIP_MOTION_STOP) || (force_log != 0U)) {
         LOGI(SHIP_TAG, "manual motion=stop reason=%s", reason);
+        ShipProtocol_LogPwmSnapshot(1U);
     }
 }
 
@@ -460,6 +485,7 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
     g_ship_rt.motion = target_motion;
     if ((prev_motion != target_motion) || (log_this_sample != 0U)) {
         ShipProtocol_LogMotion(target_motion, left_speed, right_speed);
+        ShipProtocol_LogPwmSnapshot(1U);
     }
 }
 

@@ -198,3 +198,20 @@ int16 Motor_GetSpeed(Motor_Id_t motor)
     }
     return g_right_speed;
 }
+
+void Motor_GetPwmSnapshot(Motor_PwmSnapshot_t *snapshot)
+{
+    if (snapshot == 0) {
+        return;
+    }
+
+    snapshot->period = MOTOR_PWM_PERIOD;
+
+    /* Left motor: PWM3N -> MLA, PWM3P -> MLB, both low-valid. */
+    snapshot->mla_duty = g_motor_pwm_duty.PWM3_Duty;
+    snapshot->mlb_duty = (u16)(MOTOR_PWM_PERIOD - g_motor_pwm_duty.PWM3_Duty);
+
+    /* Right motor: PWM4N -> MRA, PWM4P -> MRB, both high-valid. */
+    snapshot->mra_duty = (u16)(MOTOR_PWM_PERIOD - g_motor_pwm_duty.PWM4_Duty);
+    snapshot->mrb_duty = g_motor_pwm_duty.PWM4_Duty;
+}
