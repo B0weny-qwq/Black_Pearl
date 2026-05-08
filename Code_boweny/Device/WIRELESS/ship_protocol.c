@@ -35,6 +35,11 @@
 #define SHIP_TURN_COMPARE_BIAS         5U
 #define SHIP_AXIS_FILTER_SHIFT         2U
 #define SHIP_AXIS_MIX_DEADBAND         10
+#define SHIP_THROTTLE_DEADBAND         4
+#define SHIP_STEERING_DEADBAND         8
+#define SHIP_THROTTLE_MIN_COMMAND      180
+#define SHIP_THROTTLE_MAX_COMMAND      850
+#define SHIP_STEERING_MAX_COMMAND      700
 #define SHIP_PULSE_DURATION_MS         150U
 #define SHIP_PULSE_SPEED               700
 #define SHIP_THROTTLE_RECOVER_MS       3000UL
@@ -179,11 +184,14 @@ static int16 ShipProtocol_FilterAxis(u8 raw, int32 *state_q8)
     return (int16)((*state_q8 + 128) >> 8);
 }
 
-static int16 ShipProtocol_AxisToSignedSpeed(int16 value)
+static int16 ShipProtocol_ApplyAxisCurve(int16 value, int16 deadband,
+                                         int16 min_command, int16 max_command)
 {
     int16 delta;
     int16 sign;
     int16 magnitude;
+    int16 range;
+    int32 command;
 
     delta = value - (int16)SHIP_AXIS_CENTER;
     if (delta == 0) {
@@ -192,18 +200,50 @@ static int16 ShipProtocol_AxisToSignedSpeed(int16 value)
 
     sign = (delta > 0) ? 1 : -1;
     magnitude = (delta > 0) ? delta : (int16)(-delta);
-    if (magnitude <= SHIP_AXIS_MIX_DEADBAND) {
+    if (magnitude <= deadband) {
         return 0;
     }
 
-    magnitude = (int16)(magnitude - SHIP_AXIS_MIX_DEADBAND);
-    magnitude = (int16)(((int32)magnitude * MOTOR_SPEED_MAX) /
-                        (int32)(SHIP_AXIS_CENTER - SHIP_AXIS_MIX_DEADBAND));
-    if (magnitude > MOTOR_SPEED_MAX) {
-        magnitude = MOTOR_SPEED_MAX;
+    range = (int16)(SHIP_AXIS_CENTER - deadband);
+    magnitude = (int16)(magnitude - deadband);
+    if (range <= 0) {
+        return 0;
     }
 
-    return (int16)(sign * magnitude);
+    if (magnitude > range) {
+        magnitude = range;
+    }
+
+    if (max_command <= min_command) {
+        command = max_command;
+    } else {
+        command = min_command;
+        command += ((int32)magnitude * (int32)magnitude *
+                    (int32)(max_command - min_command)) /
+                   ((int32)range * (int32)range);
+    }
+
+    if (command > max_command) {
+        command = max_command;
+    }
+
+    return (int16)(sign * (int16)command);
+}
+
+static int16 ShipProtocol_ThrottleToSignedSpeed(int16 value)
+{
+    return ShipProtocol_ApplyAxisCurve(value,
+                                       SHIP_THROTTLE_DEADBAND,
+                                       SHIP_THROTTLE_MIN_COMMAND,
+                                       SHIP_THROTTLE_MAX_COMMAND);
+}
+
+static int16 ShipProtocol_SteeringToSignedSpeed(int16 value)
+{
+    return ShipProtocol_ApplyAxisCurve(value,
+                                       SHIP_STEERING_DEADBAND,
+                                       0,
+                                       SHIP_STEERING_MAX_COMMAND);
 }
 
 static void ShipProtocol_ResetAxisFilter(void)
@@ -452,8 +492,8 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
 
     filtered_left_right = ShipProtocol_FilterAxis(left_right, &g_ship_rt.filtered_lr_q8);
     filtered_front_back = ShipProtocol_FilterAxis(front_back, &g_ship_rt.filtered_ud_q8);
-    throttle_speed = ShipProtocol_AxisToSignedSpeed(filtered_front_back);
-    steering_speed = ShipProtocol_AxisToSignedSpeed(filtered_left_right);
+    throttle_speed = ShipProtocol_ThrottleToSignedSpeed(filtered_front_back);
+    steering_speed = ShipProtocol_SteeringToSignedSpeed(filtered_left_right);
     left_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed + steering_speed));
     right_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed - steering_speed));
     abs_throttle = (throttle_speed >= 0) ? throttle_speed : (int16)(-throttle_speed);
