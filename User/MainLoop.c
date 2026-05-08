@@ -8,7 +8,7 @@
 #include "..\Code_boweny\Device\WIRELESS\ship_protocol.h"
 #include "..\Code_boweny\Function\Log\Log.h"
 
-#if ENABLE_WIRELESS_MODULE
+#if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP
 static void Wireless_MinimalTestUnit(void)
 {
     s8 rc;
@@ -71,7 +71,7 @@ static void MAG_StandalonePoll(void)
 
 void MainLoop_Bootstrap(void)
 {
-#if ENABLE_WIRELESS_MODULE
+#if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP
     Wireless_MinimalTestUnit();
 #endif
 }
@@ -82,7 +82,7 @@ void MainLoop_RunOnce(void)
     GPS_Poll();
 #endif
 
-#if ENABLE_WIRELESS_MODULE
+#if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP
     Wireless_Poll();
 #if ENABLE_SHIP_PROTOCOL_SCHED && SHIP_PROTOCOL_POLL_ENABLE
     ShipProtocol_RunScheduler();

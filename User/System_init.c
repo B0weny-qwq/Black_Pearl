@@ -179,7 +179,7 @@ void SYS_Init(void)
     log_init();
 #endif
 
-#if ENABLE_WIRELESS_MODULE
+#if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP
     LOGI("SYS", "wireless stack init start");
     Wireless_Init();
 #endif

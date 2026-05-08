@@ -35,14 +35,18 @@
 
 /* 总线、波特率和初始化参数。 */
 #define LOG_UART_BAUDRATE              115200UL
+#define SERIAL_LOG_LEVEL               2U
 #define GPS_UART_BAUDRATE              115200UL
+#define GPS_DIAG_LOG_ENABLE            0U
 #define SENSOR_I2C_SPEED_CFG           58U
 #define SYSTEM_SPI_SPEED_CFG           SPI_Speed_4
 
 /* 无线 SPI 选择：1=软件 SPI，0=硬件 SPI4。 */
-#define WIRELESS_SPI_USE_SOFT          0
-#define WIRELESS_HW_SPI_SPEED_CFG      SPI_Speed_16
-#define WIRELESS_SOFT_SPI_DELAY_US     0
+#define ENABLE_LT8920_CHIP            1
+#define ENABLE_KCT8206L_FRONTEND      1
+#define WIRELESS_SPI_USE_SOFT         0
+#define WIRELESS_HW_SPI_SPEED_CFG     SPI_Speed_16
+#define WIRELESS_SOFT_SPI_DELAY_US    0
 
 /* 无线协议与联调开关。 */
 #define SHIP_PROTOCOL_POLL_ENABLE      1
@@ -76,13 +80,17 @@
 #define SHIP_ADC_LOG_ENABLE            1
 
 /* 无线调试输出开关。 */
-#define WIRELESS_FRONTEND_BYPASS_TEST  0
-#define WIRELESS_TX_ONLY_TEST          0
-#define WIRELESS_PAIR_TX_ONLY_TEST     0
-#define WIRELESS_CONTINUOUS_TX_TEST    0
-#define WIRELESS_CARRIER_WAVE_TEST     0
-#define WIRELESS_RX_TRACE_ENABLE       0
-#define WIRELESS_TX_TRACE_ENABLE       0
+#if ENABLE_KCT8206L_FRONTEND
+#define WIRELESS_FRONTEND_BYPASS_TEST 0
+#else
+#define WIRELESS_FRONTEND_BYPASS_TEST 1
+#endif
+#define WIRELESS_TX_ONLY_TEST         0
+#define WIRELESS_PAIR_TX_ONLY_TEST    0
+#define WIRELESS_CONTINUOUS_TX_TEST   0
+#define WIRELESS_CARRIER_WAVE_TEST    0
+#define WIRELESS_RX_TRACE_ENABLE      0
+#define WIRELESS_TX_TRACE_ENABLE      0
 
 /*
  * 保留旧代码路径兼容宏。

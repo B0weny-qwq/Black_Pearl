@@ -172,7 +172,7 @@ static void Wireless_EnableTxFrontend(void)
 {
 #if !WIRELESS_FRONTEND_BYPASS_TEST
     /* 兼容旧版 LT8920_TxData() 的时序：RX_EN 保持高电平，只脉�?TX_EN�?*/
-    WirelessPort_SetRxEn(1U);
+    WirelessPort_SetRxEn(0U);
     WirelessPort_SetTxEn(1U);
     WirelessPort_DelayUs(5U);
 #endif
