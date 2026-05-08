@@ -134,6 +134,41 @@ MainLoop_RunOnce()
 [SHIP] I: pair ok, enter work channel rx_ch=13 tx_ch=13
 ```
 
+### 配对与工作态时序图
+
+```mermaid
+sequenceDiagram
+    participant Main as "MainLoop"
+    participant WL as "wireless.c"
+    participant Ship as "ship_protocol.c"
+    participant LT as "LT8920/KCT8206L"
+    participant RC as "Remote"
+
+    Main->>WL: Wireless_Poll()
+    Main->>Ship: ShipProtocol_RunScheduler()
+    Ship->>Ship: BOOT_WAIT
+    Ship->>Ship: 10ms tick / wait_ticks--
+
+    loop pair_left > 0
+        Ship->>Ship: 组帧 AA|06|0x10|seed|xor|BB
+        Ship->>WL: Wireless_SendOnChannel(0x7F, pair_req)
+        WL->>LT: 切配对信道并发包
+        LT-->>RC: 发出 PAIR_REQ(0x10)
+    end
+
+    Ship->>Ship: pair_left == 0
+    Ship->>LT: 写工作 sync/key 到 idle
+    Ship->>LT: 切工作信道 RX(work_ch)
+    Ship->>Ship: pair_wait_rsp_time = 500
+
+    RC-->>LT: PAIR_RSP(0x0F)
+    LT-->>WL: RF payload
+    WL-->>Ship: Wireless_Receive() 出队
+    Ship->>Ship: ParseFrame() / HandlePairRsp()
+    Ship->>Ship: paired = 1
+    Ship->>Ship: state = WORK_RX
+```
+
 ## 7. `0x11` 手动控制
 
 当前 `0x11` 恢复的是老版手动开环语义，不做闭环修正：
@@ -161,6 +196,36 @@ MainLoop_RunOnce()
 - 收到合法 `0x11` 后刷新在线时间戳。
 - 超过 `SHIP_THROTTLE_TIMEOUT_MS` 未收到新 `0x11` 时，强制停机。
 - 长时间收不到新的 `0x11`` 时，会按开环安全版恢复节奏重新打开工作 RX，但不会恢复老版自动驾驶、巡航或软复位副作用。
+
+### `0x11` 遥控接收与电机控制时序图
+
+```mermaid
+sequenceDiagram
+    participant RC as "Remote"
+    participant LT as "LT8920/KCT8206L"
+    participant WL as "wireless.c"
+    participant Ship as "ship_protocol.c"
+    participant Motor as "Motor PWM"
+    participant Host as "Upper Host"
+
+    RC-->>LT: cmd=0x11 (lr, ud, key)
+    LT-->>WL: 收到 RF payload
+    WL->>WL: CRC 检查 / ReadPacket()
+    WL->>WL: QueuePush(payload)
+    Ship->>WL: Wireless_Receive()
+    WL-->>Ship: 一帧旧协议载荷
+    Ship->>Ship: ReceiveHandle() 逐字节截帧
+    Ship->>Ship: ParseFrame() 校验 AA/len/xor/BB
+    Ship->>Ship: HandleThrottle()
+    Ship->>Ship: lr/ud/key 更新
+    Ship->>Ship: FilterAxis() + deadband + curve
+    Ship->>Ship: left = throttle + steering
+    Ship->>Ship: right = throttle - steering
+    Ship->>Motor: Motor_SetBothSpeed(left, right)
+    Ship->>Ship: 刷新 last_throttle_rx_ms
+    Ship->>Host: 立即回发 0x12 状态包
+    Ship->>LT: Reopen work RX
+```
 
 ## 8. `0x12` 状态回传
 

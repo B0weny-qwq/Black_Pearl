@@ -116,6 +116,32 @@ main()
 - `update_sequence` 仅在新的 `RMC UTC/Date` 到达时递增
 - 模块不主动周期打印日志，只在初始化失败时输出必要日志
 
+## 运行时序图
+
+```mermaid
+sequenceDiagram
+    participant Main as "MainLoop"
+    participant UART2 as "UART2 RX Buffer"
+    participant GPS as "GPS.c"
+    participant Parser as "NMEA Parser"
+    participant State as "GPS_State_t"
+
+    Main->>GPS: GPS_Poll()
+    GPS->>UART2: 读取 RX2_Buffer 增量字节
+    UART2-->>GPS: 原始 NMEA 字节流
+    GPS->>GPS: 写入模块 FIFO
+
+    loop byte by byte
+        GPS->>Parser: 喂入 1 字节
+        Parser->>Parser: 找 '$' / 累加 XOR / 找 '*'
+    end
+
+    Parser->>Parser: 校验通过并拆字段
+    Parser->>Parser: RMC/GGA/GSA/GSV/VTG 定点换算
+    Parser->>State: 更新最新定位状态
+    State-->>Main: 上层通过 GPS_GetState() 读取
+```
+
 ## 解析策略
 
 实现细节固定如下：

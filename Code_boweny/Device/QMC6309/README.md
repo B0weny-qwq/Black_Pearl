@@ -93,6 +93,35 @@ s8 QMC6309_Wait_Ready(u16 timeout_ms);
 void QMC6309_DumpRegs(u8 target_addr);
 ```
 
+## 初始化与读数时序图
+
+```mermaid
+sequenceDiagram
+    participant SYS as "SYS_Init"
+    participant Prep as "Sensor_I2C_prepare"
+    participant QMC as "QMC6309.c"
+    participant Port as "QMC6309_port / I2C"
+    participant Chip as "QMC6309"
+
+    SYS->>Prep: 恢复 P1.4/P1.5 与 I2C 总线
+    SYS->>QMC: QMC6309_Init()
+    QMC->>Port: 探测 0x7C / 0x0C
+    Port->>Chip: I2C Probe
+    Chip-->>QMC: ACK + CHIP_ID
+    QMC->>Port: 写 CONTROL_1 / CONTROL_2
+    Port->>Chip: 配置 ODR / 模式
+    Chip-->>QMC: 回读 OK
+
+    loop runtime poll
+        Upper->>QMC: QMC6309_ReadXYZ() / ReadXYZFiltered()
+        QMC->>Port: 读 XYZ 寄存器
+        Port->>Chip: I2C Read
+        Chip-->>QMC: X/Y/Z 原始值
+        QMC->>QMC: 可选低通滤波
+        QMC-->>Upper: 返回磁场数据
+    end
+```
+
 ## 低通滤波接入
 
 原始读取路径保留：

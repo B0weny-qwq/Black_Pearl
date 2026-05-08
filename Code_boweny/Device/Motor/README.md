@@ -31,6 +31,31 @@ int16 Motor_GetSpeed(Motor_Id_t motor);
 - `speed < 0` 时，占空比在 `50%` 基础上下偏
 - 当前实现保持 `PWMA CH3/CH4` 持续接管引脚，不再在停机时撤回到 GPIO 上拉态
 
+## 控制时序图
+
+```mermaid
+sequenceDiagram
+    participant Upper as "Upper Control"
+    participant Motor as "Motor.c"
+    participant PWMA as "PWMA CH3/CH4"
+    participant Driver as "Half-Bridge Driver"
+    participant Load as "Left/Right Motor"
+
+    Upper->>Motor: Motor_Init()
+    Motor->>PWMA: 配置 CH3/CH4 + 绑定 P2.4~P2.7
+    PWMA-->>Driver: 输出 50% 中点占空比
+
+    Upper->>Motor: Motor_SetBothSpeed(left, right)
+    Motor->>Motor: 限幅到 -1000~1000
+    Motor->>Motor: 按 speed 计算中点偏移占空比
+    Motor->>PWMA: 更新 PWM3/4 P/N 输出
+    PWMA-->>Driver: 输出 MLA/MLB/MRA/MRB
+    Driver-->>Load: 左右电机转动
+
+    Upper->>Motor: Motor_StopAll()
+    Motor->>PWMA: 两路占空比回到 50%
+```
+
 ## 使用示例
 
 ```c

@@ -172,7 +172,9 @@ static void Wireless_EnableTxFrontend(void)
 {
 #if !WIRELESS_FRONTEND_BYPASS_TEST
     /* 兼容旧版 LT8920_TxData() 的时序：RX_EN 保持高电平，只脉�?TX_EN�?*/
-    WirelessPort_SetRxEn(0U);
+    WirelessPort_SetRxEn(1U);
+    WirelessPort_SetTxEn(0U);
+    WirelessPort_DelayUs(5U);
     WirelessPort_SetTxEn(1U);
     WirelessPort_DelayUs(5U);
 #endif
@@ -882,6 +884,11 @@ s8 Wireless_RescanAntenna(void)
         g_wireless_state.scan_has_signal = 1U;
     }
 
+#if (WIRELESS_FORCE_ANT_MODE == WIRELESS_FORCE_ANT_1)
+    final_ant = WIRELESS_ANT1;
+#elif (WIRELESS_FORCE_ANT_MODE == WIRELESS_FORCE_ANT_2)
+    final_ant = WIRELESS_ANT2;
+#endif
     rc = Wireless_SetAntenna(final_ant);
     if (rc != SUCCESS) {
         return rc;

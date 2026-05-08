@@ -68,6 +68,38 @@ for (;;) {
 }
 ```
 
+## 初始化与取数时序图
+
+```mermaid
+sequenceDiagram
+    participant Upper as "Upper Logic"
+    participant Port as "QMI8658_port"
+    participant IMU as "QMI8658.c"
+    participant Bus as "Soft/Hard I2C"
+    participant Chip as "QMI8658"
+
+    Upper->>Port: Sensor_I2C_prepare()
+    Upper->>IMU: QMI8658_RequestReinit()
+
+    loop main loop
+        Upper->>IMU: QMI8658_Service()
+        IMU->>Bus: 读 ID / 写 CTRLx / 轮询 ready
+        Bus->>Chip: I2C Access
+        Chip-->>IMU: 状态寄存器 / 数据寄存器
+        IMU->>IMU: 推进非阻塞初始化状态机
+    end
+
+    Upper->>IMU: QMI8658_IsReady()
+    IMU-->>Upper: ready = 1
+    Upper->>IMU: QMI8658_HasDataReady()
+    IMU-->>Upper: data ready = 1
+    Upper->>IMU: QMI8658_ReadAll()
+    IMU->>Bus: 读取 Acc/Gyro 数据
+    Bus->>Chip: Burst Read
+    Chip-->>IMU: 6 轴原始值
+    IMU-->>Upper: ax/ay/az/gx/gy/gz
+```
+
 ## 说明
 
 - 当前板上没有单独接出的 IMU 外部 INT 脚，所以“中断标志位轮询”实现为寄存器 ready 位轮询
