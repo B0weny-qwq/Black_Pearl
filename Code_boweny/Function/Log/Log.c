@@ -55,7 +55,8 @@ static bit log_allow_in_ahrs_test(u8 level, u8 *tag)
         return 1;
     }
 
-    if (log_tag_is(tag, "AHRS")) {
+    if (log_tag_is(tag, "AHRS") ||
+        log_tag_is(tag, "HDG")) {
         return 1;
     }
 
@@ -179,6 +180,7 @@ void log_init(void)
     PrintString1("\r\n");
     log_printf("[SYS] I: ============== Black Pearl v1.1 ==============");
     log_printf("[SYS] I:   MCU : STC32G  Fosc=%luHz", (u32)MAIN_Fosc);
+    /* Keep the banner tied to the latest firmware build for field diagnosis. */
     log_printf("[SYS] I:   Author : boweny  Build : %s %s", __DATE__, __TIME__);
     log_printf("[SYS] I: LOG Ready. Use LOGI/LOGW/LOGE/LOGD/log_printf");
     PrintString1("\r\n");

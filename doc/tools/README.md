@@ -70,6 +70,9 @@ Web Serial 不能在普通 `file://` 本地文件上下文里访问串口。
 - `[SHIP] I: tx cmd=0x12 ...`
 - `[SHIP] I: gps state fix=... sat=... lon=... lat=... angle=... seq=...`
 - `[SHIP] I: adc p0.0 ...`
+- `[AHRS] I: r=... p=... y=... g=... f=...`
+- `[AHRS] I: r=... p=... y=... ys=... g=... f=...`
+- `[AHRS] I: r=... p=... y=... yr=... f=...`
 - `[MAG] I: test raw=...`
 - `[WL]/[SHIP]/[MAG]/[GPS]` 的 `W:` / `E:` 日志
 

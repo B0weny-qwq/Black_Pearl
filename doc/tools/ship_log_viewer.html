@@ -183,7 +183,13 @@
       line-height: 1.1;
       font-weight: 900;
       color: var(--accent-deep);
+      white-space: pre-line;
       word-break: break-word;
+    }
+
+    .value-compact {
+      font-size: 20px;
+      line-height: 1.2;
     }
 
     .table {
@@ -320,6 +326,31 @@
         <div class="subhead"><h2>联调摘要</h2></div>
         <div class="cards">
           <div class="card">
+            <div class="label">AHRS R/P/Y</div>
+            <div id="ahrsPoseValue" class="value value-compact">--</div>
+            <div id="ahrsPoseMeta" class="meta">等待 AHRS 日志</div>
+          </div>
+          <div class="card">
+            <div class="label">AHRS Gyro</div>
+            <div id="ahrsGyroValue" class="value">--</div>
+            <div id="ahrsGyroMeta" class="meta">gX / gY / gZ</div>
+          </div>
+          <div class="card">
+            <div class="label">Yaw 状态</div>
+            <div id="ahrsYawValue" class="value">--</div>
+            <div id="ahrsYawMeta" class="meta">等待 ys / yr</div>
+          </div>
+          <div class="card">
+            <div class="label">AHRS Flags</div>
+            <div id="ahrsFlagValue" class="value">--</div>
+            <div id="ahrsFlagMeta" class="meta">flags / mag</div>
+          </div>
+          <div class="card">
+            <div class="label">HDG Debug</div>
+            <div id="hdgValue" class="value value-compact">--</div>
+            <div id="hdgMeta" class="meta">waiting [HDG]</div>
+          </div>
+          <div class="card">
             <div class="label">配对状态</div>
             <div id="pairValue" class="value">未配对</div>
             <div id="pairMeta" class="meta">等待串口数据</div>
@@ -340,9 +371,9 @@
             <div id="motionMeta" class="meta">等待 0x11</div>
           </div>
           <div class="card">
-            <div class="label">四路 PWM</div>
+            <div class="label">PWM / 左右输出</div>
             <div id="pwmValue" class="value">--</div>
-            <div id="pwmMeta" class="meta">等待 pwm pins 日志</div>
+            <div id="pwmMeta" class="meta">等待 MOT / pwm pins 日志</div>
           </div>
           <div class="card">
             <div class="label">按键状态</div>
@@ -368,6 +399,8 @@
 
         <table class="table">
           <tbody>
+            <tr><td>AHRS 状态</td><td id="ahrsInfo">等待 AHRS 日志</td></tr>
+            <tr><td>HDG Debug</td><td id="hdgInfo">waiting [HDG]</td></tr>
             <tr><td>串口状态</td><td id="portInfo">未选择</td></tr>
             <tr><td>遥控在线状态</td><td id="remoteInfo">离线</td></tr>
             <tr><td>最近收到命令</td><td id="lastRxCmd">--</td></tr>
@@ -477,6 +510,18 @@
         raw: true
       },
       last: {
+        ahrsPoseValue: "--",
+        ahrsPoseMeta: "等待 AHRS 日志",
+        ahrsGyroValue: "--",
+        ahrsGyroMeta: "gX / gY / gZ",
+        ahrsYawValue: "--",
+        ahrsYawMeta: "等待 ys / yr",
+        ahrsFlagValue: "--",
+        ahrsFlagMeta: "flags / mag",
+        ahrsInfo: "等待 AHRS 日志",
+        hdgValue: "--",
+        hdgMeta: "waiting [HDG]",
+        hdgInfo: "waiting [HDG]",
         pair: "未配对",
         pairMeta: "等待串口数据",
         rcValue: "离线",
@@ -486,7 +531,7 @@
         motionValue: "--",
         motionMeta: "等待 0x11",
         pwmValue: "--",
-        pwmMeta: "等待 pwm pins 日志",
+        pwmMeta: "等待 MOT / pwm pins 日志",
         keyValue: "--",
         keyMeta: "等待 key 日志",
         txValue: "--",
@@ -530,6 +575,16 @@
       disconnectBtn: document.getElementById("disconnectBtn"),
       clearBtn: document.getElementById("clearBtn"),
       statusChip: document.getElementById("statusChip"),
+      ahrsPoseValue: document.getElementById("ahrsPoseValue"),
+      ahrsPoseMeta: document.getElementById("ahrsPoseMeta"),
+      ahrsGyroValue: document.getElementById("ahrsGyroValue"),
+      ahrsGyroMeta: document.getElementById("ahrsGyroMeta"),
+      ahrsYawValue: document.getElementById("ahrsYawValue"),
+      ahrsYawMeta: document.getElementById("ahrsYawMeta"),
+      ahrsFlagValue: document.getElementById("ahrsFlagValue"),
+      ahrsFlagMeta: document.getElementById("ahrsFlagMeta"),
+      hdgValue: document.getElementById("hdgValue"),
+      hdgMeta: document.getElementById("hdgMeta"),
       pairValue: document.getElementById("pairValue"),
       pairMeta: document.getElementById("pairMeta"),
       rcValue: document.getElementById("rcValue"),
@@ -548,6 +603,8 @@
       powerMeta: document.getElementById("powerMeta"),
       magValue: document.getElementById("magValue"),
       magMeta: document.getElementById("magMeta"),
+      ahrsInfo: document.getElementById("ahrsInfo"),
+      hdgInfo: document.getElementById("hdgInfo"),
       portInfo: document.getElementById("portInfo"),
       remoteInfo: document.getElementById("remoteInfo"),
       lastRxCmd: document.getElementById("lastRxCmd"),
@@ -656,6 +713,18 @@
     }
 
     function renderCards() {
+      el.ahrsPoseValue.textContent = state.last.ahrsPoseValue;
+      el.ahrsPoseMeta.textContent = state.last.ahrsPoseMeta;
+      el.ahrsGyroValue.textContent = state.last.ahrsGyroValue;
+      el.ahrsGyroMeta.textContent = state.last.ahrsGyroMeta;
+      el.ahrsYawValue.textContent = state.last.ahrsYawValue;
+      el.ahrsYawMeta.textContent = state.last.ahrsYawMeta;
+      el.ahrsFlagValue.textContent = state.last.ahrsFlagValue;
+      el.ahrsFlagMeta.textContent = state.last.ahrsFlagMeta;
+      el.ahrsInfo.textContent = state.last.ahrsInfo;
+      el.hdgValue.textContent = state.last.hdgValue;
+      el.hdgMeta.textContent = state.last.hdgMeta;
+      el.hdgInfo.textContent = state.last.hdgInfo;
       el.pairValue.textContent = state.last.pair;
       el.pairMeta.textContent = state.last.pairMeta;
       el.rcValue.textContent = state.last.rcValue;
@@ -794,6 +863,35 @@
       return `${dir}${p1}.${p2}`;
     }
 
+    function formatAhrsFlags(flagHex) {
+      const value = Number.parseInt(flagHex, 16);
+      if (!Number.isFinite(value)) {
+        return "unknown";
+      }
+      const flags = [];
+      if (value & 0x01) flags.push("ready");
+      if (value & 0x02) flags.push("acc");
+      if (value & 0x04) flags.push("mag");
+      if (value & 0x08) flags.push("bias");
+      if (value & 0x10) flags.push("acc-ref");
+      if (value & 0x20) flags.push("dt-clamp");
+      return flags.length ? flags.join(" / ") : "none";
+    }
+
+    function formatAhrsMagState(flagHex, suffix) {
+      if (suffix === "mv=0") {
+        return "mag invalid";
+      }
+      if (suffix === "me=0") {
+        return "mag off";
+      }
+      const value = Number.parseInt(flagHex, 16);
+      if (!Number.isFinite(value)) {
+        return "mag unknown";
+      }
+      return (value & 0x04) ? "mag valid" : "mag pending";
+    }
+
     function parseLine(rawLine) {
       const line = rawLine.trimEnd();
       if (!line) {
@@ -802,6 +900,100 @@
 
       state.lineCount += 1;
       let important = false;
+
+      const ahrs = line.match(/^\[AHRS\] I: r=([+\-]\d+\.\d+) p=([+\-]\d+\.\d+) y=([+\-]\d+\.\d+)(?: ys=(\d+))?(?: g=([+\-]\d+\.\d+) ([+\-]\d+\.\d+) ([+\-]\d+\.\d+))?(?: yr=([+\-]\d+\.\d+))? f=([0-9A-Fa-f]{2})(?: (mv=0|me=0))?$/);
+      if (ahrs) {
+        const flagHex = ahrs[9].toUpperCase();
+        const magState = formatAhrsMagState(flagHex, ahrs[10] || "");
+        state.last.ahrsPoseValue = `r ${ahrs[1]}\np ${ahrs[2]}\ny ${ahrs[3]}`;
+        state.last.ahrsPoseMeta = "roll / pitch / yaw (deg)";
+        if (ahrs[5] && ahrs[6] && ahrs[7]) {
+          state.last.ahrsGyroValue = `${ahrs[5]} / ${ahrs[6]} / ${ahrs[7]}`;
+          state.last.ahrsGyroMeta = "gX / gY / gZ (deg/s)";
+        } else {
+          state.last.ahrsGyroValue = "--";
+          state.last.ahrsGyroMeta = "当前日志未附带 g=";
+        }
+        if (ahrs[8]) {
+          state.last.ahrsYawValue = ahrs[8];
+          state.last.ahrsYawMeta = "relative yaw (yr)";
+        } else if (ahrs[4]) {
+          state.last.ahrsYawValue = `YS ${ahrs[4]}`;
+          state.last.ahrsYawMeta = "waiting yaw lock";
+        } else {
+          state.last.ahrsYawValue = "ABS";
+          state.last.ahrsYawMeta = `absolute yaw ${ahrs[3]}`;
+        }
+        state.last.ahrsFlagValue = `0x${flagHex}`;
+        state.last.ahrsFlagMeta = `${formatAhrsFlags(flagHex)} / ${magState}`;
+        state.last.ahrsInfo =
+          `r=${ahrs[1]} p=${ahrs[2]} y=${ahrs[3]}`
+          + (ahrs[4] ? ` ys=${ahrs[4]}` : "")
+          + (ahrs[8] ? ` yr=${ahrs[8]}` : "")
+          + (ahrs[5] ? ` g=${ahrs[5]} ${ahrs[6]} ${ahrs[7]}` : "")
+          + ` f=0x${flagHex} ${magState}`;
+        important = true;
+      }
+
+      const hdgLock = line.match(/^\[HDG\] I: y=([+\-]\d+\.\d+) yg=([+\-]\d+\.\d+) ym=([+\-]\d+\.\d+) ys=(\d+) gz=([+\-]\d+\.\d+)(?: bz=([+\-]\d+\.\d+))?(?: mv=(\d+))?(?: mu=(\d+))?(?: sf=(\d+))?(?: err=([+\-]\d+\.\d+))?(?: hp=([+\-]\d+\.\d+))?(?: hd=([+\-]\d+\.\d+))?(?: hm=([+\-]\d+\.\d+))? f=([0-9A-Fa-f]{2})(?: (mv=0|me=0))?$/);
+      if (hdgLock) {
+        const flagHex = hdgLock[14].toUpperCase();
+        const magState = formatAhrsMagState(flagHex, hdgLock[15] || "");
+        state.last.hdgValue = `y ${hdgLock[1]}\nyg ${hdgLock[2]}\nym ${hdgLock[3]}`;
+        state.last.hdgMeta =
+          `ys=${hdgLock[4]} / gz=${hdgLock[5]}`
+          + (hdgLock[6] ? ` / bz=${hdgLock[6]}` : "")
+          + (hdgLock[7] ? ` / mv=${hdgLock[7]}` : "")
+          + (hdgLock[8] ? ` / mu=${hdgLock[8]}` : "")
+          + (hdgLock[9] ? ` / sf=${hdgLock[9]}` : "")
+          + (hdgLock[10] ? ` / err=${hdgLock[10]}` : "")
+          + (hdgLock[11] ? ` / hp=${hdgLock[11]}` : "")
+          + (hdgLock[12] ? ` / hd=${hdgLock[12]}` : "")
+          + (hdgLock[13] ? ` / hm=${hdgLock[13]}` : "");
+        state.last.hdgInfo =
+          `HDG lock y=${hdgLock[1]} yg=${hdgLock[2]} ym=${hdgLock[3]}`
+          + ` ys=${hdgLock[4]} gz=${hdgLock[5]}`
+          + (hdgLock[6] ? ` bz=${hdgLock[6]}` : "")
+          + (hdgLock[7] ? ` mv=${hdgLock[7]}` : "")
+          + (hdgLock[8] ? ` mu=${hdgLock[8]}` : "")
+          + (hdgLock[9] ? ` sf=${hdgLock[9]}` : "")
+          + (hdgLock[10] ? ` err=${hdgLock[10]}` : "")
+          + (hdgLock[11] ? ` hp=${hdgLock[11]}` : "")
+          + (hdgLock[12] ? ` hd=${hdgLock[12]}` : "")
+          + (hdgLock[13] ? ` hm=${hdgLock[13]}` : "")
+          + ` f=0x${flagHex} ${magState}`;
+        important = true;
+      }
+
+      const hdgRel = line.match(/^\[HDG\] I: yr=([+\-]\d+\.\d+) yg=([+\-]\d+\.\d+) ym=([+\-]\d+\.\d+) gz=([+\-]\d+\.\d+)(?: bz=([+\-]\d+\.\d+))?(?: mv=(\d+))?(?: mu=(\d+))?(?: sf=(\d+))?(?: err=([+\-]\d+\.\d+))?(?: hp=([+\-]\d+\.\d+))?(?: hd=([+\-]\d+\.\d+))?(?: hm=([+\-]\d+\.\d+))? f=([0-9A-Fa-f]{2})(?: (mv=0|me=0))?$/);
+      if (hdgRel) {
+        const flagHex = hdgRel[13].toUpperCase();
+        const magState = formatAhrsMagState(flagHex, hdgRel[14] || "");
+        state.last.hdgValue = `yr ${hdgRel[1]}\nyg ${hdgRel[2]}\nym ${hdgRel[3]}`;
+        state.last.hdgMeta =
+          `gz=${hdgRel[4]}`
+          + (hdgRel[5] ? ` / bz=${hdgRel[5]}` : "")
+          + (hdgRel[6] ? ` / mv=${hdgRel[6]}` : "")
+          + (hdgRel[7] ? ` / mu=${hdgRel[7]}` : "")
+          + (hdgRel[8] ? ` / sf=${hdgRel[8]}` : "")
+          + (hdgRel[9] ? ` / err=${hdgRel[9]}` : "")
+          + (hdgRel[10] ? ` / hp=${hdgRel[10]}` : "")
+          + (hdgRel[11] ? ` / hd=${hdgRel[11]}` : "")
+          + (hdgRel[12] ? ` / hm=${hdgRel[12]}` : "");
+        state.last.hdgInfo =
+          `HDG yr=${hdgRel[1]} yg=${hdgRel[2]} ym=${hdgRel[3]}`
+          + ` gz=${hdgRel[4]}`
+          + (hdgRel[5] ? ` bz=${hdgRel[5]}` : "")
+          + (hdgRel[6] ? ` mv=${hdgRel[6]}` : "")
+          + (hdgRel[7] ? ` mu=${hdgRel[7]}` : "")
+          + (hdgRel[8] ? ` sf=${hdgRel[8]}` : "")
+          + (hdgRel[9] ? ` err=${hdgRel[9]}` : "")
+          + (hdgRel[10] ? ` hp=${hdgRel[10]}` : "")
+          + (hdgRel[11] ? ` hd=${hdgRel[11]}` : "")
+          + (hdgRel[12] ? ` hm=${hdgRel[12]}` : "")
+          + ` f=0x${flagHex} ${magState}`;
+        important = true;
+      }
 
       const pairReq = line.match(/\[SHIP\] I: pair req sent seq=(\d+)\/(\d+) retry=(\d+) ch=0x([0-9A-Fa-f]+)/);
       if (pairReq) {
@@ -872,6 +1064,21 @@
         state.last.throttleMeta = `raw=${throttle[1]} steering=${throttle[4]} raw_lr=${throttle[2]} key=${throttle[6]}`;
         state.last.rcMeta = `throttle=${throttle[3]} steering=${throttle[4]} key=${throttle[5]}(${throttle[6]})`;
         updateKeyFromFrame(throttle[5], throttle[6], "throttle");
+        important = true;
+      }
+
+      const motorOut = line.match(/^\[MOT\] I: m=(\d+) y=([-\d]+)(?: t=([-\d]+))? o=([-\d]+) l=([-\d]+) r=([-\d]+)$/);
+      if (motorOut) {
+        const motorMode = Number(motorOut[1]);
+        const motorModeText = motorMode === 0 ? "idle yaw hold" : (motorMode === 1 ? "remote yaw hold" : "manual");
+        const motorThrottle = motorOut[3] || "0";
+        state.last.throttleValue = `${motorThrottle}`;
+        state.last.throttleMeta = `mode=${motorModeText} yaw=${motorOut[2]} out=${motorOut[4]}`;
+        state.last.motionValue = motorModeText;
+        state.last.motionMeta = `left=${motorOut[5]} right=${motorOut[6]} yaw=${motorOut[2]} out=${motorOut[4]}`;
+        state.last.pwmValue = `L ${motorOut[5]}\nR ${motorOut[6]}`;
+        state.last.pwmMeta = `Motor_SetBothSpeed base=${motorThrottle} out=${motorOut[4]}`;
+        pushTimeline(`MOT ${motorModeText}: base=${motorThrottle} out=${motorOut[4]} left=${motorOut[5]} right=${motorOut[6]}`);
         important = true;
       }
 
@@ -1025,13 +1232,13 @@
         important = true;
       }
 
-      const warn = line.match(/\[(WL|SHIP|MAG|GPS)\] W: (.+)$/);
+      const warn = line.match(/\[(WL|SHIP|MAG|GPS|IMU|AHRS)\] W: (.+)$/);
       if (warn) {
         state.last.warnInfo = `[${warn[1]}] ${warn[2]}`;
         important = true;
       }
 
-      const err = line.match(/\[(WL|SHIP|MAG|GPS)\] E: (.+)$/);
+      const err = line.match(/\[(WL|SHIP|MAG|GPS|IMU|AHRS)\] E: (.+)$/);
       if (err) {
         state.last.warnInfo = `[${err[1]}] ${err[2]}`;
         pushTimeline(`错误：${err[2]}`);
@@ -1157,6 +1364,18 @@
         rawLines: []
       });
       Object.assign(state.last, {
+        ahrsPoseValue: "--",
+        ahrsPoseMeta: "等待 AHRS 日志",
+        ahrsGyroValue: "--",
+        ahrsGyroMeta: "gX / gY / gZ",
+        ahrsYawValue: "--",
+        ahrsYawMeta: "等待 ys / yr",
+        ahrsFlagValue: "--",
+        ahrsFlagMeta: "flags / mag",
+        ahrsInfo: "等待 AHRS 日志",
+        hdgValue: "--",
+        hdgMeta: "waiting [HDG]",
+        hdgInfo: "waiting [HDG]",
         pair: "未配对",
         pairMeta: "等待串口数据",
         rcValue: "离线",
@@ -1166,7 +1385,7 @@
         motionValue: "--",
         motionMeta: "等待 0x11",
         pwmValue: "--",
-        pwmMeta: "等待 pwm pins 日志",
+        pwmMeta: "等待 MOT / pwm pins 日志",
         keyValue: "--",
         keyMeta: "等待 key 日志",
         txValue: "--",

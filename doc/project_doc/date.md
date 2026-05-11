@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-05-07
- * @version v1.7.55
+ * @date    2026-05-11
+ * @version v1.7.58
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -38,6 +38,97 @@
 - [模块名] Bug描述 → 修复方案
 
 ### 优化改进
+
+---
+
+## [2026-05-11] - v1.7.58 四元数AHRS重构
+
+### Bug 修复
+- **[欧拉角姿态主链退役]** 旧版 AHRS 采用 `roll/pitch/yaw` 分别积分，再用加速度和 `atan2(my,mx)` 做慢修正。该结构在大姿态和有倾角的 yaw 修正下容易出现耦合误差与单向漂移。修复：将 `Code_boweny/Function/AHRS` 重构为 Mahony 风格四元数传播 + accel/mag 误差反馈。
+- **[磁修正缺少倾斜补偿]** 旧版磁力计只按水平面 `atan2(my,mx)` 修 yaw，板子存在明显 `roll/pitch` 时，航向会被错误拉偏。修复：磁力计改为“低通后的三轴向量 + 四元数姿态下的倾斜补偿航向误差反馈”。
+- **[Keil C51 链接溢出]** 四元数版引入浮点状态后，AHRS 上下文直接放在默认区会触发 `EDATA` 溢出。修复：将 AHRS 上下文迁到 `xdata`，保持工程可继续完整链接。
+
+### 优化改进
+- **[接口兼容]** `AHRS_Reset`、`AHRS_UpdateRaw6Axis`、`AHRS_UpdateRawMag`、`AHRS_GetState` 和 `AHRS_State_t` 均保持不变，主循环和上位机日志正则无需改动。
+- **[日志兼容]** 继续保留 `g=`、`ys=`、`yr=`、`f=`、`mv=0`、`me=0` 语义，不污染现有 `[AHRS]` 主格式。
+- **[Yaw策略维持不变]** 仍按“短期信陀螺、长期用磁力计慢修正”的策略运行，GPS 不进入本轮主链。
+
+### 变更记录
+- **[AHRS.h/.c]** 内核从欧拉角互补滤波切换为四元数 Mahony 融合；保留轴映射、gyro bias 学习、模长门控与 flags 语义。
+- **[README / total / ahrs_report]** 根目录和镜像文档统一改写为当前四元数实现口径。
+- **[Build]** `RVMDK/STC32G-LIB.uvproj` 已重新编译通过。
+
+### 当前效果
+- 当前根目录工程已切到“四元数传播 + accel/mag 修正”的 AHRS 主链。
+- Keil 构建通过，当前体积为 `edata+hdata=3967`、`xdata=6724`、`code=47175`。
+- `MainLoop.c`、`doc/tools/ship_log_viewer.html` 和现有 `[AHRS]` 日志显示链路无需同步改格式。
+
+### 开发者备注
+- 本轮没有加入磁力计硬铁/软铁校准，所以绝对 yaw 仍属于“工程可用、未最终标定”状态。
+- 下一阶段若要继续提升绝对航向，应先做磁力计校准，再考虑把 GPS 作为低频长期参考接入。
+
+## [2026-05-11] - v1.7.57 IMU根因确认与AHRS融合链恢复
+
+### Bug 修复
+- **[IMU根因确认]** 本轮确认此前 IMU 异常的直接根因是 QMI8658 器件本体损坏，而不是 I2C 驱动路径或 AHRS 算法根因。修复：文档口径统一改为“IMU 已恢复，当前进入融合链恢复阶段”，不再继续把 AHRS 主链维持在 `basic raw` 排障档。
+- **[主循环仍停在基础读数档]** 根目录当前代码此前只执行 `QMI8658_Service() + basic raw log`，AHRS 轮询入口未接回。修复：恢复 `QMI8658_Service() -> AHRS_UpdateRaw6Axis() -> AHRS_UpdateRawMag()` 主链，并保留 `Task_Pro_Handler_Callback()` 与 MAG 独立观测。
+- **[AHRS参数与当前bring-up配置不一致]** 当前 QMI8658 仍使用 `CTRL2/CTRL3=0x07/0x07` 这一套可稳定出数的 bring-up 配置，但根目录 `AHRS.h` 仍保留 `9ms / 256 LSB/(deg/s)` 的旧参数。修复：对齐为 `AHRS_IMU_PERIOD_MS=17ms`、`AHRS_GYRO_LSB_PER_DPS=2048`。
+
+### 优化改进
+- **[Yaw策略收口]** 当前 yaw 策略明确为“短期信陀螺积分，长期用磁力计慢修正”，GPS 只保留为下一阶段低频长期参考，不在本轮主链启用。
+- **[磁修正开关集中]** 新增/收口 `AHRS_MAG_ENABLE` 到 `User/FeatureSwitch.h`，默认 `1`；若现场磁环境差，可直接切回 gyro-only 诊断而不改 Driver 或业务层。
+- **[AHRS日志辨识度]** AHRS 日志继续保留 `g=`、`ys=`、`yr=` 调试字段，并在磁力计未参与或无效时追加 `me=0` / `mv=0`，便于区分“未启用磁修正”和“磁数据当前无效”。
+
+### 变更记录
+- **[FeatureSwitch]** `ENABLE_IMU_AHRS_POLL=1`，`ENABLE_IMU_BASIC_POLL=0`，`AHRS_MAG_ENABLE=1`，保持 `ENABLE_MAG_MODULE=1`、`ENABLE_GPS_MODULE=0`。
+- **[System_init]** 传感器初始化链路恢复 `AHRS_Reset()`，随后再初始化 `QMC6309/QMI8658`。
+- **[MainLoop]** 当前主循环恢复 AHRS 轮询，使用 `Task_GetTickMs()` 固定 `dt_ms`，每 `17ms` 读取一次 IMU，每 `100ms` 读取一次滤波地磁。
+- **[文档同步]** 同步更新根目录 `doc/project_doc/total.md` 与镜像目录 `black_-pearl-master/doc/project_doc/total.md` / `date.md`。
+
+### 当前效果
+- 固件已从“IMU basic raw 排障档”切回“IMU + MAG + AHRS”运行档。
+- 启动后只要 `QMI8658_Init()` ready，主循环就会进入姿态融合并输出 AHRS 日志，不再停留在纯 `basic raw` 模式。
+- GPS 长期航向修正本轮未接入，不会引入新的串口与业务链路耦合。
+
+### 开发者备注
+- 若现场磁场明显受电机、船体或布线干扰，可先把 `AHRS_MAG_ENABLE` 改为 `0` 做 gyro-only 复核，再决定是否保留磁修正。
+- 下一阶段若要把 GPS 纳入长期航向参考，应在保持当前 AHRS 主链稳定的前提下单独增加门控与低频融合策略，不要与本轮恢复工作混做。
+
+---
+
+## [2026-05-11] - v1.7.56 传感器 I2C 路径复核与文档纠偏
+
+### Bug 修复
+- **[文档失真]** 根目录 `doc/project_doc/total.md` 与当前实际工程状态脱节，仍混入旧阶段描述，容易误导排障方向。修复：重写总览文档，明确当前测试档、真实启动路径、真实 I2C 调用链和本轮排障结论。
+- **[硬 I2C 前置判定过严]** 当前传感器链路使用 STC 硬件 I2C 时，早先把 `P14/P15` GPIO 电平直接纳入“总线空闲”前置拦截，导致日志出现 `bus not idle -> recover failed -> bus idle check failed before probe`，在真正发起 I2C 事务前就可能被软件自己挡住。修复：硬 I2C 分支的总线状态判定收紧为优先看控制器 busy 状态，`P14/P15` 电平判断只保留给软 I2C 分支。
+
+### 优化改进
+- **[I2C 路径确认]** 复核当前根目录工程后确认：
+  - `QMC6309_port.c` 不维护独立 I2C 实现，而是直接复用 `QMI8658Port_*`。
+  - `QMI8658_port.c` 在 `QMI8658_I2C_USE_SOFT == 0` 时，实际调用 `Driver/src/STC32G_I2C.c` 的 `I2C_WriteNbyte()` / `I2C_ReadNbyte()`。
+  - 当前传感器硬 I2C 确实在走 STC 底层官方 API，不是手搓事务，也不是旧文档描述的其他路径。
+- **[测试档收口]** 当前特征开关已收敛到传感器基础排障档：
+  - `ENABLE_MAG_MODULE=1`
+  - `ENABLE_IMU_MODULE=1`
+  - `ENABLE_MAG_STANDALONE_POLL=1`
+  - `ENABLE_IMU_BASIC_POLL=1`
+  - `ENABLE_IMU_AHRS_POLL=0`
+  - `QMI8658_I2C_USE_SOFT=0`
+  - `QMI8658_DIAG_ENABLE=1`
+
+### 变更记录
+- **total.md**: 重写根目录工程总览，改为与当前代码一致的启动顺序、主循环职责、I2C 路径和排障结论。
+- **date.md**: 新增本条日志，记录 2026-05-11 传感器 I2C 路径复核与排障结论。
+
+### 当前效果
+- 日志现已不再停在最早的 `bus idle check failed before probe` 阶段。
+- 代码路径已经推进到 `QMC6309` / `QMI8658` 的真实地址探测阶段，说明“软件自己先把总线挡死”这一层问题已经被压缩。
+- 当前仍未拿到完整 probe 后续 ACK / ID 结果，因此还不能把原因继续细化到“器件无应答”还是“读寄存器异常”。
+
+### 当前判断
+- 现阶段最可信的根因不是“没走 STC 底层 API”，因为实际已经在走。
+- 更合理的原因是：当前根目录工程相对之前可工作的版本发生了传感器 I2C 实现漂移，中间叠加了过严的硬 I2C 前置判定，导致一度在 probe 前自锁。
+- 在放宽前置判定后，问题已收敛到器件地址探测与 ACK/ID 读取阶段；是否还有更深层的硬件或时序问题，需要继续看 probe 后续日志。
 - [模块名] 改进描述
 
 ### 变更记录

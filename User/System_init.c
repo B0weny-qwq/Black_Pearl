@@ -17,6 +17,7 @@
 #include "STC32G_NVIC.h"
 #include "app.h"
 #include "..\Code_boweny\Function\Log\Log.h"
+#include "..\Code_boweny\Function\AHRS\AHRS.h"
 #include "..\Code_boweny\Device\QMC6309\QMC6309.h"
 #include "..\Code_boweny\Device\QMI8658\QMI8658.h"
 #include "..\Code_boweny\Device\GPS\GPS.h"
@@ -99,6 +100,8 @@ static void Sensor_I2C_prepare(void)
 {
     P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
     P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
+    P14 = 1;
+    P15 = 1;
     I2C_SW(I2C_P14_P15);
     I2C_config();
 }
@@ -193,14 +196,21 @@ void SYS_Init(void)
     LOGI("SYS", "sensor path init start");
     Sensor_I2C_prepare();
     g_qmi8658_ready = 0;
+    AHRS_Reset();
 #if ENABLE_MAG_MODULE
     QMC6309_Init();
 #endif
 #if ENABLE_IMU_MODULE
 #if QMI8658_INIT_NONBLOCKING
     QMI8658_RequestReinit();
+    g_qmi8658_ready = 0;
 #else
-    QMI8658_Init();
+    g_qmi8658_ready = (QMI8658_Init() == 0) ? 1U : 0U;
+    if (g_qmi8658_ready != 0U) {
+        LOGI("SYS", "imu init ready");
+    } else {
+        LOGE("SYS", "imu init failed");
+    }
 #endif
 #endif
 #else

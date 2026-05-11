@@ -56,7 +56,7 @@
 #define QMI8658_REG_GY_H            0x3E  /**< 陀螺仪 Y 高字节。 */
 #define QMI8658_REG_GZ_L            0x3F  /**< 陀螺仪 Z 低字节。 */
 #define QMI8658_REG_GZ_H            0x40  /**< 陀螺仪 Z 高字节。 */
-#define QMI8658_REG_RESET_STATE     0x4D  /**< 复位状态寄存器。 */
+#define QMI8658_REG_RESET_STATE     0x4D  /**< 复位后可短暂观测 0x80，后续可能被其他操作覆盖。 */
 #define QMI8658_REG_RESET           0x60  /**< 软复位寄存器。 */
 
 #define QMI8658_I2C_ADDR_PRIMARY    0x6B  /**< 主 I2C 地址。 */
@@ -67,22 +67,37 @@
 #define QMI8658_ACC_ODR_3HZ         0x0F
 #define QMI8658_ACC_ODR_11HZ        0x0E
 #define QMI8658_ACC_ODR_21HZ        0x0D
-#define QMI8658_ACC_ODR_29HZ        0x08
-#define QMI8658_ACC_ODR_58HZ        0x07
-#define QMI8658_ACC_ODR_117HZ       0x06
-#define QMI8658_ACC_ODR_235HZ       0x05
-#define QMI8658_ACC_ODR_470HZ       0x04
-#define QMI8658_ACC_ODR_940HZ       0x03
+#define QMI8658_ACC_ODR_28HZ        0x08  /**< 6DOF典型输出约 28.025Hz。 */
+#define QMI8658_ACC_ODR_56HZ        0x07  /**< 6DOF典型输出约 56.05Hz。 */
+#define QMI8658_ACC_ODR_112HZ       0x06  /**< 6DOF典型输出约 112.1Hz。 */
+#define QMI8658_ACC_ODR_224HZ       0x05  /**< 6DOF典型输出约 224.2Hz。 */
+#define QMI8658_ACC_ODR_448HZ       0x04  /**< 6DOF典型输出约 448.4Hz。 */
+#define QMI8658_ACC_ODR_896HZ       0x03  /**< 6DOF典型输出约 896.8Hz。 */
 
-#define QMI8658_GYRO_ODR_29HZ       0x08
-#define QMI8658_GYRO_ODR_58HZ       0x07
-#define QMI8658_GYRO_ODR_117HZ      0x06
-#define QMI8658_GYRO_ODR_235HZ      0x05
-#define QMI8658_GYRO_ODR_470HZ      0x04
-#define QMI8658_GYRO_ODR_940HZ      0x03
+#define QMI8658_GYRO_ODR_28HZ       0x08  /**< 6DOF典型输出约 28.025Hz。 */
+#define QMI8658_GYRO_ODR_56HZ       0x07  /**< 6DOF典型输出约 56.05Hz。 */
+#define QMI8658_GYRO_ODR_112HZ      0x06  /**< 6DOF典型输出约 112.1Hz。 */
+#define QMI8658_GYRO_ODR_224HZ      0x05  /**< 6DOF典型输出约 224.2Hz。 */
+#define QMI8658_GYRO_ODR_448HZ      0x04  /**< 6DOF典型输出约 448.4Hz。 */
+#define QMI8658_GYRO_ODR_896HZ      0x03  /**< 6DOF典型输出约 896.8Hz。 */
 #define QMI8658_GYRO_ODR_1880HZ     0x02
 #define QMI8658_GYRO_ODR_3760HZ     0x01
 #define QMI8658_GYRO_ODR_7520HZ     0x00
+
+/* Compatibility aliases kept for existing code paths. */
+#define QMI8658_ACC_ODR_29HZ        QMI8658_ACC_ODR_28HZ
+#define QMI8658_ACC_ODR_58HZ        QMI8658_ACC_ODR_56HZ
+#define QMI8658_ACC_ODR_117HZ       QMI8658_ACC_ODR_112HZ
+#define QMI8658_ACC_ODR_235HZ       QMI8658_ACC_ODR_224HZ
+#define QMI8658_ACC_ODR_470HZ       QMI8658_ACC_ODR_448HZ
+#define QMI8658_ACC_ODR_940HZ       QMI8658_ACC_ODR_896HZ
+
+#define QMI8658_GYRO_ODR_29HZ       QMI8658_GYRO_ODR_28HZ
+#define QMI8658_GYRO_ODR_58HZ       QMI8658_GYRO_ODR_56HZ
+#define QMI8658_GYRO_ODR_117HZ      QMI8658_GYRO_ODR_112HZ
+#define QMI8658_GYRO_ODR_235HZ      QMI8658_GYRO_ODR_224HZ
+#define QMI8658_GYRO_ODR_470HZ      QMI8658_GYRO_ODR_448HZ
+#define QMI8658_GYRO_ODR_940HZ      QMI8658_GYRO_ODR_896HZ
 
 #define QMI8658_ACC_RANGE_2G        0x00
 #define QMI8658_ACC_RANGE_4G        0x10
@@ -91,15 +106,19 @@
 #define QMI8658_GYRO_RANGE_16       0x00
 #define QMI8658_GYRO_RANGE_32       0x10
 #define QMI8658_GYRO_RANGE_64       0x20
-#define QMI8658_GYRO_RANGE_125      0x30
-#define QMI8658_GYRO_RANGE_250      0x40
+#define QMI8658_GYRO_RANGE_128      0x30  /**< 物理量程 ±128dps，256LSB/dps。 */
+#define QMI8658_GYRO_RANGE_256      0x40  /**< 物理量程 ±256dps，128LSB/dps。 */
 #define QMI8658_GYRO_RANGE_512      0x50
 #define QMI8658_GYRO_RANGE_1024     0x60
 #define QMI8658_GYRO_RANGE_2048     0x70
 
+/* Compatibility aliases kept for existing code paths. */
+#define QMI8658_GYRO_RANGE_125      QMI8658_GYRO_RANGE_128
+#define QMI8658_GYRO_RANGE_250      QMI8658_GYRO_RANGE_256
+
 #define QMI8658_CTRL1_INIT          0x40  /**< 当前默认 CTRL1 初始化值。 */
-#define QMI8658_CTRL2_INIT          0x07  /**< 当前默认 CTRL2 初始化值。 */
-#define QMI8658_CTRL3_INIT          0x07  /**< 当前默认 CTRL3 初始化值。 */
+#define QMI8658_CTRL2_INIT          0x07  /**< 16:45 诊断固件基线：ACC bring-up 配置。 */
+#define QMI8658_CTRL3_INIT          0x07  /**< 16:45 诊断固件基线：GYRO bring-up 配置。 */
 #define QMI8658_CTRL5_INIT          0x11  /**< 当前默认 CTRL5 初始化值。 */
 #define QMI8658_CTRL6_INIT          0x00  /**< 当前默认 CTRL6 初始化值。 */
 #define QMI8658_CTRL7_INIT          0x03  /**< 当前默认 CTRL7 初始化值。 */
@@ -110,7 +129,12 @@
 #define QMI8658_FIFO_CTRL_BYPASS    0x00  /**< FIFO 旁路模式值。 */
 
 #define QMI8658_CHIP_ID_VALUE       0x05  /**< 期望芯片 ID。 */
-#define QMI8658_RESET_STATE_READY   0x80  /**< 期望复位完成标志。 */
+#define QMI8658_RESET_STATE_READY   0x80  /**< 仅用于复位后瞬时观测，不作为稳定运行判据。 */
+
+#undef QMI8658_CTRL2_INIT
+#undef QMI8658_CTRL3_INIT
+#define QMI8658_CTRL2_INIT          (QMI8658_ACC_RANGE_4G | QMI8658_ACC_ODR_56HZ)
+#define QMI8658_CTRL3_INIT          (QMI8658_GYRO_RANGE_256 | QMI8658_GYRO_ODR_56HZ)
 
 #ifndef QMI8658_CLEAR_DATAPATH_ENABLE
 #define QMI8658_CLEAR_DATAPATH_ENABLE  0
@@ -148,16 +172,16 @@
 #define QMI8658_SOFT_I2C_USE_P14_P15   1
 #endif
 
-#define QMI8658_RESET_DELAY_MS         500U  /**< 软复位后等待时间。 */
+#define QMI8658_RESET_DELAY_MS         500U  /**< 软复位后等待时间，明显大于15ms上限。 */
 #define QMI8658_PWR_UP_DELAY_MS        500U  /**< 上电后等待时间。 */
 #define QMI8658_INIT_RETRY_MAX         3U    /**< 初始化最大重试次数。 */
 #define QMI8658_INIT_RETRY_DELAY_MS    200U  /**< 初始化重试间隔。 */
-#define QMI8658_ENABLE_DELAY_MS        30U   /**< 使能后等待时间。 */
-#define QMI8658_READY_TIMEOUT_MS       200U  /**< ready 轮询超时。 */
+#define QMI8658_ENABLE_DELAY_MS        30U   /**< 使能后初始等待，后续由ready轮询补足。 */
+#define QMI8658_READY_TIMEOUT_MS       200U  /**< ready 轮询超时，覆盖gyro起振时间。 */
 #define QMI8658_STATUSINT_AVAIL        0x01  /**< STATUSINT 可用位。 */
 #define QMI8658_STATUS0_A_DA           0x01  /**< STATUS0 加速度 ready 位。 */
 #define QMI8658_STATUS0_G_DA           0x02  /**< STATUS0 陀螺仪 ready 位。 */
-#define QMI8658_STATUS0_TEMP_DA        0x04  /**< STATUS0 温度 ready 位。 */
+/* STATUS0 bit[7:2] reserved; temperature data follows accel/gyro refresh. */
 #define QMI8658_READ_FAIL_REINIT_COUNT 4U    /**< 连续读失败后请求重拉起阈值。 */
 
 #define QMI8658_ACC_IS_ZERO(x, y, z)     (((x) == 0) && ((y) == 0) && ((z) == 0))

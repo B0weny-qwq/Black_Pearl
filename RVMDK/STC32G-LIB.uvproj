@@ -862,6 +862,16 @@
               <FileType>5</FileType>
               <FilePath>..\Code_boweny\Function\AHRS\AHRS.h</FilePath>
             </File>
+            <File>
+              <FileName>HeadingEstimator.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Code_boweny\Function\AHRS\HeadingEstimator.c</FilePath>
+            </File>
+            <File>
+              <FileName>HeadingEstimator.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Code_boweny\Function\AHRS\HeadingEstimator.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
