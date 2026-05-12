@@ -74,12 +74,6 @@ static void MAG_StandalonePoll(void)
 
 #if ENABLE_IMU_MODULE
 #define IMU_BASIC_LOG_PERIOD_MS        500U
-#define AHRS_YAW_ZERO_STABLE_CD        150
-#define AHRS_YAW_ZERO_ROLL_PITCH_CD    50
-#define AHRS_YAW_ZERO_MAG_CD           150
-#define AHRS_YAW_ZERO_UPTIME_MS        5000UL
-#define AHRS_YAW_ZERO_STABLE_SAMPLES   100U
-
 #ifndef AHRS_LOG_DECIMATION
 #define AHRS_LOG_DECIMATION            32U
 #endif
@@ -284,12 +278,7 @@ static void IMU_AhrsPoll(void)
     static u16 sample_div = 0;
     static u8 read_error_latched = 0;
     static u8 yaw_zero_valid = 0;
-    static u8 yaw_window_valid = 0;
     static u8 heading_seeded = 0;
-    static u16 yaw_stable_count = 0;
-    static int16 zero_roll_ref_cd = 0;
-    static int16 zero_pitch_ref_cd = 0;
-    static int16 zero_mag_ref_cd = 0;
     static int32 yaw_gyro_zero_cd = 0;
     static int32 yaw_mag_zero_cd = 0;
     u32 now_ms;
@@ -364,11 +353,6 @@ static void IMU_AhrsPoll(void)
     att = AHRS_GetState();
     if ((att->flags & AHRS_FLAG_GYRO_BIAS_READY) == 0U) {
         yaw_zero_valid = 0;
-        yaw_window_valid = 0;
-        yaw_stable_count = 0;
-        zero_roll_ref_cd = 0;
-        zero_pitch_ref_cd = 0;
-        zero_mag_ref_cd = 0;
         yaw_gyro_zero_cd = 0L;
         yaw_mag_zero_cd = 0L;
         heading_seeded = 0U;
@@ -387,7 +371,13 @@ static void IMU_AhrsPoll(void)
                 heading_seed_deg = (float)att->yaw_deg100 * 0.01f;
             }
             Heading_SetHeadingDeg(&g_heading, heading_seed_deg);
+            Heading_ResetZero(&g_heading);
             heading_seeded = 1U;
+            yaw_zero_valid = 1U;
+            yaw_gyro_zero_cd = Heading_GetGyroDeg100(&g_heading);
+            yaw_mag_zero_cd = Heading_GetMagDeg100(&g_heading);
+            g_heading_rel_cd_snapshot = 0;
+            g_heading_ready_snapshot = 1U;
         }
 
         Heading_Update(&g_heading,
@@ -396,43 +386,6 @@ static void IMU_AhrsPoll(void)
                        raw_mag_valid,
                        heading_static_flag,
                        heading_dt_s);
-    }
-
-    if (!yaw_zero_valid) {
-        if ((now_ms >= AHRS_YAW_ZERO_UPTIME_MS) &&
-            ((att->flags & AHRS_FLAG_ACC_VALID) != 0U) &&
-            raw_mag_valid &&
-            heading_static_flag) {
-            if (!yaw_window_valid) {
-                zero_roll_ref_cd = att->roll_deg100;
-                zero_pitch_ref_cd = att->pitch_deg100;
-                zero_mag_ref_cd = att->yaw_mag_deg100;
-                yaw_window_valid = 1U;
-                yaw_stable_count = 1U;
-            } else if ((AHRS_Abs32Local((int32)AHRS_WrapCdLocal((int32)att->roll_deg100 - zero_roll_ref_cd)) <= AHRS_YAW_ZERO_ROLL_PITCH_CD) &&
-                       (AHRS_Abs32Local((int32)AHRS_WrapCdLocal((int32)att->pitch_deg100 - zero_pitch_ref_cd)) <= AHRS_YAW_ZERO_ROLL_PITCH_CD) &&
-                       (AHRS_Abs32Local((int32)AHRS_WrapCdLocal((int32)att->yaw_mag_deg100 - zero_mag_ref_cd)) <= AHRS_YAW_ZERO_MAG_CD)) {
-                if (yaw_stable_count < 1000U) {
-                    yaw_stable_count++;
-                }
-            } else {
-                zero_roll_ref_cd = att->roll_deg100;
-                zero_pitch_ref_cd = att->pitch_deg100;
-                zero_mag_ref_cd = att->yaw_mag_deg100;
-                yaw_stable_count = 1U;
-            }
-        } else {
-            yaw_window_valid = 0U;
-            yaw_stable_count = 0U;
-        }
-
-        if (yaw_stable_count >= AHRS_YAW_ZERO_STABLE_SAMPLES) {
-            Heading_ResetZero(&g_heading);
-            yaw_gyro_zero_cd = Heading_GetGyroDeg100(&g_heading);
-            yaw_mag_zero_cd = Heading_GetMagDeg100(&g_heading);
-            yaw_window_valid = 0U;
-            yaw_zero_valid = 1;
-        }
     }
 
     if (yaw_zero_valid != 0U) {
@@ -494,7 +447,7 @@ static void IMU_AhrsPoll(void)
                                    g_roll_buf,
                                    g_pitch_buf,
                                    g_yaw_buf,
-                                   (u16)yaw_stable_count);
+                                   1U);
         ahrs_log_len += (u8)sprintf(g_ahrs_log_buf + ahrs_log_len,
                                     " g=%s %s %s f=%02X%s",
                                     g_gx_buf,
@@ -517,7 +470,7 @@ static void IMU_AhrsPoll(void)
                                    g_heading_buf,
                                    g_yaw_gyro_buf,
                                    g_yaw_mag_buf,
-                                   (u16)yaw_stable_count);
+                                   1U);
         ahrs_log_len += (u8)sprintf(g_ahrs_log_buf + ahrs_log_len,
                                     " gz=%s bz=%s mv=%u mu=%u sf=%u err=%s hp=%s hd=%s hm=%s f=%02X",
                                     g_gz_buf,

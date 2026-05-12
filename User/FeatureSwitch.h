@@ -63,7 +63,7 @@
  * - 当前值 100ms
  * - 周期过快会放大噪声，过慢会降低修正响应
  */
-#define SHIP_YAW_HOLD_PERIOD_MS        100UL
+#define SHIP_YAW_HOLD_PERIOD_MS        150UL
 
 /**
  * @brief  船体 yaw 自稳日志开关
@@ -83,7 +83,7 @@
  * @brief  差速输出限幅
  * @details 左右电机差速总输出限制，防止 yaw 修正过猛。
  */
-#define SHIP_YAW_HOLD_OUTPUT_LIMIT     60
+#define SHIP_YAW_HOLD_OUTPUT_LIMIT     40
 
 /**
  * @brief  yaw 自稳比例增益
@@ -91,13 +91,13 @@
  * - Q10 定点
  * - 当前值偏保守，先保证不明显过冲
  */
-#define SHIP_YAW_HOLD_KP_Q10           6
+#define SHIP_YAW_HOLD_KP_Q10           4
 
 /**
  * @brief  yaw 自稳误差死区（centi-degree）
  * @details 小误差直接忽略，降低静止抖动和输出突增
  */
-#define SHIP_YAW_HOLD_DEADBAND_CD      100
+#define SHIP_YAW_HOLD_DEADBAND_CD      150
 
 /**
  * @brief  yaw 自稳积分增益

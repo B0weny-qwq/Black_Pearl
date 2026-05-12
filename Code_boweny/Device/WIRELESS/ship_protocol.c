@@ -746,14 +746,12 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
     }
 
     yaw_output = 0;
-#if SHIP_YAW_HOLD_ENABLE
+#if SHIP_YAW_HOLD_ENABLE && SHIP_YAW_HOLD_MANUAL_ENABLE
     if ((abs_steering == 0)
-#if SHIP_YAW_HOLD_MANUAL_ENABLE
 #if SHIP_YAW_HOLD_FORWARD_ONLY
         && (throttle_speed > 0)
 #else
         && (throttle_speed != 0)
-#endif
 #endif
         ) {
         now_ms = Task_GetTickMs();
@@ -794,7 +792,9 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
             return;
         }
     }
+#endif
 
+#if SHIP_YAW_HOLD_ENABLE
     ShipProtocol_ResetYawHold(SHIP_REASON_C("manual steer/open"), log_this_sample);
 #endif
 
