@@ -258,6 +258,10 @@ static u8 ShipProtocol_UpdateYawHoldPid(u32 now_ms, int16 *yaw_cd, u8 *pid_updat
         g_ship_rt.yaw_hold_last_update_ms = now_ms;
         yaw_error_cd = ShipProtocol_WrapCd((int32)g_ship_rt.yaw_hold_target_cd -
                                            (int32)current_yaw_cd);
+        if ((yaw_error_cd <= SHIP_YAW_HOLD_DEADBAND_CD) &&
+            (yaw_error_cd >= (int16)(-SHIP_YAW_HOLD_DEADBAND_CD))) {
+            yaw_error_cd = 0;
+        }
         g_ship_rt.yaw_hold_output = PID_UpdateTarget(&g_ship_yaw_pid, yaw_error_cd, 0);
         if (pid_updated != 0) {
             *pid_updated = 1U;
@@ -744,10 +748,12 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
     yaw_output = 0;
 #if SHIP_YAW_HOLD_ENABLE
     if ((abs_steering == 0)
+#if SHIP_YAW_HOLD_MANUAL_ENABLE
 #if SHIP_YAW_HOLD_FORWARD_ONLY
         && (throttle_speed > 0)
 #else
         && (throttle_speed != 0)
+#endif
 #endif
         ) {
         now_ms = Task_GetTickMs();
@@ -1941,7 +1947,9 @@ void ShipProtocol_RunScheduler(void)
     }
 
 #if SHIP_YAW_HOLD_ENABLE
-    ShipProtocol_ServiceIdleYawHold(now_ms);
+    if ((g_ship_rt.throttle_online == 0U) || (g_ship_rt.valid == 0U)) {
+        ShipProtocol_ServiceIdleYawHold(now_ms);
+    }
 #endif
 }
 
