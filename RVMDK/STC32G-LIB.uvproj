@@ -820,6 +820,31 @@
           </Files>
         </Group>
         <Group>
+          <GroupName>AutoDrive</GroupName>
+          <Files>
+            <File>
+              <FileName>autodrive.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Code_boweny\Device\AutoDrive\autodrive.c</FilePath>
+            </File>
+            <File>
+              <FileName>autodrive_cfg.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Code_boweny\Device\AutoDrive\autodrive_cfg.c</FilePath>
+            </File>
+            <File>
+              <FileName>autodrive.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Code_boweny\Device\AutoDrive\autodrive.h</FilePath>
+            </File>
+            <File>
+              <FileName>autodrive_cfg.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Code_boweny\Device\AutoDrive\autodrive_cfg.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
           <GroupName>LOG</GroupName>
           <Files>
             <File>
