@@ -83,7 +83,7 @@
  * @brief  差速输出限幅
  * @details 左右电机差速总输出限制，防止 yaw 修正过猛。
  */
-#define SHIP_YAW_HOLD_OUTPUT_LIMIT     40
+#define SHIP_YAW_HOLD_OUTPUT_LIMIT     100
 
 /**
  * @brief  yaw 自稳比例增益

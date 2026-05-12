@@ -371,11 +371,6 @@
             <div id="motionMeta" class="meta">等待 0x11</div>
           </div>
           <div class="card">
-            <div class="label">PWM / 左右输出</div>
-            <div id="pwmValue" class="value">--</div>
-            <div id="pwmMeta" class="meta">等待 MOT / pwm pins 日志</div>
-          </div>
-          <div class="card">
             <div class="label">按键状态</div>
             <div id="keyValue" class="value">--</div>
             <div id="keyMeta" class="meta">等待 key 日志</div>
@@ -530,8 +525,6 @@
         throttleMeta: "等待 throttle_raw 日志",
         motionValue: "--",
         motionMeta: "等待 0x11",
-        pwmValue: "--",
-        pwmMeta: "等待 MOT / pwm pins 日志",
         keyValue: "--",
         keyMeta: "等待 key 日志",
         txValue: "--",
@@ -593,8 +586,6 @@
       throttleMeta: document.getElementById("throttleMeta"),
       motionValue: document.getElementById("motionValue"),
       motionMeta: document.getElementById("motionMeta"),
-      pwmValue: document.getElementById("pwmValue"),
-      pwmMeta: document.getElementById("pwmMeta"),
       keyValue: document.getElementById("keyValue"),
       keyMeta: document.getElementById("keyMeta"),
       txValue: document.getElementById("txValue"),
@@ -733,8 +724,6 @@
       el.throttleMeta.textContent = state.last.throttleMeta;
       el.motionValue.textContent = state.last.motionValue;
       el.motionMeta.textContent = state.last.motionMeta;
-      el.pwmValue.textContent = state.last.pwmValue;
-      el.pwmMeta.textContent = state.last.pwmMeta;
       el.keyValue.textContent = state.last.keyValue;
       el.keyMeta.textContent = state.last.keyMeta;
       el.txValue.textContent = state.last.txValue;
@@ -1076,8 +1065,6 @@
         state.last.throttleMeta = `mode=${motorModeText} yaw=${motorOut[2]} out=${motorOut[4]}`;
         state.last.motionValue = motorModeText;
         state.last.motionMeta = `left=${motorOut[5]} right=${motorOut[6]} yaw=${motorOut[2]} out=${motorOut[4]}`;
-        state.last.pwmValue = `L ${motorOut[5]}\nR ${motorOut[6]}`;
-        state.last.pwmMeta = `Motor_SetBothSpeed base=${motorThrottle} out=${motorOut[4]}`;
         pushTimeline(`MOT ${motorModeText}: base=${motorThrottle} out=${motorOut[4]} left=${motorOut[5]} right=${motorOut[6]}`);
         important = true;
       }
@@ -1113,16 +1100,6 @@
         state.last.motionValue = motion[1];
         state.last.motionMeta = `left=${motion[2]} right=${motion[3]}`;
         pushTimeline(`电机目标：${motion[1]}，left=${motion[2]} right=${motion[3]}`);
-        important = true;
-      }
-
-      const pwmPins = line.match(/\[SHIP\] I: pwm pins mla=(\d+) mlb=(\d+) mra=(\d+) mrb=(\d+) period=(\d+)/);
-      if (pwmPins) {
-        const period = Number(pwmPins[5]) || 1;
-        const fmtPct = (v) => `${((Number(v) * 100) / period).toFixed(1)}%`;
-        state.last.pwmValue = `L ${fmtPct(pwmPins[1])}/${fmtPct(pwmPins[2])} R ${fmtPct(pwmPins[3])}/${fmtPct(pwmPins[4])}`;
-        state.last.pwmMeta = `MLA=${pwmPins[1]} MLB=${pwmPins[2]} | MRA=${pwmPins[3]} MRB=${pwmPins[4]} | period=${pwmPins[5]}`;
-        pushTimeline(`四路PWM：MLA=${pwmPins[1]} MLB=${pwmPins[2]} MRA=${pwmPins[3]} MRB=${pwmPins[4]} period=${pwmPins[5]}`);
         important = true;
       }
 
@@ -1384,8 +1361,6 @@
         throttleMeta: "等待 throttle_raw 日志",
         motionValue: "--",
         motionMeta: "等待 0x11",
-        pwmValue: "--",
-        pwmMeta: "等待 MOT / pwm pins 日志",
         keyValue: "--",
         keyMeta: "等待 key 日志",
         txValue: "--",
