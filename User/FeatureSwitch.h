@@ -55,7 +55,7 @@
  * - 0：遥控器接入后不抢油门，yaw 自稳只在无遥控时的空闲态接管
  * - 1：保留原有手动航向保持逻辑
  */
-#define SHIP_YAW_HOLD_MANUAL_ENABLE    0
+#define SHIP_YAW_HOLD_MANUAL_ENABLE    1
 
 /**
  * @brief  船体 yaw 自稳控制周期
@@ -84,6 +84,15 @@
  * @details 左右电机差速总输出限制，防止 yaw 修正过猛。
  */
 #define SHIP_YAW_HOLD_OUTPUT_LIMIT     100
+
+/**
+ * @brief  手动自稳的转向门限
+ * @details
+ * - 单位为遥控器轴心偏差值，100 表示满量程中心偏差
+ * - 当左右摇杆偏差不超过该值时，认为用户想直线前进，允许进入 yaw 自稳
+ * - 当前建议值为 10，等价于大约 10% 的转向输入
+ */
+#define SHIP_YAW_HOLD_STEER_GATE       10U
 
 /**
  * @brief  yaw 自稳比例增益

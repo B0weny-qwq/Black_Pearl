@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-05-11
- * @version v1.7.58
+ * @date    2026-05-13
+ * @version v1.7.61
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -41,6 +41,30 @@
 - **[船体 yaw 自稳参数收口]** `SHIP_YAW_HOLD_*` 参数统一收在 `User/FeatureSwitch.h`，并将 `SHIP_YAW_HOLD_KP_Q10` 从 `31` 下调到 `12`，保持 P-only，先把差速自稳从“偏猛”收回到可调区间。
 - **[日志节流]** `SHIP_YAW_HOLD_LOG_PERIOD_MS` 继续保留，用于限制 `[MOT]` 诊断输出频率，避免上位机被高频 motor 日志刷屏。
 - **[FeatureSwitch 中文化]** `User/FeatureSwitch.h` 重写为中文 Doxygen 风格，逐组补齐核心模块、轮询、IMU、无线、协议、配对、yaw 自稳和旧兼容参数说明，避免后续再出现“只写了一个注释”的不完整配置说明。
+
+---
+
+## [2026-05-13] - v1.7.61 手动自稳开启与PWM输出口径同步
+
+### Bug 修复
+- **[总览文档过期]** `doc/project_doc/total.md` 仍记录 `ENABLE_GPS_MODULE=0`、旧 yaw-hold 参数和旧运行档，已经与当前 `User/FeatureSwitch.h` 不一致。修复：按当前工作区真实开关重写总览，明确 `Wireless/GPS/MAG/IMU/AHRS` 均启用。
+- **[协议核对结论缺失]** 旧文档没有集中记录遥控器串口命令是否逐字节对齐，容易继续误判 `0x12` 半球字段和点位 payload。修复：补齐旧版帧格式、命令号、GPS 15 字节回传、点位 10 字节格式和 `0x15` 保存格式的核对结论。
+- **[手动自稳门控未同步]** 之前文档仍把 `SHIP_YAW_HOLD_MANUAL_ENABLE=1` 描述成“泛泛的小转向叠加 yaw-hold”，但当前代码已经把门限收敛到 `SHIP_YAW_HOLD_STEER_GATE=10U`，并且直接下发左右 PWM。修复：把“直线自稳触发条件”和“PWM 输出口径”同步写入总览与变更日志。
+
+### 优化改进
+- **[0x12 兼容口径]** 明确 `0x12` 半球字段固定 `E/W` 是对齐老版 `nmea41_Get_EW()` / `nmea41_Get_NS()` 的兼容行为，不是改成了新协议。
+- **[存储口径]** 明确当前无外置 EEPROM，自动返航配置写入 STC flash/EEPROM 区 `0x0001F800`，由 `AutoDriveCfg_Save()` 管理。
+- **[风险边界]** 明确当前工作区 `0x11` wire payload 与旧版一致，但应用层已开启 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，手动控制会在 `|steering| <= 10` 且前进油门成立时叠加 yaw-hold，并直接输出左右 PWM，不等同旧版纯开环。
+
+### 变更记录
+- **[total.md]** 重写当前结论、功能开关、启动顺序、主循环、旧遥控器协议核对表、存储方式和已知差异，并同步当前手动自稳门控口径。
+- **[date.md]** 新增本条日志，并将文件头版本更新为 `v1.7.61`。
+
+### 开发者备注
+- 旧遥控器能否接收命令，首先看 wire 格式；当前 `0x0F~0x15` 的帧格式和字段顺序已对齐。
+- 如果目标是“应用层行为严格等同老版本”，当前 `SHIP_YAW_HOLD_MANUAL_ENABLE=1` 需要在发布前处理，否则 `0x11` 控船手感和旧版纯开环存在差异。
+- 当前手动自稳门控是 `|steering| <= 10` 且油门为前进时进入；其余情况仍回到开环差速。
+- `0x15` 正常 11 字节帧兼容旧遥控器；短包只保存开关、不更新返航点，是当前实现的防御性差异。
 
 ---
 

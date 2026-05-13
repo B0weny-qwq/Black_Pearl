@@ -387,121 +387,6 @@
         <Group>
           <GroupName>APP</GroupName>
           <Files>
-            <File>
-              <FileName>APP.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_AD_UART.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_AD_UART.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_Lamp.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_Lamp.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_INT_UART.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_INT_UART.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_RTC.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_RTC.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_I2C_PS.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_I2C_PS.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_SPI_PS.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_SPI_PS.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_WDT.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_WDT.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_EEPROM.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_EEPROM.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_DMA_AD.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_DMA_AD.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_DMA_LCM.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_DMA_LCM.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_DMA_M2M.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_DMA_M2M.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_DMA_SPI_PS.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_DMA_SPI_PS.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_DMA_UART.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_DMA_UART.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_PWMA_Output.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_PWMA_Output.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_PWMB_Output.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_PWMB_Output.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_DMA_I2C.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_DMA_I2C.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_CAN.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_CAN.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_LIN.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_LIN.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_USART_LIN.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_USART_LIN.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_USART2_LIN.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_USART2_LIN.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_HSSPI.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_HSSPI.c</FilePath>
-            </File>
-            <File>
-              <FileName>APP_HSPWM.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\App\src\APP_HSPWM.c</FilePath>
-            </File>
           </Files>
         </Group>
         <Group>
@@ -511,11 +396,6 @@
               <FileName>STC32G_ADC.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Driver\src\STC32G_ADC.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_Compare.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_Compare.c</FilePath>
             </File>
             <File>
               <FileName>STC32G_Delay.c</FileName>
@@ -528,11 +408,6 @@
               <FilePath>..\Driver\src\STC32G_EEPROM.c</FilePath>
             </File>
             <File>
-              <FileName>STC32G_Exti.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_Exti.c</FilePath>
-            </File>
-            <File>
               <FileName>STC32G_GPIO.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Driver\src\STC32G_GPIO.c</FilePath>
@@ -543,24 +418,9 @@
               <FilePath>..\Driver\src\STC32G_I2C.c</FilePath>
             </File>
             <File>
-              <FileName>STC32G_LCM.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_LCM.c</FilePath>
-            </File>
-            <File>
               <FileName>STC32G_NVIC.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Driver\src\STC32G_NVIC.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_Soft_I2C.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_Soft_I2C.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_Soft_UART.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_Soft_UART.c</FilePath>
             </File>
             <File>
               <FileName>STC32G_SPI.c</FileName>
@@ -578,80 +438,15 @@
               <FilePath>..\Driver\src\STC32G_UART.c</FilePath>
             </File>
             <File>
-              <FileName>STC32G_WDT.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_WDT.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_DMA.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_DMA.c</FilePath>
-            </File>
-            <File>
               <FileName>STC32G_PWM.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Driver\src\STC32G_PWM.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_RTC.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_RTC.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_CAN.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_CAN.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_LIN.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_LIN.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_Clock.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_Clock.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_USART_LIN.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\src\STC32G_USART_LIN.c</FilePath>
             </File>
           </Files>
         </Group>
         <Group>
           <GroupName>ISR</GroupName>
           <Files>
-            <File>
-              <FileName>STC32G_ADC_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_ADC_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_Compare_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_Compare_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_Exti_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_Exti_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_GPIO_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_GPIO_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_I2C_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_I2C_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_SPI_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_SPI_Isr.c</FilePath>
-            </File>
             <File>
               <FileName>STC32G_Timer_Isr.c</FileName>
               <FileType>1</FileType>
@@ -661,36 +456,6 @@
               <FileName>STC32G_UART_Isr.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Driver\isr\STC32G_UART_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_DMA_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_DMA_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_PWM_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_PWM_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_RTC_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_RTC_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_LCM_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_LCM_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_CAN_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_CAN_Isr.c</FilePath>
-            </File>
-            <File>
-              <FileName>STC32G_LIN_Isr.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\isr\STC32G_LIN_Isr.c</FilePath>
             </File>
           </Files>
         </Group>

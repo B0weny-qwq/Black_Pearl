@@ -819,81 +819,93 @@ static void ShipProtocol_LogLightPending(void)
 
 static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log_this_sample)
 {
-    u8 abs_left_right;
-    u8 abs_front_back;
-    u8 pwm;
-    int16 speed;
+    int16 throttle_speed;
+    int16 steering_speed;
+    int16 left_speed;
+    int16 right_speed;
+    int16 abs_throttle;
+    int16 abs_steering;
     ShipMotion_t target_motion;
+    int16 yaw_cd;
+    int16 yaw_output;
+    u32 now_ms;
+    u8 pid_updated;
 
-    ShipProtocol_ResetYawHold(SHIP_REASON_C("legacy manual"), log_this_sample);
-    abs_left_right = ShipProtocol_AbsAxisDiff(left_right);
-    abs_front_back = (u8)(ShipProtocol_AbsAxisDiff(front_back) + SHIP_TURN_COMPARE_BIAS);
+    throttle_speed = ShipProtocol_ThrottleToSignedSpeed(ShipProtocol_FilterAxis(front_back, &g_ship_rt.filtered_ud_q8));
+    steering_speed = ShipProtocol_SteeringToSignedSpeed(ShipProtocol_FilterAxis(left_right, &g_ship_rt.filtered_lr_q8));
+    abs_throttle = (throttle_speed >= 0) ? throttle_speed : (int16)(-throttle_speed);
+    abs_steering = (steering_speed >= 0) ? steering_speed : (int16)(-steering_speed);
+    left_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed + steering_speed));
+    right_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed - steering_speed));
     target_motion = SHIP_MOTION_STOP;
-    speed = 0;
+    yaw_output = 0;
 
-    if ((abs_front_back > abs_left_right) &&
-        ((abs_left_right > 10U) || (abs_front_back > 20U))) {
-        if (front_back > SHIP_FB_DEAD_HIGH) {
-            if (g_manual_first_cruise_run != 0U) {
-                return;
-            }
-            pwm = (u8)(front_back - SHIP_AXIS_CENTER);
-            g_now_pwm_accelerator = pwm;
-            g_manual_in_cruise_run = 0U;
-            target_motion = SHIP_MOTION_FORWARD;
-            speed = ShipProtocol_LegacyPwmToSpeed(pwm);
-        } else if (front_back < SHIP_FB_DEAD_LOW) {
-            pwm = (u8)(SHIP_AXIS_CENTER - front_back);
-            if ((g_manual_cruise_mode != SHIP_CRUISE_STOP) && (front_back < 30U)) {
-                g_manual_cruise_mode = SHIP_CRUISE_STOP;
-            }
-            g_manual_in_cruise_run = 0U;
-            g_now_pwm_accelerator = 0U;
-            target_motion = SHIP_MOTION_BACKWARD;
-            speed = ShipProtocol_LegacyPwmToSpeed(pwm);
-        }
-    } else if ((abs_front_back < abs_left_right) &&
-               ((abs_left_right > 10U) || (abs_front_back > 20U))) {
-        if (left_right <= SHIP_LR_DEAD_LOW) {
-            pwm = (u8)(SHIP_AXIS_CENTER - left_right);
-            target_motion = SHIP_MOTION_LEFT;
-            speed = ShipProtocol_LegacyPwmToSpeed(pwm);
-        } else if (left_right > SHIP_LR_DEAD_HIGH) {
-            pwm = (u8)(left_right - SHIP_AXIS_CENTER);
-            target_motion = SHIP_MOTION_RIGHT;
-            speed = ShipProtocol_LegacyPwmToSpeed(pwm);
-        }
+    if ((abs_throttle == 0) && (abs_steering == 0)) {
         g_manual_in_cruise_run = 0U;
         g_now_pwm_accelerator = 0U;
-    } else {
-        if (g_manual_cruise_mode != SHIP_CRUISE_STOP) {
-            if (g_manual_in_cruise_run == 0U) {
-                g_now_pwm_accelerator = 100U;
-            }
-            g_manual_first_cruise_run = 0U;
-            g_manual_in_cruise_run = 1U;
-            target_motion = SHIP_MOTION_FORWARD;
-            speed = ShipProtocol_LegacyPwmToSpeed(g_now_pwm_accelerator);
-        } else {
-            g_now_pwm_accelerator = 0U;
-            g_manual_in_cruise_run = 0U;
-            ShipProtocol_LogManualDecision(left_right, front_back, g_ship_rt.key,
-                                           SHIP_MOTION_STOP, 0, log_this_sample);
-            ShipProtocol_StopMotion(SHIP_REASON_U8("manual center"), log_this_sample);
-            return;
-        }
-    }
-
-    if ((target_motion == SHIP_MOTION_STOP) || (speed == 0)) {
         ShipProtocol_LogManualDecision(left_right, front_back, g_ship_rt.key,
                                        SHIP_MOTION_STOP, 0, log_this_sample);
-        ShipProtocol_StopMotion(SHIP_REASON_U8("manual stop"), log_this_sample);
+        ShipProtocol_StopMotion(SHIP_REASON_U8("manual center"), log_this_sample);
         return;
     }
 
+#if SHIP_YAW_HOLD_ENABLE && SHIP_YAW_HOLD_MANUAL_ENABLE
+    if ((abs_steering <= (int16)SHIP_YAW_HOLD_STEER_GATE) &&
+#if SHIP_YAW_HOLD_FORWARD_ONLY
+        (throttle_speed > 0)
+#else
+        (throttle_speed != 0)
+#endif
+        ) {
+        now_ms = Task_GetTickMs();
+        if (ShipProtocol_UpdateYawHoldPid(now_ms, &yaw_cd, &pid_updated) != 0U) {
+            yaw_output = ShipProtocol_YawOutputToSpeed(g_ship_rt.yaw_hold_output, throttle_speed);
+            left_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed + yaw_output));
+            right_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed - yaw_output));
+            target_motion = (throttle_speed >= 0) ? SHIP_MOTION_FORWARD : SHIP_MOTION_BACKWARD;
+            if (log_this_sample != 0U) {
+                LOGI(SHIP_TAG,
+                     "yaw hold tgt=%d yr=%d out=%d throttle=%d steer=%d gate=%u left=%d right=%d",
+                     g_ship_rt.yaw_hold_target_cd,
+                     yaw_cd,
+                     yaw_output,
+                     throttle_speed,
+                     steering_speed,
+                     (u16)SHIP_YAW_HOLD_STEER_GATE,
+                     left_speed,
+                     right_speed);
+            }
+            ShipProtocol_EnsureMotorInit();
+#if SHIP_THROTTLE_PWM_ENABLE
+            Motor_SetBothSpeed(left_speed, right_speed);
+#endif
+            g_ship_rt.motion = target_motion;
+            ShipProtocol_LogMotion(target_motion, left_speed, right_speed);
+            ShipProtocol_LogPwmSnapshot(1U);
+            return;
+        }
+    }
+#endif
+
+#if SHIP_YAW_HOLD_ENABLE
+    if (g_ship_rt.yaw_hold_active != 0U) {
+        ShipProtocol_ResetYawHold(SHIP_REASON_C("manual steer/open"), log_this_sample);
+    }
+#endif
+
+    if ((abs_throttle + SHIP_TURN_COMPARE_BIAS) >= abs_steering) {
+        target_motion = (throttle_speed >= 0) ? SHIP_MOTION_FORWARD : SHIP_MOTION_BACKWARD;
+    } else {
+        target_motion = (steering_speed >= 0) ? SHIP_MOTION_RIGHT : SHIP_MOTION_LEFT;
+    }
+
     ShipProtocol_LogManualDecision(left_right, front_back, g_ship_rt.key,
-                                   target_motion, speed, log_this_sample);
-    ShipProtocol_ApplyMotion(target_motion, speed, log_this_sample);
+                                   target_motion,
+                                   (abs_throttle >= abs_steering) ? abs_throttle : abs_steering,
+                                   log_this_sample);
+    ShipProtocol_ApplyMotion(target_motion,
+                             (abs_throttle >= abs_steering) ? abs_throttle : abs_steering,
+                             log_this_sample);
 }
 
 static void ShipProtocol_HandleKey(u8 front_back, u8 key)
