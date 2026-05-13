@@ -56,6 +56,26 @@ static u16 AutoDrive_Abs16(int16 value)
     return (u16)value;
 }
 
+static u16 AutoDrive_ReadU16Wire(const u8 *data_m)
+{
+    return (u16)(((u16)data_m[0] << 8) | data_m[1]);
+}
+
+static void AutoDrive_PointFromLegacyWire(AutoDrive_PointRaw_t *point,
+                                          const u8 *data_m)
+{
+    if ((point == 0) || (data_m == 0)) {
+        return;
+    }
+
+    point->lon_ew = data_m[0];
+    point->lon_whole = AutoDrive_ReadU16Wire(&data_m[1]);
+    point->lon_frac = AutoDrive_ReadU16Wire(&data_m[3]);
+    point->lat_ns = data_m[5];
+    point->lat_whole = AutoDrive_ReadU16Wire(&data_m[6]);
+    point->lat_frac = AutoDrive_ReadU16Wire(&data_m[8]);
+}
+
 static u32 AutoDrive_Abs32Diff(u32 lhs, u32 rhs)
 {
     if (lhs >= rhs) {
@@ -88,10 +108,7 @@ static u8 AutoDrive_PointRawValid(const AutoDrive_PointRaw_t *point)
     if ((point->lon_ew != 'E') && (point->lon_ew != 'W')) {
         return 0U;
     }
-    if ((point->lat_ns != 'N') && (point->lat_ns != 'S')) {
-        return 0U;
-    }
-    if ((point->lon_whole == 0U) || (point->lat_whole == 0U)) {
+    if (point->lon_whole == 0U) {
         return 0U;
     }
     return 1U;
@@ -153,9 +170,6 @@ static u8 AutoDrive_GpsReady(void)
 
     gps = GPS_GetState();
     if (gps == 0) {
-        return 0U;
-    }
-    if (gps->fix_valid == 0U) {
         return 0U;
     }
     sat_count = (gps->satellites_used_gsa > 0U) ? gps->satellites_used_gsa : gps->satellites_used;
@@ -261,7 +275,7 @@ void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
         return;
     }
 
-    AutoDrive_CopyPoint(&g_return_position, (const AutoDrive_PointRaw_t *)data_m);
+    AutoDrive_PointFromLegacyWire(&g_return_position, data_m);
     if (AutoDrive_IsCanActive(&g_return_position) == 0U) {
         return;
     }
@@ -278,7 +292,7 @@ void AutoDrive_SetFishPositionRaw(const u8 *data_m)
         return;
     }
 
-    AutoDrive_CopyPoint(&g_fish_position, (const AutoDrive_PointRaw_t *)data_m);
+    AutoDrive_PointFromLegacyWire(&g_fish_position, data_m);
     if (AutoDrive_IsCanActive(&g_fish_position) == 0U) {
         return;
     }
@@ -320,9 +334,8 @@ void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len)
 
     g_autoDrive_switch = data_m[0];
     g_autodrv_cfg.auto_ret_onoff = data_m[0];
-    if (len >= (u8)(1U + sizeof(AutoDrive_PointRaw_t))) {
-        AutoDrive_CopyPoint(&g_autodrv_cfg.ret_point,
-                            (const AutoDrive_PointRaw_t *)&data_m[1]);
+    if (len >= (u8)(1U + AUTODRIVE_LEGACY_POINT_WIRE_LEN)) {
+        AutoDrive_PointFromLegacyWire(&g_autodrv_cfg.ret_point, &data_m[1]);
     }
     (void)AutoDriveCfg_Save(&g_autodrv_cfg);
 }

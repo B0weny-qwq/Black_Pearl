@@ -40,6 +40,8 @@ typedef struct
     u16 lat_frac;
 } AutoDrive_PointRaw_t;
 
+#define AUTODRIVE_LEGACY_POINT_WIRE_LEN 10U
+
 typedef struct
 {
     u8 auto_ret_onoff;

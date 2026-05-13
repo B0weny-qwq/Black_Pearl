@@ -132,7 +132,7 @@
  * - 1：启用 GPS 初始化、轮询和状态回传
  * - 0：关闭 GPS，避免串口和航向参考链路干扰当前联调
  */
-#define ENABLE_GPS_MODULE              0
+#define ENABLE_GPS_MODULE              1
 
 /**
  * @brief  磁力计模块总开关
