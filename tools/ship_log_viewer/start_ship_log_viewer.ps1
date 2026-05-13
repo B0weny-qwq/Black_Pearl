@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 Set-Location -LiteralPath $PSScriptRoot
-$viewerScript = Join-Path $PSScriptRoot "tools\ship_log_viewer\start_ship_log_viewer.py"
+$viewerScript = Join-Path $PSScriptRoot "start_ship_log_viewer.py"
 
 if (Get-Command py -ErrorAction SilentlyContinue) {
     py -3 $viewerScript

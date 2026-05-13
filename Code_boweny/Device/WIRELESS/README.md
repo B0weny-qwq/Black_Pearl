@@ -60,7 +60,7 @@
 - 无线、GPS、磁力计、IMU/AHRS 当前都启用。
 - 磁力计单独刷屏入口关闭，磁力计由 AHRS 路径使用。
 - 主路径使用 `ShipProtocol_RunScheduler()`，不使用兼容轮询 `ShipProtocol_Poll()`。
-- `0x11` 的空口载荷仍是旧版 `lr/ud/key`，但当前应用层打开了手动航向保持，控制手感不是旧版纯开环。
+- `0x11` 的空口载荷仍是旧版 `lr/ud/key`，但当前应用层打开了手动航向保持；只有在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、`|steering| <= SHIP_YAW_HOLD_STEER_GATE` 且前进油门成立时，才会叠加 yaw-hold，因此控制手感不是旧版纯开环。
 - 当前强制使用天线 1；即使初始化会扫描 RSSI，最终也被 `WIRELESS_FORCE_ANT_1` 固定。
 
 ## 3. 硬件连接
@@ -125,7 +125,7 @@ MainLoop_RunOnce()
 调用约束：
 
 - `Wireless_Poll()` 负责把 LT8920 收到的射频载荷推入软件队列。
-- `ShipProtocol_RunScheduler()` 负责从无线队列取 payload，并按旧协议找帧、分发、回 `0x12`。
+- `ShipProtocol_RunScheduler()` 负责从无线队列取 payload，并按旧协议找帧、分发、回 `0x12`；同时它也会内部执行 `AutoDrive_Init()`、`AutoDrive_LinkAliveTick()` 和 `AutoDrive_Poll()`。
 - 同一主循环不要同时开启 `ShipProtocol_RunScheduler()` 和 `ShipProtocol_Poll()`，否则会重复消费无线队列。
 
 ## 5. LT8920 管理层行为
@@ -293,7 +293,7 @@ payload[2] = key  // 按键码
 - 收到 `0x11` 后刷新 `last_throttle_rx_ms` 和 `last_proto_rx_ms`。
 - 若 AutoDrive 正忙，只处理按键和链路保活，不接管手动电机。
 - 若短脉冲未激活，进入 `ShipProtocol_ApplyManualControl()`。
-- 当前工作区的手动控制不是旧版纯开环：它会做轴滤波、死区曲线、油门/转向混合，并在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1` 且转向输入小于 `SHIP_YAW_HOLD_STEER_GATE` 时叠加手动航向保持。
+- 当前工作区的手动控制不是旧版纯开环：它会做轴滤波、死区曲线、油门/转向混合，并在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、`|steering| <= SHIP_YAW_HOLD_STEER_GATE` 且前进油门成立时叠加手动航向保持。
 - 如果要求应用层行为严格等同旧版 `WirelessProtoca_Motor_Control()`，需要关闭 `SHIP_YAW_HOLD_MANUAL_ENABLE` 或恢复旧版开环分支。
 
 安全保护：
@@ -526,7 +526,8 @@ GPS 回传：
 
 | 差异 | 当前处理 | 影响 |
 |------|----------|------|
-| `0x11` 应用层不是旧版纯开环 | 当前打开 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，会叠加手动航向保持 | 空口兼容，但手感不完全等同旧版 |
+| `0x11` 应用层不是旧版纯开环 | 当前打开 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，且仅在小转向和前进油门下叠加 yaw-hold | 空口兼容，但手感不完全等同旧版 |
+| `AutoDrive` 入口隐藏在协议调度器内 | `ShipProtocol_RunScheduler()` 会初始化并轮询 `AutoDrive` | 阅读主循环时容易误以为 AutoDrive 未接入 |
 | A 键灯控引脚未确认 | 只记录 `light-unbound`，不绑定 GPIO | 遥控器能下发，船灯不动作 |
 | `0x0F` 配对响应不再触发旧版罗盘校准 | 当前只置 `paired=1` 并进入工作信道 | 配对协议兼容，但旧版 `Compass_calib_start()` 副作用未恢复 |
 | 电量 ADC 通道不同 | 旧板是 `ADC_CH9`，当前板检测电压是 `ADC_CH8` | 协议字段和阈值对齐旧版，采样脚按当前硬件 |
@@ -562,6 +563,7 @@ GPS 回传：
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-13 | v1.6 | 补充 `AutoDrive` 实际接入路径、`0x11` 手动 yaw-hold 触发条件和当前主链说明，收口到根目录代码真实状态。 |
 | 2026-05-13 | v1.5 | 补齐遥控器命令对齐表、ADC_CH8/ADC_CH9 板级差异说明、主循环条件入口和禁止修改项，统一中文表述。 |
 | 2026-05-13 | v1.4 | 按当前工作区真实代码重写 README，补全硬件、开关、配对、帧格式、命令、GPS 回传、电量、点位、flash 存储、联调验收和已知差异。 |
 | 2026-05-07 | v1.3 | 二次复核老版无线业务，补回 `0x12` 回传后工作 RX 恢复、长静默恢复节奏和左右转极性说明。 |

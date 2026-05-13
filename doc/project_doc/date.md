@@ -4,7 +4,7 @@
  *
  * @author  boweny
  * @date    2026-05-13
- * @version v1.7.61
+ * @version v1.7.62
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -41,6 +41,33 @@
 - **[船体 yaw 自稳参数收口]** `SHIP_YAW_HOLD_*` 参数统一收在 `User/FeatureSwitch.h`，并将 `SHIP_YAW_HOLD_KP_Q10` 从 `31` 下调到 `12`，保持 P-only，先把差速自稳从“偏猛”收回到可调区间。
 - **[日志节流]** `SHIP_YAW_HOLD_LOG_PERIOD_MS` 继续保留，用于限制 `[MOT]` 诊断输出频率，避免上位机被高频 motor 日志刷屏。
 - **[FeatureSwitch 中文化]** `User/FeatureSwitch.h` 重写为中文 Doxygen 风格，逐组补齐核心模块、轮询、IMU、无线、协议、配对、yaw 自稳和旧兼容参数说明，避免后续再出现“只写了一个注释”的不完整配置说明。
+
+---
+
+## [2026-05-13] - v1.7.62 device 文档一致性复核
+
+### 新增功能
+- **[AutoDrive README]** 新增 `Code_boweny/Device/AutoDrive/README.md`，把自动返航、点位巡航、链路保活、返航触发、航向来源和 flash 存储入口按当前根目录代码补齐，不再让 `AutoDrive` 成为“代码已接入但设备文档缺失”的盲区。
+
+### Bug 修复
+- **[Device 文档缺口]** `Code_boweny/Device/AutoDrive/` 已被 `ship_protocol.c` 实际初始化和轮询，但目录下没有 README，导致“每个 device 是否都能独立查行为”这件事不成立。修复：补齐独立 README，并明确它由 `ShipProtocol_RunScheduler()` 内部接管。
+- **[头文件口径过期]** `QMI8658.h`、`QMC6309.h`、`Motor.h` 顶部说明仍残留“IMU 关闭”“磁力计不进主链”“正负速度交换 P/N 极性”这类旧阶段表述，已经与当前工程不一致。修复：统一改成当前真实运行口径。
+- **[无线文档隐藏行为未写清]** `Code_boweny/Device/WIRELESS/README.md` 之前没有明确写出 `AutoDrive` 实际由协议调度器初始化/轮询，也没有把手动 yaw-hold 的完整门控条件写全。修复：补齐 `AutoDrive_Init/LinkAliveTick/Poll` 真实接入位置，以及 `|steering| <= gate + 前进油门` 的当前门控条件。
+- **[总览文档遗漏 AutoDrive 主链位置]** `doc/project_doc/total.md` 之前虽然写了 `0x13/0x14/0x15` 和返航存储，但没有明确 `AutoDrive` 当前不在主循环裸入口、而是在 `ShipProtocol_RunScheduler()` 内运行。修复：补齐主循环说明和当前结论。
+
+### 优化改进
+- **[文档边界统一]** 当前根目录 `Device/*/README.md` 现在全部存在，并统一按“根目录真实代码”描述，不再混用历史联调档口径。
+- **[维护入口更清晰]** `total.md` 与各 device README 现在都能直接指向 `User/FeatureSwitch.h`、`ship_protocol.c`、`autodrive.c` 这类真实配置或行为来源，后续维护时更容易顺着代码落点核对。
+
+### 变更记录
+- **[Device]** 新增 `Code_boweny/Device/AutoDrive/README.md`。
+- **[Headers]** 更新 `Code_boweny/Device/QMI8658/QMI8658.h`、`Code_boweny/Device/QMC6309/QMC6309.h`、`Code_boweny/Device/Motor/Motor.h`、`Code_boweny/Device/WIRELESS/ship_protocol.h`、`Code_boweny/Device/WIRELESS/ship_protocol.c` 的顶部说明。
+- **[README]** 更新 `Code_boweny/Device/QMC6309/README.md`、`Code_boweny/Device/Motor/README.md`、`Code_boweny/Device/WIRELESS/README.md` 的当前行为描述。
+- **[Project Doc]** 将 `doc/project_doc/total.md` 和 `date.md` 顶部版本同步为 `v1.7.62`。
+
+### 开发者备注
+- 这次只修正文档和注释口径，不改算法、不改功能宏、不改控制参数。
+- `date.md` 历史条目保留当时语境；当前一致性只要求文件头版本、最新条目和 `total.md` 与当前工作区真实状态一致。
 
 ---
 

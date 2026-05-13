@@ -3,7 +3,7 @@
  * @brief   Black Pearl v1.1 当前工程总览
  * @author  boweny
  * @date    2026-05-13
- * @version v1.7.61
+ * @version v1.7.62
  */
 
 # Black Pearl v1.1 当前工程总览
@@ -17,6 +17,7 @@
 - 旧遥控器空口数据格式已按 `ship_Gps_V2.1_20260406-115200` 复核：命令号、帧格式、`0x12` 15 字节 GPS 回传、`0x13/0x14/0x15` 点位格式保持旧版 wire 兼容。
 - `0x12` 半球字段继续固定为 `E/W`，这是旧版 `nmea41_Get_EW()='E'`、`nmea41_Get_NS()='W'` 的兼容行为，不是新协议格式。
 - 当前工作区 `0x11` wire payload 仍是旧版 `lr/ud/key`，但手动控制应用层已开启 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，并以 `SHIP_YAW_HOLD_STEER_GATE=10U` 作为直线自稳门限；当左右输入偏差不超过该门限且油门为前进时，会在当前电机 PWM 上叠加 yaw-hold 输出。当前控制周期为 `SHIP_YAW_HOLD_PERIOD_MS=150UL`，`Kp/死区/日志节流` 也统一收在 `User/FeatureSwitch.h` 顶部，便于现场调参。
+- `AutoDrive` 并非独立主循环入口，而是隐藏在 `ShipProtocol_RunScheduler()` 内初始化与轮询；`0x13/0x14/0x15`、低电返航和链路超时都会走到这条链。
 
 ## 2. 当前开关
 
@@ -83,7 +84,7 @@ MainLoop_RunOnce()
 ```
 
 - `IMU_AhrsPoll()` 持续更新 AHRS 与 `HeadingEstimator`，为 yaw-hold 提供相对航向。
-- `ShipProtocol_RunScheduler()` 负责旧遥控器配对、收帧、分发命令和合法帧后立即回发 `0x12`。
+- `ShipProtocol_RunScheduler()` 负责旧遥控器配对、收帧、分发命令和合法帧后立即回发 `0x12`，同时内部执行 `AutoDrive_Init()`、`AutoDrive_LinkAliveTick()` 与 `AutoDrive_Poll()`。
 - `MAG_StandalonePoll()` 当前关闭，磁力计由 AHRS 低频读取。
 
 ## 5. 旧遥控器协议核对
@@ -109,6 +110,7 @@ MainLoop_RunOnce()
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-13 | `v1.7.62` | 复核各 device README、补齐 `AutoDrive/README.md`，同步 `AutoDrive` 实际接入路径和头文件注释口径。 |
 | 2026-05-13 | `v1.7.61` | 同步手动自稳开启、转向门限 10 和 PWM 输出口径，更新当前真实开关、主循环和已知差异。 |
 | 2026-05-12 | `v1.7.59` | yaw-hold 参数收口到 `FeatureSwitch.h`，补齐中文注释。 |
 | 2026-05-11 | `v1.7.58` | AHRS 切换为 Mahony 四元数融合，保留现有航向链和日志格式。 |

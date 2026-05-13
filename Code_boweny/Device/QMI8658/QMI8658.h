@@ -7,11 +7,17 @@
  *
  * @details
  * 提供 QMI8658 的寄存器定义、初始化状态机、原始数据读取、ready 查询、
- * 运行期重初始化和调试接口。今晚联调版本中 IMU 保持关闭，不参与初始化、
- * 主循环轮询、AHRS 融合或控船决策；本头文件保留是为了后续继续排障。
+ * 运行期重初始化和调试接口。当前根目录工程中 IMU 处于启用状态，
+ * 并通过 `QMI8658_Service()` + `MainLoop.c/IMU_AhrsPoll()` 进入
+ * `AHRS + HeadingEstimator` 主链。
  *
- * @warning
- * 当前 `ENABLE_IMU_MODULE=0`，本模块不应被今晚开环控船主链路调用。
+ * @note
+ * 当前默认运行档由 `User/FeatureSwitch.h` 控制：
+ * - `ENABLE_IMU_MODULE=1`
+ * - `ENABLE_IMU_AHRS_POLL=1`
+ * - `ENABLE_IMU_BASIC_POLL=0`
+ * - `QMI8658_INIT_NONBLOCKING=1`
+ * - `QMI8658_READY_MODE_STATUS0=1`
  *
  * @see     Code_boweny/Device/QMI8658/QMI8658.c
  * @see     Code_boweny/Device/QMI8658/QMI8658_port.h

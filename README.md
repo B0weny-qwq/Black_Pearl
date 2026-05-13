@@ -1,89 +1,262 @@
 # Black Pearl v1.1
 
-这个工程现场使用时，重点不是底层引脚表，而是怎么打开上位机、怎么看无线遥控、油门、按键、GPS 和状态回包。
+## 1. 交付时先看这里
 
-## 1. 打开上位机
+这个工程对外交付时，优先给对方这几个入口：
 
-在仓库根目录运行：
+- 上位机目录：
+  [tools/ship_log_viewer/](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer)
+- 上位机详细使用说明：
+  [tools/ship_log_viewer/README.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/README.md)
+- 上位机页面：
+  [tools/ship_log_viewer/ship_log_viewer.html](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/ship_log_viewer.html)
+- 根目录一键启动：
+  [start_ship_log_viewer.bat](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/start_ship_log_viewer.bat)
+- PowerShell 启动：
+  [start_ship_log_viewer.ps1](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/start_ship_log_viewer.ps1)
 
-```text
-start_ship_log_viewer.bat
-```
+工程文档主入口：
 
-PowerShell 也可以运行：
+- 工程总览：
+  [doc/project_doc/total.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/total.md)
+- 开发日志 / 变更记录：
+  [doc/project_doc/date.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/date.md)
 
-```powershell
-.\start_ship_log_viewer.ps1
-```
+---
 
-脚本会启动本地 HTTP 服务并打开页面。浏览器地址是：
+## 2. 上位机怎么用
 
-```text
-http://127.0.0.1:8000/doc/tools/ship_log_viewer.html
-```
+上位机的具体使用、页面卡片含义、串口连接方式、日志识别规则、现场排错顺序，不在本 README 里重复展开。
 
-不要直接双击 HTML 文件。Web Serial 必须在 `http://127.0.0.1`、`http://localhost` 或 `https://` 环境下运行。
+直接看：
 
-## 2. 上位机怎么看
+- [tools/ship_log_viewer/README.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/README.md)
 
-页面重点看这些卡片：
+如果只是现场打开：
 
-- 配对状态：只表示已经进入工作信道。
-- 遥控在线：只看最近是否收到 `0x11`，关闭遥控器后应在超时后变离线。
-- 油门数值：看 `throttle_raw / steering_raw / throttle_val / steering_val`。
-- 动作判定：看 `manual motion` 的 forward/backward/left/right/stop。
-- 按键状态：解析 A/B/C/D/E 和固件 `key action` 日志。
-- GPS：同时显示 `gps state`、老版 `0x12` 字段和 15 字节 payload。
+1. 双击根目录 [start_ship_log_viewer.bat](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/start_ship_log_viewer.bat)
+2. 选择串口
+3. 点连接
+4. 先看“配对状态”和“遥控链路”
+5. 再看“遥控输入油门”和“实际输出油门”
 
-关键日志示例：
+---
 
-```text
-[SHIP] I: rc cmd=0x11 lr=100 ud=179 key=0xA0(NONE) paired=1
-[SHIP] I: throttle_raw=179 steering_raw=100 throttle_val=79 steering_val=0 key=0xA0(NONE)
-[SHIP] I: manual motion=forward left=790 right=-790
-[SHIP] I: tx cmd=0x12 ch=13 payload_len=15 sat=8 angle=1 power=0xAE auto=0x00
-[SHIP] I: gps state fix=1 legacy=1 sat=8 lon=E121940096 lat=N373696970 angle=1 power=0xAE seq=56
-[SHIP] I: gps sat source gsa=8 gga=10 report=8
-[SHIP] I: gps payload oldfmt ew=E lon1=12156 lon2=4607 ns=W lat1=3724 lat2=2182
-[SHIP] I: gps payload bytes=08 00 01 45 2F 7C 11 FF 57 0E 8C 08 86 AE 00
-```
+## 3. 维护时先看哪里
 
-## 3. GPS 格式说明
+维护这个工程，不要先盲改 `.c`。
 
-`0x12` 继续保持老版遥控器兼容格式，payload 固定 15 字节，不新增字段：
+推荐顺序：
 
-```text
-sat, angle_u16, 'E', lon1_u16, lon2_u16, 'W', lat1_u16, lat2_u16, power, auto
-```
+1. 先看工程总览：
+   [doc/project_doc/total.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/total.md)
+2. 再看最近变更：
+   [doc/project_doc/date.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/date.md)
+3. 再看对应模块 `.h` 文件里的中文注释和 Doxygen 说明
+4. 最后再改实现文件
 
-坐标不是 `deg1e7` 直接发给遥控器，而是按老版 RMC 原始字符串拆分：
+原因很简单：
 
-- 经度 `12156.4607500` 发成 `lon1=12156`、`lon2=4607`。
-- 纬度 `3724.2182068` 发成 `lat1=3724`、`lat2=2182`。
-- 航向角按老版发整数度，不发 `deg * 100`。
-- 卫星数按老版优先使用完整 GSA PRN 计数；GSA 不完整时回退 GGA 卫星数，并限制最大 24。
-- 方向字节按老版保持 `E/W` 常量；真实半球只在 `gps state` 日志中显示。
+- `total.md` 说明当前真实运行档和开关状态
+- `date.md` 说明为什么这么改过
+- `.h` 注释说明模块接口、宏、参数、行为边界
 
-如果现场看到 `fix=0 legacy=0 lon=E0 lat=N0`，说明 GPS 当前没有有效 RMC 定位。此时 `0x12` 坐标为 0 是预期现象，需要先看 GPS 天线、室外环境、波特率和 UART2 数据是否正常。
+---
 
-## 4. 现场检查顺序
+## 4. 配置在哪里改
 
-1. 打开上位机并连接串口。
-2. 看 `[SYS] I: gps init start` 和 `[GPS] I: init uart=2 route=P1.0/P1.1 baud=115200`。
-3. 看无线配对 `pair req / pair success`。
-4. 配对成功后看 `rc cmd=0x11` 是否持续出现。
-5. 看油门数值和动作判定是否跟遥杆一致。
-6. 关遥控器，看“遥控在线”是否超时变离线。
-7. 看 `gps payload oldfmt` 和 `gps payload bytes` 是否与遥控器端显示一致。
+这个工程的维护原则是：
 
-## 5. 当前版本重点
+- 先找对应 `.h`
+- 具体配置说明直接看对应 `.h` 里的中文注释
+- 不要靠猜，不要只看 `.c`
 
-当前联调版本保持无线、GPS、磁力计开启；IMU、AHRS、数据融合关闭。电机 PWM 真实输出已开启，当前按半桥驱动方式工作：`50%` 占空比为静止中点，油门值围绕中点上下偏移，不再使用“0% 关断、正负切极性”的旧模型。
+### 4.1 总开关和功能开关
 
-常用文件：
+主配置入口：
 
-- [上位机页面](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/tools/ship_log_viewer.html)
-- [无线协议主逻辑](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/ship_protocol.c)
-- [GPS 解析](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/GPS/GPS.c)
-- [工程总览](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/total.md)
-- [变更记录](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/date.md)
+- [User/FeatureSwitch.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/User/FeatureSwitch.h)
+
+这里集中管理：
+
+- 无线开关
+- GPS 开关
+- MAG 开关
+- IMU / AHRS 开关
+- 船控协议调度开关
+- 手动 yaw 自稳开关
+- yaw hold 参数
+- 日志开关
+- 兼容行为开关
+
+具体每个宏是什么意思，直接看 `FeatureSwitch.h` 顶部和分组注释。
+
+### 4.2 自动驾驶 / 返航 / 存储配置
+
+看：
+
+- [Code_boweny/Device/AutoDrive/autodrive.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/AutoDrive/autodrive.h)
+- [Code_boweny/Device/AutoDrive/autodrive_cfg.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/AutoDrive/autodrive_cfg.h)
+
+这里包含：
+
+- 自动驾驶模式
+- 返航点 / 目标点
+- 保存与加载
+- Flash/EEPROM 配置口径
+
+具体行为看 `.h` 注释，不在这里重复抄。
+
+### 4.3 船控协议 / 遥控器协议
+
+看：
+
+- [Code_boweny/Device/WIRELESS/ship_protocol.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/ship_protocol.h)
+- [Code_boweny/Device/WIRELESS/wireless.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/wireless.h)
+- [Code_boweny/Device/WIRELESS/lt8920.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/lt8920.h)
+
+这里包含：
+
+- 配对
+- 工作信道
+- `0x11/0x12/0x13/0x14/0x15`
+- 遥控在线状态
+- GPS 回传
+
+### 4.4 姿态 / 航向 / Heading
+
+看：
+
+- [Code_boweny/Function/AHRS/AHRS.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Function/AHRS/AHRS.h)
+- [Code_boweny/Function/AHRS/HeadingEstimator.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Function/AHRS/HeadingEstimator.h)
+
+这里包含：
+
+- AHRS 状态定义
+- HeadingEstimator 接口
+- yaw / gyro / mag 相关参数说明
+
+### 4.5 PID
+
+看：
+
+- [Code_boweny/Function/PID/PID.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Function/PID/PID.h)
+
+### 4.6 电机 / PWM
+
+看：
+
+- [Code_boweny/Device/Motor/Motor.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/Motor/Motor.h)
+
+### 4.7 GPS
+
+看：
+
+- [Code_boweny/Device/GPS/GPS.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/GPS/GPS.h)
+
+### 4.8 磁力计 / IMU
+
+看：
+
+- [Code_boweny/Device/QMC6309/QMC6309.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/QMC6309/QMC6309.h)
+- [Code_boweny/Device/QMI8658/QMI8658.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/QMI8658/QMI8658.h)
+
+---
+
+## 5. 维护时怎么做
+
+建议统一按这个流程维护：
+
+1. 先确认需求是“改功能”还是“改参数”
+2. 如果只是改参数，先改对应 `.h` 或 `FeatureSwitch.h`
+3. 改之前先看对应 `.h` 注释，确认宏和接口语义
+4. 改完同步更新：
+   [doc/project_doc/total.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/total.md)
+   和
+   [doc/project_doc/date.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/date.md)
+5. 如果日志格式改了，也要同步更新：
+   [tools/ship_log_viewer/README.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/README.md)
+   和
+   [tools/ship_log_viewer/ship_log_viewer.html](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/ship_log_viewer.html)
+
+维护规则就一句话：
+
+- 具体含义先查对应 `.h` 的注释
+
+---
+
+## 6. 工程整体目录
+
+## 6.1 主要目录
+
+- `User/`
+  主循环、FeatureSwitch、项目级入口配置
+- `Code_boweny/Device/`
+  外设和业务设备层
+- `Code_boweny/Function/`
+  AHRS、PID、Filter、Log 等功能模块
+- `Driver/`
+  STC32G 底层驱动
+- `App/`
+  板级外设应用封装
+- `RVMDK/`
+  Keil 工程、编译输出、map/list
+- `tools/ship_log_viewer/`
+  串口日志上位机
+- `doc/project_doc/`
+  项目总览、开发日志
+- `doc/build_doc/`
+  模块级设计/构建说明
+- `ship_Gps_V2.1_20260406-115200/`
+  旧版参考工程和协议对照资料
+
+## 6.2 当前最常改的文件
+
+- [User/FeatureSwitch.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/User/FeatureSwitch.h)
+- [User/MainLoop.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/User/MainLoop.c)
+- [Code_boweny/Device/WIRELESS/ship_protocol.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/WIRELESS/ship_protocol.c)
+- [Code_boweny/Device/AutoDrive/autodrive.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/AutoDrive/autodrive.c)
+- [Code_boweny/Function/AHRS/AHRS.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Function/AHRS/AHRS.c)
+- [Code_boweny/Function/AHRS/HeadingEstimator.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Function/AHRS/HeadingEstimator.c)
+- [Code_boweny/Device/Motor/Motor.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/Code_boweny/Device/Motor/Motor.c)
+- [tools/ship_log_viewer/ship_log_viewer.html](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/ship_log_viewer.html)
+
+---
+
+## 7. 当前工程功能范围
+
+当前工作区主功能包括：
+
+- 无线遥控配对与控制
+- 旧遥控器协议兼容
+- `0x12` GPS 状态回传
+- `0x13/0x14/0x15` 点位收发
+- GPS 定位与航向
+- 磁力计、IMU、AHRS、HeadingEstimator
+- 手动差速控制
+- 手动直线 yaw 自稳
+- 自动驾驶 / 返航配置保存
+- 串口日志上位机联调
+
+具体运行档和开关状态，不以 README 为准，以：
+
+- [doc/project_doc/total.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/total.md)
+
+为准。
+
+---
+
+## 8. 最后一句
+
+如果只是用工程：
+
+- 先看上位机 README
+
+如果是维护工程：
+
+- 先看 `total.md`
+- 再看 `date.md`
+- 再查对应 `.h` 注释
+
+不要跳过 `.h` 注释直接改实现。  
+这个工程后续维护，默认就是按这个规则走。

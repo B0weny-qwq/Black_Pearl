@@ -22,7 +22,8 @@
  * - `PAIR_RSP(0x0F)` 仅在有效窗口内置配对成功并打印。
  * - 任意合法协议帧分发结束后立即回发一次 `GPS_REPORT(0x12)`。
  * - `GPS_REPORT(0x12)` payload 保持老版 15 字节，不新增字段。
- * - `THROTTLE(0x11)` 恢复为老版手动开环判定，不走 IMU/AHRS/航向闭环。
+ * - `THROTTLE(0x11)` 空口仍保持老版 `lr/ud/key` 载荷，但应用层已加入
+ *   轴滤波、差速映射和可选 yaw-hold 手动直线保持，不再等同旧版纯开环。
  * - `A/C/D` 按键入口保留老版语义，其中 A 键灯控因当前 v1.1 板级引脚未确认，
  *   只保留日志提示，不在本层擅自绑定到未知引脚。
  *
@@ -90,8 +91,10 @@ s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len);
  * 若该宏为 0，则只保留日志，不输出电机 PWM。
  *
  * @warning
- * 当前工程有意关闭旧版 autoDrive/巡航/数据融合链路，`0x13/0x14/0x15`
- * 只保留兼容解析入口和日志，不参与今晚主控船链路。
+ * 当前工程保留 `0x13/0x14/0x15` 的旧版点位格式，并实际调用
+ * `AutoDrive_SetReturnPositionRaw()`、`AutoDrive_SetFishPositionRaw()`、
+ * `AutoDrive_SetSwitchRaw()`；低电和链路超时也会通过 `AutoDrive_TriggerReturn()`
+ * 进入返航入口。
  */
 void ShipProtocol_RunScheduler(void);
 

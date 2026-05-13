@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set "VIEWER_SCRIPT=%~dp0tools\ship_log_viewer\start_ship_log_viewer.py"
+set "VIEWER_SCRIPT=%~dp0start_ship_log_viewer.py"
 
 where py >nul 2>nul
 if %errorlevel%==0 (

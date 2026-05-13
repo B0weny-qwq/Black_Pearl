@@ -4,6 +4,26 @@
 
 `Code_boweny/Device/QMC6309/` 是 QMC6309 三轴地磁计驱动模块，运行链路为 `User/System_init.c` -> `Code_boweny/Device/QMC6309/QMC6309.c`。
 
+当前根目录工程里它不是“只上电观测”的独立模块，而是进入了 AHRS 航向链：
+
+```text
+SYS_Init()
+  -> QMC6309_Init()
+
+MainLoop_RunOnce()
+  -> IMU_AhrsPoll()
+     -> QMC6309_ReadXYZFiltered()
+     -> AHRS_UpdateRawMag()
+```
+
+默认运行档：
+
+- `ENABLE_MAG_MODULE = 1`
+- `ENABLE_MAG_STANDALONE_POLL = 0`
+- `AHRS_MAG_PERIOD_MS = 100`
+
+也就是磁力计默认不单独刷屏，而是每约 `100ms` 由 AHRS 低频读取一次。
+
 ## 当前配置
 
 | 项目 | 说明 |

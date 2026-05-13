@@ -7,15 +7,17 @@
  *
  * @details
  * 提供 QMC6309 的初始化、芯片 ID 读取、原始三轴读取、滤波后三轴读取、
- * 输出速率设置和寄存器诊断接口。当前联调版本中，磁力计允许上电并轮询，
- * 但不参与今晚的开环控船控制链路。
+ * 输出速率设置和寄存器诊断接口。当前根目录工程中磁力计处于启用状态，
+ * 通过 `AHRS_UpdateRawMag()` 和 `HeadingEstimator` 参与航向估计主链，
+ * 同时也保留独立读数与寄存器诊断能力。
  *
  * @hardware
  * - 总线: 复用传感器 I2C 后端
  * - 默认引脚: P1.4=SDA / P1.5=SCL
  *
  * @note
- * 当前主链路只要求磁力计初始化成功或失败但不阻塞控船链路。
+ * 当前默认 `ENABLE_MAG_MODULE=1`，`ENABLE_MAG_STANDALONE_POLL=0`。
+ * 也就是磁力计默认不单独刷屏，而是按 `AHRS_MAG_PERIOD_MS` 被 AHRS 低频读取。
  *
  * @see     Code_boweny/Device/QMC6309/QMC6309.c
  * @see     Code_boweny/Device/QMC6309/QMC6309_port.h

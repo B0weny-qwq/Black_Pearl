@@ -19,6 +19,9 @@
 - `QMI8658_READY_MODE_STATUS0 = 1`
 - `QMI8658_READY_MODE_STATUSINT = 0`
 - `QMI8658_INIT_NONBLOCKING = 1`
+- `ENABLE_IMU_MODULE = 1`
+- `ENABLE_IMU_AHRS_POLL = 1`
+- `ENABLE_IMU_BASIC_POLL = 0`
 
 ## 当前接口
 
@@ -102,6 +105,7 @@ sequenceDiagram
 
 ## 说明
 
+- 当前根目录工程里 IMU 是启用状态，不是“今晚保持关闭”
 - 当前板上没有单独接出的 IMU 外部 INT 脚，所以“中断标志位轮询”实现为寄存器 ready 位轮询
 - 默认使用 `STATUS0.aDA/gDA` 作为 ready 判据
 - `STATUSINT` 只保留为可选实验模式，不是当前主路径

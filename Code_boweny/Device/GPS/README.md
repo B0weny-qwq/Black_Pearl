@@ -85,7 +85,7 @@ const GPS_State_t *GPS_GetState(void);
 主循环高频调用函数：
 
 - 从 `RX2_Buffer` 拉取增量字节
-- 按原始字节直接透传到 UART1，便于现场测试 GPS 实际波特率
+- `GPS_RAW_ECHO_ENABLE=1` 时可选透传原始字节到 UART1
 - 写入模块内 FIFO
 - 逐字节驱动 NMEA 状态机
 - 完成校验、字段拆分、定点换算和状态更新
@@ -107,14 +107,19 @@ SYS_Init()
 main()
   -> while(1)
        GPS_Poll()
-       IMU_HighRatePoll()
+       Wireless_Poll()
+       ShipProtocol_RunScheduler()
+       Wireless_SearchSignalPoll()
+       IMU_ServicePoll()
+       IMU_AhrsPoll()
+       Task_Pro_Handler_Callback()
 ```
 
 说明：
 
 - `GPS_Poll()` 放在主循环前部，优先处理串口流，降低丢帧风险
-- `update_sequence` 仅在新的 `RMC UTC/Date` 到达时递增
-- 模块不主动周期打印日志，只在初始化失败时输出必要日志
+- `update_sequence` 仅在新的有效主状态提交后递增
+- GPS 详细诊断日志受 `GPS_DIAG_LOG_ENABLE` 控制
 
 ## 运行时序图
 
@@ -161,7 +166,7 @@ sequenceDiagram
 2. 不要把 GPS 改到 UART1；UART1 已用于 LOG 输出
 3. 不要重新启用 `APP_AD_UART`，否则会重新占用 Timer2
 4. 如果后续需要修改 GPS 波特率，只改 `GPS_BAUDRATE` 宏即可
-5. 当前默认开启 `GPS_RAW_ECHO_ENABLE` 以便测试波特率，测试完成后可改为 `0`
+5. 当前默认 `GPS_RAW_ECHO_ENABLE=0`，不会自动做 UART2->UART1 原始透传
 6. 本模块不维护完整卫星表，`GSV` 当前只汇总 `satellites_view` 与 `max_snr`
 7. 受 Driver 接口限制，`uart_overflow_count` 更适合作为 UART2 接收缓冲回卷/覆盖风险计数，不是精确的丢字节统计值
 
