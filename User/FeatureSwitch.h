@@ -179,7 +179,7 @@
  * - 1：磁力计单独刷屏，适合排查 QMC6309 本体
  * - 0：不独立刷屏，由 AHRS 内部低频读取
  */
-#define ENABLE_MAG_STANDALONE_POLL     0
+#define ENABLE_MAG_STANDALONE_POLL     1
 
 /**
  * @brief  AHRS 姿态轮询开关

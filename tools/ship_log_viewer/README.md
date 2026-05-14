@@ -282,12 +282,14 @@ meta 里还会显示：
 来源：
 
 - `[MOT] I: m=... y=... t=... o=... l=... r=...`
+- `[SHIP] I: pwm pins mla=... mlb=... mra=... mrb=... period=...`
 
 用途：
 
 - 看控制器最后到底下发了多少
 - 看左右输出是否一致
 - 看 yaw hold / manual hold 是否叠加了差速
+- 主数值显示为左右两行百分比：`左 +18%` / `右 +18%`，负数表示反向输出
 
 这个卡片显示的是“输出”。
 不是遥控器原始输入。
@@ -296,15 +298,35 @@ meta 里还会显示：
 
 来源：
 
-- `manual parse`
-- `manual motion`
-- `yaw hold`
-- `[MOT]`
+- `[SHIP] I: manual parse ... target=... speed=...`
+- `[SHIP] I: manual motion=... left=... right=...`
+- `[SHIP] I: manual motion=stop reason=...`
 
 用途：
 
 - 看当前被识别成 `forward / backward / left / right / stop`
-- 看是否已经进入 yaw hold
+- `[MOT]`、`pwm pins`、`yaw hold` 只更新“实际输出油门”，不再覆盖动作判定
+- 小字字段按 `speed / throttle / steering` 或 `left / right` 分行显示，避免挤成一行
+- 重复的 `stop/manual center` 会在时间线上做 1 秒限流，避免中位帧持续输入时刷屏
+
+### `电量采样`
+
+来源：
+
+- `[SHIP] I: adc p0.0 raw=... adc_mv=... bat_mv=... power_level=...`
+- `0x12` 的 `power=0x..` 字节
+
+`power_level` 是 `0..4` 等级，不是原始 ADC。
+
+### `地磁数据`
+
+来源：
+
+- `[MAG] I: test raw=... ... norm1=...`
+- `[MAG] I: raw=... ... norm=... yaw=... self=...`
+- `[HDG] I: ... ym=... mv=... mu=...`
+
+当前固件启用 `ENABLE_MAG_STANDALONE_POLL=1`，每秒独立输出一次地磁原始读数，便于确认上位机能看到地磁。
 
 ### `按键状态`
 

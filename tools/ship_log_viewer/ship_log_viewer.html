@@ -62,6 +62,7 @@
     h1 { font-size: 28px; line-height: 1.1; }
     h2 { font-size: 18px; }
     .subtitle, .meta, .footnote { color: var(--muted); font-size: 13px; }
+    .meta { white-space: pre-line; line-height: 1.35; }
 
     .status-chip {
       padding: 10px 14px;
@@ -534,6 +535,8 @@
       eventCount: 0,
       manualCount: 0,
       gpsTxCount: 0,
+      motionLastKey: "",
+      motionLastAt: 0,
       timeline: [],
       rawLines: [],
       dirty: {
@@ -894,6 +897,41 @@
       return map[mode] || `mode ${mode}`;
     }
 
+    function clampPercent(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return 0;
+      }
+      return Math.max(-100, Math.min(100, Math.round(num)));
+    }
+
+    function motorSpeedToPercent(speed) {
+      return clampPercent(Number(speed) / 10);
+    }
+
+    function formatSignedPercent(value) {
+      const pct = clampPercent(value);
+      return `${pct > 0 ? "+" : ""}${pct}%`;
+    }
+
+    function formatOutputPercent(left, right) {
+      return `左 ${formatSignedPercent(left)}\n右 ${formatSignedPercent(right)}`;
+    }
+
+    function formatMotorOutputPercent(leftSpeed, rightSpeed) {
+      return formatOutputPercent(motorSpeedToPercent(leftSpeed), motorSpeedToPercent(rightSpeed));
+    }
+
+    function formatPwmOutputPercent(mla, mlb, mra, mrb, period) {
+      const p = Number(period);
+      if (!Number.isFinite(p) || p <= 0) {
+        return "左 0%\n右 0%";
+      }
+      const left = ((Number(mla) - Number(mlb)) * 100) / p;
+      const right = ((Number(mrb) - Number(mra)) * 100) / p;
+      return formatOutputPercent(left, right);
+    }
+
     function updateSelfStabilizeFromSteering(steeringValue) {
       const steering = Number(steeringValue);
       const absSteering = Number.isFinite(steering) ? Math.abs(steering) : NaN;
@@ -909,6 +947,21 @@
       state.last.keyMeta = `${source} / 等待 key action 日志确认动作`;
       markDirty("cards");
       renderCardsNow();
+    }
+
+    function updateMotionDecision(value, meta, timelineText) {
+      const now = Date.now();
+      const key = `${value}|${meta}`;
+      state.last.motionValue = value;
+      state.last.motionMeta = meta;
+      if (key !== state.motionLastKey || (now - state.motionLastAt) >= 1000) {
+        state.motionLastKey = key;
+        state.motionLastAt = now;
+        if (timelineText) {
+          pushTimeline(timelineText);
+        }
+      }
+      markDirty("cards");
     }
 
     function cmdName(cmd) {
@@ -1108,15 +1161,16 @@
 
       const shipYawHold = line.match(/\[SHIP\] I: yaw hold tgt=([-\d]+) yr=([-\d]+) out=([-\d]+) throttle=([-\d]+) steer=([-\d]+) gate=(\d+) left=([-\d]+) right=([-\d]+)/);
       if (shipYawHold) {
-        state.last.motionValue = "yaw-hold";
-        state.last.motionMeta = `tgt=${shipYawHold[1]} yr=${shipYawHold[2]} out=${shipYawHold[3]} left=${shipYawHold[7]} right=${shipYawHold[8]}`;
+        state.last.throttleOutputValue = formatMotorOutputPercent(shipYawHold[7], shipYawHold[8]);
+        state.last.throttleOutputMeta = `yaw-hold tgt=${shipYawHold[1]} yr=${shipYawHold[2]} out=${shipYawHold[3]}\nleft=${shipYawHold[7]} right=${shipYawHold[8]}`;
         pushTimeline(`yaw hold：yr=${shipYawHold[2]} out=${shipYawHold[3]} left=${shipYawHold[7]} right=${shipYawHold[8]}`);
         important = true;
       }
 
       const pwmPins = line.match(/\[SHIP\] I: pwm pins mla=(\d+) mlb=(\d+) mra=(\d+) mrb=(\d+) period=(\d+)/);
       if (pwmPins) {
-        state.last.motionMeta = `mla=${pwmPins[1]} mlb=${pwmPins[2]} mra=${pwmPins[3]} mrb=${pwmPins[4]} period=${pwmPins[5]}`;
+        state.last.throttleOutputValue = formatPwmOutputPercent(pwmPins[1], pwmPins[2], pwmPins[3], pwmPins[4], pwmPins[5]);
+        state.last.throttleOutputMeta = `pwm mla=${pwmPins[1]} mlb=${pwmPins[2]}\nmra=${pwmPins[3]} mrb=${pwmPins[4]} period=${pwmPins[5]}`;
         pushTimeline(`PWM：mla=${pwmPins[1]} mlb=${pwmPins[2]} mra=${pwmPins[3]} mrb=${pwmPins[4]} period=${pwmPins[5]}`);
         important = true;
       }
@@ -1258,28 +1312,28 @@
         const motorMode = Number(motorOut[1]);
         const motorModeText = throttleModeText(motorMode);
         const motorThrottle = motorOut[3] || "0";
-        state.last.throttleOutputValue = `${motorThrottle}`;
-        state.last.throttleOutputMeta = `mode=${motorModeText} yaw=${motorOut[2]} out=${motorOut[4]} left=${motorOut[5]} right=${motorOut[6]}`;
-        state.last.motionValue = motorModeText;
-        state.last.motionMeta = `left=${motorOut[5]} right=${motorOut[6]} yaw=${motorOut[2]} out=${motorOut[4]}`;
+        state.last.throttleOutputValue = formatMotorOutputPercent(motorOut[5], motorOut[6]);
+        state.last.throttleOutputMeta = `mode=${motorModeText} yaw=${motorOut[2]} base=${motorThrottle} out=${motorOut[4]}\nleft=${motorOut[5]} right=${motorOut[6]}`;
         pushTimeline(`MOT ${motorModeText}: base=${motorThrottle} out=${motorOut[4]} left=${motorOut[5]} right=${motorOut[6]}`);
         important = true;
       }
 
       const motorYawHold = line.match(/\[SHIP\] I: yaw hold tgt=([-\d]+) yr=([-\d]+) out=([-\d]+) throttle=([-\d]+) steer=([-\d]+) gate=(\d+) left=([-\d]+) right=([-\d]+)/);
       if (motorYawHold) {
-        state.last.motionValue = "yaw-hold";
-        state.last.motionMeta = `tgt=${motorYawHold[1]} yr=${motorYawHold[2]} out=${motorYawHold[3]} left=${motorYawHold[7]} right=${motorYawHold[8]}`;
+        state.last.throttleOutputValue = formatMotorOutputPercent(motorYawHold[7], motorYawHold[8]);
+        state.last.throttleOutputMeta = `yaw-hold tgt=${motorYawHold[1]} yr=${motorYawHold[2]} out=${motorYawHold[3]}\nleft=${motorYawHold[7]} right=${motorYawHold[8]}`;
         pushTimeline(`yaw hold：yr=${motorYawHold[2]} out=${motorYawHold[3]} left=${motorYawHold[7]} right=${motorYawHold[8]}`);
         important = true;
       }
 
       const manualParse = line.match(/\[SHIP\] I: manual parse cmd=0x11 throttle_raw=(\d+) steering_raw=(\d+) throttle_val=([-\d]+) steering_val=([-\d]+) key=(0x[0-9A-Fa-f]{2})\(([^)]+)\) target=([a-zA-Z-]+) speed=([-\d]+)/);
       if (manualParse) {
-        state.last.motionValue = manualParse[7];
-        state.last.motionMeta = `speed=${manualParse[8]} throttle=${manualParse[3]} steering=${manualParse[4]}`;
+        updateMotionDecision(
+          manualParse[7],
+          `speed=${manualParse[8]}\nthrottle=${manualParse[3]}\nsteering=${manualParse[4]}`,
+          `动作判定：${manualParse[7]}，speed=${manualParse[8]}，throttle=${manualParse[3]} steering=${manualParse[4]}`
+        );
         updateKeyFromFrame(manualParse[5], manualParse[6], "manual parse");
-        pushTimeline(`动作判定：${manualParse[7]}，speed=${manualParse[8]}，throttle=${manualParse[3]} steering=${manualParse[4]}`);
         important = true;
       }
 
@@ -1303,17 +1357,17 @@
 
       const motion = line.match(/\[SHIP\] I: manual motion=([a-zA-Z-]+) left=([-\d]+) right=([-\d]+)/);
       if (motion) {
-        state.last.motionValue = motion[1];
-        state.last.motionMeta = `left=${motion[2]} right=${motion[3]}`;
-        pushTimeline(`电机目标：${motion[1]}，left=${motion[2]} right=${motion[3]}`);
+        updateMotionDecision(
+          motion[1],
+          `left=${motion[2]}\nright=${motion[3]}`,
+          `电机目标：${motion[1]}，left=${motion[2]} right=${motion[3]}`
+        );
         important = true;
       }
 
       const stopReason = line.match(/\[SHIP\] I: manual motion=stop reason=(.+)$/);
       if (stopReason) {
-        state.last.motionValue = "stop";
-        state.last.motionMeta = `reason=${stopReason[1]}`;
-        pushTimeline(`停机：${stopReason[1]}`);
+        updateMotionDecision("stop", `reason=${stopReason[1]}`, `停机：${stopReason[1]}`);
         important = true;
       }
 
@@ -1400,10 +1454,10 @@
         important = true;
       }
 
-      const power = line.match(/\[SHIP\] I: adc p0\.0 raw=(\d+) adc_mv=(\d+) bat_mv=(\d+) power=(0x[0-9A-Fa-f]{2})/);
+      const power = line.match(/\[SHIP\] I: adc p0\.0 raw=(\d+) adc_mv=(\d+) bat_mv=(\d+) power(?:_level)?=(0x[0-9A-Fa-f]{2}|\d+)/);
       if (power) {
         state.last.powerValue = `${power[3]} mV`;
-        state.last.powerMeta = `raw=${power[1]} adc=${power[2]}mV power=${power[4]}`;
+        state.last.powerMeta = `raw=${power[1]} adc=${power[2]}mV level=${power[4]}`;
         important = true;
       }
 
