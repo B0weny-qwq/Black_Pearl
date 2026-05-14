@@ -56,6 +56,7 @@
 #define SHIP_CMD_RETURN_HOME     0x13U  /**< 遥控器设置返航点命令。 */
 #define SHIP_CMD_GOTO_POINT      0x14U  /**< 遥控器设置目标点命令。 */
 #define SHIP_CMD_RETURN_SWITCH   0x15U  /**< 遥控器自动返航开关命令。 */
+#define SHIP_CMD_AUTODRIVE_DIAG  0x16U  /**< 船端返航/去点诊断上报命令，payload 固定长度。 */
 
 /**
  * @brief   轮询无线接收数据并尝试解析协议帧。

@@ -10,7 +10,7 @@
 #define AUTODRIVE_MIN_ACTIVE_DISTANCE_M    10U
 #define AUTODRIVE_MAX_ACTIVE_DISTANCE_M    800U
 #define AUTODRIVE_ARRIVE_DISTANCE_M        3U
-#define AUTODRIVE_STRAIGHT_DISTANCE_X10_M  15U
+#define AUTODRIVE_STRAIGHT_DISTANCE_X10_M  2U
 #define AUTODRIVE_MANUAL_TIMEOUT_TICKS     (30U * 100U)
 #define AUTODRIVE_MANUAL_CLOSE_TICKS       300U
 #define AUTODRIVE_DRIVE_PWM                900
@@ -47,6 +47,7 @@ static u16 g_link_close_ticks = 0U;
 static u32 g_last_run_update_seq = 0UL;
 static u32 g_last_poll_tick_ms = 0UL;
 static u32 g_last_link_tick_ms = 0UL;
+static u8 g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
 
 static u16 AutoDrive_Abs16(int16 value)
 {
@@ -58,7 +59,8 @@ static u16 AutoDrive_Abs16(int16 value)
 
 static u16 AutoDrive_ReadU16Wire(const u8 *data_m)
 {
-    return (u16)(((u16)data_m[0] << 8) | data_m[1]);
+    /* Match legacy ship firmware: raw GPS_POSITION bytes on wire. */
+    return (u16)(((u16)data_m[1] << 8) | data_m[0]);
 }
 
 static void AutoDrive_PointFromLegacyWire(AutoDrive_PointRaw_t *point,
@@ -182,6 +184,25 @@ static u8 AutoDrive_GpsReady(void)
     return 1U;
 }
 
+static u8 AutoDrive_GetSatCount(void)
+{
+    const GPS_State_t *gps;
+
+    gps = GPS_GetState();
+    if (gps == 0) {
+        return 0U;
+    }
+    if (gps->satellites_used_gsa > 0U) {
+        return gps->satellites_used_gsa;
+    }
+    return gps->satellites_used;
+}
+
+static void AutoDrive_SetDiagReason(u8 reason)
+{
+    g_last_diag_reason = reason;
+}
+
 static void AutoDrive_SetMotorForward(u16 pwm)
 {
     Motor_SetBothSpeed((int16)pwm, (int16)pwm);
@@ -205,6 +226,7 @@ void AutoDrive_StopMotion(void)
 void AutoDrive_Stop(void)
 {
     g_autoDrive_state = AUTO_DRIVE_IDLE;
+    AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_STOP);
     AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
 }
 
@@ -271,6 +293,7 @@ u8 AutoDrive_IsCanActive(const AutoDrive_PointRaw_t *point)
 
 void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
 {
+    AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_CMD_RETURN_HOME);
     if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
         return;
     }
@@ -288,6 +311,7 @@ void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
 
 void AutoDrive_SetFishPositionRaw(const u8 *data_m)
 {
+    AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT);
     if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
         return;
     }
@@ -303,8 +327,9 @@ void AutoDrive_SetFishPositionRaw(const u8 *data_m)
     g_autoDrive_fail_flag = 0U;
 }
 
-void AutoDrive_TriggerReturn(void)
+void AutoDrive_TriggerReturnWithReason(u8 reason)
 {
+    AutoDrive_SetDiagReason(reason);
     if (g_autodrv_cfg.auto_ret_onoff != 0x30U) {
         if (g_autoDrive_fail_flag != 0U) {
             return;
@@ -321,9 +346,15 @@ void AutoDrive_TriggerReturn(void)
     }
 }
 
+void AutoDrive_TriggerReturn(void)
+{
+    AutoDrive_TriggerReturnWithReason(AUTODRIVE_DIAG_REASON_GENERIC_TRIGGER);
+}
+
 void AutoDrive_WorkOvertimeFail(void)
 {
     g_autoDrive_fail_flag = 1U;
+    AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_OVERTIME);
 }
 
 void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len)
@@ -335,6 +366,7 @@ void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len)
     g_autoDrive_switch = data_m[0];
     g_autodrv_cfg.auto_ret_onoff = data_m[0];
     if (len >= (u8)(1U + AUTODRIVE_LEGACY_POINT_WIRE_LEN)) {
+        AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_RETURN_SWITCH_SAVE);
         AutoDrive_PointFromLegacyWire(&g_autodrv_cfg.ret_point, &data_m[1]);
     }
     (void)AutoDriveCfg_Save(&g_autodrv_cfg);
@@ -606,16 +638,8 @@ u16 AutoDrive_GetNorthAngel(u8 direction, u8 angel)
     }
 }
 
-static u16 AutoDrive_GetCurrentHeadingDeg(void)
+static u16 AutoDrive_GetStartHeadingDeg(void)
 {
-    const GPS_State_t *gps;
-
-    gps = GPS_GetState();
-    if ((gps != 0) && (gps->course_deg_x100 <= 36000U) &&
-        (gps->speed_kmh_x100 >= 80UL)) {
-        return (u16)(gps->course_deg_x100 / 100U);
-    }
-
     if (AHRS_IsReady()) {
         const AHRS_State_t *ahrs;
         int16 yaw;
@@ -629,6 +653,29 @@ static u16 AutoDrive_GetCurrentHeadingDeg(void)
             yaw = (int16)(yaw - 36000);
         }
         return (u16)(yaw / 100U);
+    }
+
+    {
+        const GPS_State_t *gps;
+
+        gps = GPS_GetState();
+        if ((gps != 0) && (gps->fix_valid != 0U) &&
+            (gps->course_deg_x100 <= 36000U)) {
+            return (u16)(gps->course_deg_x100 / 100U);
+        }
+    }
+
+    return 0U;
+}
+
+static u16 AutoDrive_GetRunHeadingDeg(void)
+{
+    const GPS_State_t *gps;
+
+    gps = GPS_GetState();
+    if ((gps != 0) && (gps->fix_valid != 0U) &&
+        (gps->course_deg_x100 <= 36000U)) {
+        return (u16)(gps->course_deg_x100 / 100U);
     }
 
     return 65535U;
@@ -655,6 +702,52 @@ static void AutoDrive_UpdateGpsStepPoints(void)
     AutoDrive_PointFromGps(&g_now_position, gps);
 }
 
+static void AutoDrive_GetSnapshotTargetPoint(AutoDrive_PointRaw_t *point)
+{
+    if (point == 0) {
+        return;
+    }
+
+    point->lon_ew = 0U;
+    point->lon_whole = 0U;
+    point->lon_frac = 0U;
+    point->lat_ns = 0U;
+    point->lat_whole = 0U;
+    point->lat_frac = 0U;
+
+    if (g_autoDrive_mode == AUTO_DRIVE_GO_HOME_POSITION) {
+        AutoDrive_CopyPoint(point, &g_return_position);
+    } else if (g_autoDrive_mode == AUTO_DRIVE_GO_FISISH_POSITION) {
+        AutoDrive_CopyPoint(point, &g_fish_position);
+    } else {
+        AutoDrive_CopyPoint(point, &g_autodrv_cfg.ret_point);
+    }
+}
+
+static u8 AutoDrive_CanActivateTargetPoint(const AutoDrive_PointRaw_t *point,
+                                           const AutoDrive_PointRaw_t *current_point)
+{
+    u16 distance;
+
+    if (AutoDrive_PointRawValid(point) == 0U) {
+        return 0U;
+    }
+    if (AutoDrive_PointRawValid(current_point) == 0U) {
+        return 0U;
+    }
+    if (AutoDrive_GpsReady() == 0U) {
+        return 0U;
+    }
+
+    distance = AutoDrive_GetDistanceNowToDestination((const u8 *)point,
+                                                     (const u8 *)current_point);
+    if ((distance > AUTODRIVE_MIN_ACTIVE_DISTANCE_M) &&
+        (distance < AUTODRIVE_MAX_ACTIVE_DISTANCE_M)) {
+        return 1U;
+    }
+    return 0U;
+}
+
 void AutoDrive_Init(void)
 {
     AutoDriveCfg_Init();
@@ -674,6 +767,7 @@ void AutoDrive_Init(void)
     g_last_run_update_seq = 0UL;
     g_last_poll_tick_ms = Task_GetTickMs();
     g_last_link_tick_ms = g_last_poll_tick_ms;
+    g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
 
     if (g_motor_ready == 0U) {
         Motor_Init();
@@ -701,7 +795,7 @@ void AutoDrive_LinkAliveTick(void)
     if (g_link_alive_ticks < AUTODRIVE_MANUAL_TIMEOUT_TICKS) {
         g_link_alive_ticks++;
     } else {
-        AutoDrive_TriggerReturn();
+        AutoDrive_TriggerReturnWithReason(AUTODRIVE_DIAG_REASON_LINK_TIMEOUT);
         g_link_alive_ticks = 0U;
     }
 
@@ -755,10 +849,7 @@ void AutoDrive_Poll(void)
                 AutoDrive_GetDirectionNowToDestination((const u8 *)&g_idle_position,
                                                        (const u8 *)&g_return_position);
 
-            current_heading = AutoDrive_GetCurrentHeadingDeg();
-            if (current_heading == 65535U) {
-                current_heading = 0U;
-            }
+            current_heading = AutoDrive_GetStartHeadingDeg();
 
             switch (g_destination_direction) {
             case POSITION_NORTH:
@@ -893,6 +984,7 @@ void AutoDrive_Poll(void)
         }
 
         if (destination_distance < AUTODRIVE_ARRIVE_DISTANCE_M) {
+            AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_ARRIVE);
             g_autoDrive_state = AUTO_DRIVE_IDLE;
             AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
             AutoDrive_StopMotion();
@@ -911,7 +1003,7 @@ void AutoDrive_Poll(void)
             break;
         }
 
-        g_nowrun_angle = AutoDrive_GetCurrentHeadingDeg();
+        g_nowrun_angle = AutoDrive_GetRunHeadingDeg();
         if ((g_nowrun_angle == 65535U) || (g_nowrun_angle > 360U)) {
             g_nowrun_angle =
                 AutoDrive_GetAngelNowToDestination((const u8 *)&g_last_position,
@@ -953,4 +1045,50 @@ void AutoDrive_Poll(void)
         AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
         break;
     }
+}
+
+void AutoDrive_GetDebugSnapshot(AutoDrive_DebugSnapshot_t *snapshot)
+{
+    u16 heading;
+
+    if (snapshot == 0) {
+        return;
+    }
+
+    snapshot->state = g_autoDrive_state;
+    snapshot->mode = g_autoDrive_mode;
+    snapshot->auto_ret_onoff = g_autodrv_cfg.auto_ret_onoff;
+    snapshot->fail_flag = g_autoDrive_fail_flag;
+    snapshot->last_reason = g_last_diag_reason;
+    snapshot->gps_ready = AutoDrive_GpsReady();
+    snapshot->sat_count = AutoDrive_GetSatCount();
+    snapshot->current_point.lon_ew = 0U;
+    snapshot->current_point.lon_whole = 0U;
+    snapshot->current_point.lon_frac = 0U;
+    snapshot->current_point.lat_ns = 0U;
+    snapshot->current_point.lat_whole = 0U;
+    snapshot->current_point.lat_frac = 0U;
+
+    AutoDrive_GetCurrentPointRaw(&snapshot->current_point);
+    AutoDrive_GetSnapshotTargetPoint(&snapshot->target_point);
+
+    snapshot->can_activate_target =
+        AutoDrive_CanActivateTargetPoint(&snapshot->target_point,
+                                         &snapshot->current_point);
+
+    if ((AutoDrive_PointRawValid(&snapshot->current_point) != 0U) &&
+        (AutoDrive_PointRawValid(&snapshot->target_point) != 0U)) {
+        snapshot->distance_to_target_m =
+            AutoDrive_GetDistanceNowToDestination((const u8 *)&snapshot->current_point,
+                                                  (const u8 *)&snapshot->target_point);
+    } else {
+        snapshot->distance_to_target_m = 0U;
+    }
+
+    heading = AutoDrive_GetRunHeadingDeg();
+    if ((heading == 65535U) || (heading > 360U)) {
+        heading = AutoDrive_GetStartHeadingDeg();
+    }
+    snapshot->current_heading_deg = heading;
+    snapshot->target_heading_deg = g_destination_angle;
 }

@@ -48,11 +48,43 @@ typedef struct
     AutoDrive_PointRaw_t ret_point;
 } AutoDrive_ReturnConfig_t;
 
+typedef enum
+{
+    AUTODRIVE_DIAG_REASON_NONE = 0,
+    AUTODRIVE_DIAG_REASON_CMD_RETURN_HOME = 1,
+    AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT = 2,
+    AUTODRIVE_DIAG_REASON_RETURN_SWITCH_SAVE = 3,
+    AUTODRIVE_DIAG_REASON_LINK_TIMEOUT = 4,
+    AUTODRIVE_DIAG_REASON_LOW_POWER = 5,
+    AUTODRIVE_DIAG_REASON_GENERIC_TRIGGER = 6,
+    AUTODRIVE_DIAG_REASON_ARRIVE = 7,
+    AUTODRIVE_DIAG_REASON_OVERTIME = 8,
+    AUTODRIVE_DIAG_REASON_STOP = 9
+} AutoDrive_DiagReason_t;
+
+typedef struct
+{
+    u8 state;
+    u8 mode;
+    u8 auto_ret_onoff;
+    u8 fail_flag;
+    u8 last_reason;
+    u8 gps_ready;
+    u8 sat_count;
+    u8 can_activate_target;
+    u16 distance_to_target_m;
+    u16 current_heading_deg;
+    u16 target_heading_deg;
+    AutoDrive_PointRaw_t current_point;
+    AutoDrive_PointRaw_t target_point;
+} AutoDrive_DebugSnapshot_t;
+
 void AutoDrive_Init(void);
 void AutoDrive_Poll(void);
 void AutoDrive_Stop(void);
 void AutoDrive_StopMotion(void);
 void AutoDrive_TriggerReturn(void);
+void AutoDrive_TriggerReturnWithReason(u8 reason);
 void AutoDrive_WorkOvertimeFail(void);
 
 void AutoDrive_SetMode(u8 mode);
@@ -66,6 +98,7 @@ void AutoDrive_SetFishPositionRaw(const u8 *data_m);
 void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len);
 void AutoDrive_GetStoredConfig(AutoDrive_ReturnConfig_t *cfg);
 void AutoDrive_GetCurrentPointRaw(AutoDrive_PointRaw_t *point);
+void AutoDrive_GetDebugSnapshot(AutoDrive_DebugSnapshot_t *snapshot);
 
 u16 AutoDrive_GetDistanceNowToDestination(const u8 *nowpositionData,
                                           const u8 *despositionData);

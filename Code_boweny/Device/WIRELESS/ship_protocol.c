@@ -98,6 +98,16 @@
 #ifndef SHIP_YAW_HOLD_LOG_PERIOD_MS
 #define SHIP_YAW_HOLD_LOG_PERIOD_MS    1000UL
 #endif
+#ifndef SHIP_AUTODRIVE_DIAG_ENABLE
+#define SHIP_AUTODRIVE_DIAG_ENABLE     1
+#endif
+#ifndef SHIP_AUTODRIVE_DIAG_PERIOD_MS
+#define SHIP_AUTODRIVE_DIAG_PERIOD_MS  1000UL
+#endif
+#ifndef SHIP_AUTODRIVE_DIAG_MIN_GAP_MS
+#define SHIP_AUTODRIVE_DIAG_MIN_GAP_MS 200UL
+#endif
+#define SHIP_AUTODRIVE_DIAG_PAYLOAD_LEN 36U
 
 #ifdef BOARD_12V
 #define SHIP_BATT_ADC_FULL_RAW         2000U
@@ -218,6 +228,9 @@ static u8 ShipProtocol_IsLowPower(void);
 static void ShipProtocol_LowPowerCheck(void);
 static const char *ShipProtocol_KeyNameAlways(u8 key);
 static u8 ShipProtocol_ConfirmCenterStop(u8 log_this_sample);
+static void ShipProtocol_WritePointLegacy(u8 *dst, const AutoDrive_PointRaw_t *point);
+static void ShipProtocol_SendAutoDriveDiagOnce(u8 log_this_tx);
+static void ShipProtocol_ServiceAutoDriveDiag(u32 now_ms);
 #if SHIP_YAW_HOLD_ENABLE
 static u8 ShipProtocol_UpdateYawHoldPid(u32 now_ms, int16 *yaw_cd, u8 *pid_updated);
 static void ShipProtocol_LogMotorOutput(u8 mode, int16 yaw_cd, int16 throttle_speed, int16 yaw_output, int16 left_speed, int16 right_speed, u8 force_log);
@@ -579,7 +592,7 @@ static void ShipProtocol_LowPowerCheck(void)
         if (ShipProtocol_IsLowPower() &&
             (AutoDrive_GetMode() == AUTO_DRIVE_CLOSE) &&
             (g_now_pwm_accelerator < 10U)) {
-            AutoDrive_TriggerReturn();
+            AutoDrive_TriggerReturnWithReason(AUTODRIVE_DIAG_REASON_LOW_POWER);
         }
     } else if (ShipProtocol_IsLowPower() == 0U) {
         g_lowpower_check_times = 0U;
@@ -634,6 +647,8 @@ static const char *ShipProtocol_CmdName(u8 cmd)
         return "manual-ctrl";
     case SHIP_CMD_GPS_REPORT:
         return "gps-report";
+    case SHIP_CMD_AUTODRIVE_DIAG:
+        return "autodrive-diag";
     case SHIP_CMD_RETURN_HOME:
         return "return-home";
     case SHIP_CMD_GOTO_POINT:
@@ -1218,6 +1233,20 @@ static void ShipProtocol_WriteU16Legacy(u8 *dst, u16 value)
     dst[1] = (u8)(value >> 8);
 }
 
+static void ShipProtocol_WritePointLegacy(u8 *dst, const AutoDrive_PointRaw_t *point)
+{
+    if ((dst == 0) || (point == 0)) {
+        return;
+    }
+
+    dst[0] = point->lon_ew;
+    ShipProtocol_WriteU16Legacy(&dst[1], point->lon_whole);
+    ShipProtocol_WriteU16Legacy(&dst[3], point->lon_frac);
+    dst[5] = point->lat_ns;
+    ShipProtocol_WriteU16Legacy(&dst[6], point->lat_whole);
+    ShipProtocol_WriteU16Legacy(&dst[8], point->lat_frac);
+}
+
 #if SHIP_PROTOCOL_DIAG_ENABLE
 static void ShipProtocol_LogCoordBE(const u8 *buf, u8 len)
 {
@@ -1730,6 +1759,129 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
     } else {
         g_ship_rt.work_rx_configured = 0U;
     }
+}
+
+static void ShipProtocol_SendAutoDriveDiagOnce(u8 log_this_tx)
+{
+#if SHIP_AUTODRIVE_DIAG_ENABLE
+    AutoDrive_DebugSnapshot_t snapshot;
+    u8 payload[SHIP_AUTODRIVE_DIAG_PAYLOAD_LEN];
+    u8 idx;
+    s8 rc;
+
+    AutoDrive_GetDebugSnapshot(&snapshot);
+    idx = 0U;
+    payload[idx++] = 0x01U;
+    payload[idx++] = snapshot.state;
+    payload[idx++] = snapshot.mode;
+    payload[idx++] = snapshot.auto_ret_onoff;
+    payload[idx++] = snapshot.fail_flag;
+    payload[idx++] = snapshot.last_reason;
+    payload[idx++] = snapshot.gps_ready;
+    payload[idx++] = snapshot.sat_count;
+    payload[idx++] = snapshot.can_activate_target;
+    payload[idx++] = 0U;
+    ShipProtocol_WriteU16Legacy(&payload[idx], snapshot.distance_to_target_m);
+    idx += 2U;
+    ShipProtocol_WriteU16Legacy(&payload[idx], snapshot.current_heading_deg);
+    idx += 2U;
+    ShipProtocol_WriteU16Legacy(&payload[idx], snapshot.target_heading_deg);
+    idx += 2U;
+    ShipProtocol_WritePointLegacy(&payload[idx], &snapshot.current_point);
+    idx += AUTODRIVE_LEGACY_POINT_WIRE_LEN;
+    ShipProtocol_WritePointLegacy(&payload[idx], &snapshot.target_point);
+    idx += AUTODRIVE_LEGACY_POINT_WIRE_LEN;
+
+    if (idx != SHIP_AUTODRIVE_DIAG_PAYLOAD_LEN) {
+        LOGE(SHIP_TAG, "diag payload len bad=%u", (u16)idx);
+        return;
+    }
+
+    if (log_this_tx != 0U) {
+        LOGI(SHIP_TAG,
+             "tx cmd=0x16 state=%u mode=%u sw=0x%02X reason=%u gps=%u sat=%u dist=%u",
+             (u16)snapshot.state,
+             (u16)snapshot.mode,
+             (u16)snapshot.auto_ret_onoff,
+             (u16)snapshot.last_reason,
+             (u16)snapshot.gps_ready,
+             (u16)snapshot.sat_count,
+             (u16)snapshot.distance_to_target_m);
+        ShipProtocol_LogPayloadBrief(SHIP_STAGE_U8("tx frame"),
+                                     SHIP_CMD_AUTODRIVE_DIAG,
+                                     payload,
+                                     idx);
+    }
+
+    rc = ShipProtocol_SendFrame(g_ship_rt.rf_channel[0],
+                                SHIP_CMD_AUTODRIVE_DIAG,
+                                payload,
+                                idx,
+                                log_this_tx);
+    if (rc != SUCCESS) {
+        LOGE(SHIP_TAG, "diag tx fail rc=%d ch=0x%02X", rc, (u16)g_ship_rt.rf_channel[0]);
+    }
+    if (g_ship_rt.paired != 0U) {
+        ShipProtocol_ReopenWorkRx(SHIP_REASON_C("autodrive diag tx"), 0U, 0U);
+    } else {
+        g_ship_rt.work_rx_configured = 0U;
+    }
+#else
+    (void)log_this_tx;
+#endif
+}
+
+static void ShipProtocol_ServiceAutoDriveDiag(u32 now_ms)
+{
+#if SHIP_AUTODRIVE_DIAG_ENABLE
+    static u32 last_tx_ms = 0UL;
+    static u8 last_state = 0xFFU;
+    static u8 last_mode = 0xFFU;
+    static u8 last_reason = 0xFFU;
+    static u8 last_busy = 0xFFU;
+    static u8 last_switch = 0xFFU;
+    static u8 last_fail = 0xFFU;
+    AutoDrive_DebugSnapshot_t snapshot;
+    u8 busy;
+    u8 tracked;
+    u8 changed;
+
+    if (g_ship_rt.paired == 0U) {
+        return;
+    }
+
+    AutoDrive_GetDebugSnapshot(&snapshot);
+    busy = (snapshot.state != AUTO_DRIVE_IDLE) ? 1U : 0U;
+    tracked = (busy != 0U) ||
+              (snapshot.auto_ret_onoff != 0x30U) ||
+              (snapshot.fail_flag != 0U);
+    changed = (snapshot.state != last_state) ||
+              (snapshot.mode != last_mode) ||
+              (snapshot.last_reason != last_reason) ||
+              (busy != last_busy) ||
+              (snapshot.auto_ret_onoff != last_switch) ||
+              (snapshot.fail_flag != last_fail);
+
+    if ((tracked == 0U) && (changed == 0U) && (last_tx_ms == 0UL)) {
+        return;
+    }
+
+    if ((last_tx_ms == 0UL) ||
+        ((changed != 0U) &&
+         (ShipProtocol_ElapsedMs(now_ms, last_tx_ms) >= SHIP_AUTODRIVE_DIAG_MIN_GAP_MS)) ||
+        (ShipProtocol_ElapsedMs(now_ms, last_tx_ms) >= SHIP_AUTODRIVE_DIAG_PERIOD_MS)) {
+        ShipProtocol_SendAutoDriveDiagOnce((changed != 0U) ? 1U : 0U);
+        last_tx_ms = now_ms;
+        last_state = snapshot.state;
+        last_mode = snapshot.mode;
+        last_reason = snapshot.last_reason;
+        last_busy = busy;
+        last_switch = snapshot.auto_ret_onoff;
+        last_fail = snapshot.fail_flag;
+    }
+#else
+    (void)now_ms;
+#endif
 }
 
 static void ShipProtocol_HandlePairRsp(const u8 *payload, u8 payload_len)
@@ -2374,6 +2526,7 @@ void ShipProtocol_RunScheduler(void)
     }
 
     AutoDrive_Poll();
+    ShipProtocol_ServiceAutoDriveDiag(now_ms);
 
 #if SHIP_YAW_HOLD_ENABLE
     if (((g_ship_rt.throttle_online == 0U) || (g_ship_rt.valid == 0U)) &&
