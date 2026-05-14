@@ -6,6 +6,7 @@
 void MainLoop_Bootstrap(void);
 void MainLoop_RunOnce(void);
 u8 MainLoop_IsHeadingReady(void);
+u16 MainLoop_GetHeadingDeg100(void);
 int16 MainLoop_GetHeadingRelativeDeg100(void);
 
 #endif

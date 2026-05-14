@@ -51,6 +51,7 @@
 #define WIRELESS_SCAN_SAMPLE_MS    2U     /**< 天线扫描单次采样间隔，单位 ms。 */
 #define WIRELESS_SIGNAL_RSSI_MIN   12U    /**< 判定存在有效信号的最小 RSSI。 */
 #define WIRELESS_SEARCH_POLL_DIV   32U    /**< 搜索信号轮询分频系数。 */
+#define WIRELESS_SEARCH_MAX_RETRY  5U     /**< 运行期最多重扫次数，超过后进入正常收发。 */
 #define WIRELESS_TX_TIMEOUT_LOOPS  1000U  /**< 发送完成轮询最大循环次数。 */
 #define WIRELESS_TX_PKT_POLL_US    1000U  /**< 发送完成轮询间隔，单位 us。 */
 

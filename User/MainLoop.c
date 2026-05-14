@@ -25,7 +25,7 @@ static void Wireless_MinimalTestUnit(void)
 #endif
 
 #if ENABLE_MAG_MODULE && ENABLE_MAG_STANDALONE_POLL
-#define MAG_TEST_PERIOD_MS  1000U
+#define MAG_TEST_PERIOD_MS  SHIP_MAG_LOG_PERIOD_MS
 
 static u32 MAG_Abs16ToU32(int16 value)
 {
@@ -73,7 +73,7 @@ static void MAG_StandalonePoll(void)
 #endif
 
 #if ENABLE_IMU_MODULE
-#define IMU_BASIC_LOG_PERIOD_MS        500U
+#define IMU_BASIC_LOG_PERIOD_MS        SHIP_IMU_LOG_PERIOD_MS
 #ifndef AHRS_LOG_DECIMATION
 #define AHRS_LOG_DECIMATION            32U
 #endif
@@ -270,6 +270,22 @@ static u8 AHRS_IsHeadingStatic(const AHRS_State_t *att)
     return 1U;
 }
 
+static u8 AHRS_HasSelfStabilize(const AHRS_State_t *att)
+{
+    if (att == 0) {
+        return 0U;
+    }
+
+    if ((att->flags & AHRS_FLAG_GYRO_BIAS_READY) == 0U) {
+        return 0U;
+    }
+    if ((att->flags & AHRS_FLAG_MAG_VALID) == 0U) {
+        return 0U;
+    }
+
+    return AHRS_IsHeadingStatic(att);
+}
+
 static void IMU_AhrsPoll(void)
 {
     static u8 timing_started = 0;
@@ -281,6 +297,10 @@ static void IMU_AhrsPoll(void)
     static u8 heading_seeded = 0;
     static int32 yaw_gyro_zero_cd = 0;
     static int32 yaw_mag_zero_cd = 0;
+    static int16 last_mag_x = 0;
+    static int16 last_mag_y = 0;
+    static int16 last_mag_z = 0;
+    static u8 last_mag_valid = 0U;
     u32 now_ms;
     u32 elapsed_ms;
     u16 dt_ms;
@@ -302,6 +322,7 @@ static void IMU_AhrsPoll(void)
     int32 heading_mag_dbg_cd;
     u8 raw_mag_valid;
     u8 heading_static_flag;
+    u8 self_stabilize_flag;
     float heading_seed_deg;
     float heading_dt_s;
     char *mag_suffix;
@@ -347,6 +368,10 @@ static void IMU_AhrsPoll(void)
         last_mag_ms = now_ms;
         if (QMC6309_ReadXYZFiltered(&mx, &my, &mz) == 0) {
             (void)AHRS_UpdateRawMag(mx, my, mz);
+            last_mag_x = mx;
+            last_mag_y = my;
+            last_mag_z = mz;
+            last_mag_valid = 1U;
         }
     }
 
@@ -362,6 +387,7 @@ static void IMU_AhrsPoll(void)
     } else {
         raw_mag_valid = ((att->flags & AHRS_FLAG_MAG_VALID) != 0U) ? 1U : 0U;
         heading_static_flag = AHRS_IsHeadingStatic(att);
+        self_stabilize_flag = AHRS_HasSelfStabilize(att);
         heading_dt_s = (float)dt_ms * 0.001f;
 
         if (!heading_seeded) {
@@ -484,6 +510,15 @@ static void IMU_AhrsPoll(void)
                                     g_hm_buf,
                                     att->flags);
         LOGI("HDG", "%s", g_ahrs_log_buf);
+        LOGI("MAG", "raw=%d %d %d norm=%lu yaw=%s self=%u",
+             last_mag_valid ? last_mag_x : 0,
+             last_mag_valid ? last_mag_y : 0,
+             last_mag_valid ? last_mag_z : 0,
+             (u32)(AHRS_Abs32Local((int32)(last_mag_valid ? last_mag_x : 0)) +
+                   AHRS_Abs32Local((int32)(last_mag_valid ? last_mag_y : 0)) +
+                   AHRS_Abs32Local((int32)(last_mag_valid ? last_mag_z : 0))),
+             g_yaw_mag_buf,
+             (u16)self_stabilize_flag);
         return;
     }
 
@@ -527,6 +562,15 @@ static void IMU_AhrsPoll(void)
                                 g_hm_buf,
                                 att->flags);
     LOGI("HDG", "%s", g_ahrs_log_buf);
+    LOGI("MAG", "raw=%d %d %d norm=%lu yaw=%s self=%u",
+         last_mag_valid ? last_mag_x : 0,
+         last_mag_valid ? last_mag_y : 0,
+         last_mag_valid ? last_mag_z : 0,
+         (u32)(AHRS_Abs32Local((int32)(last_mag_valid ? last_mag_x : 0)) +
+               AHRS_Abs32Local((int32)(last_mag_valid ? last_mag_y : 0)) +
+               AHRS_Abs32Local((int32)(last_mag_valid ? last_mag_z : 0))),
+         g_yaw_mag_buf,
+         (u16)self_stabilize_flag);
 }
 #endif
 #endif
@@ -548,6 +592,24 @@ u8 MainLoop_IsHeadingReady(void)
 {
 #if ENABLE_IMU_MODULE && ENABLE_IMU_AHRS_POLL
     return g_heading_ready_snapshot;
+#else
+    return 0U;
+#endif
+}
+
+u16 MainLoop_GetHeadingDeg100(void)
+{
+#if ENABLE_IMU_MODULE && ENABLE_IMU_AHRS_POLL
+    int32 heading_cd;
+
+    heading_cd = Heading_GetDeg100(&g_heading);
+    while (heading_cd >= 36000L) {
+        heading_cd -= 36000L;
+    }
+    while (heading_cd < 0L) {
+        heading_cd += 36000L;
+    }
+    return (u16)heading_cd;
 #else
     return 0U;
 #endif

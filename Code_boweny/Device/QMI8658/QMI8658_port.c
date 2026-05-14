@@ -147,6 +147,9 @@ s8 QMI8658Port_Init(void)
 {
     QMI8658Port_ConfigPins();
     QMI8658Port_HardI2cRestore();
+    if (QMI8658Port_BusNeedsRecover() != 0U) {
+        QMI8658Port_BusRecover();
+    }
     return SUCCESS;
 }
 
@@ -251,14 +254,12 @@ static u8 QMI8658Port_BusState(void)
     if (Get_MSBusy_Status() != 0U) {
         state |= 0x01U;
     }
-#if QMI8658_I2C_USE_SOFT
     if (P14 == 0) {
         state |= 0x02U;
     }
     if (P15 == 0) {
         state |= 0x04U;
     }
-#endif
     return state;
 }
 

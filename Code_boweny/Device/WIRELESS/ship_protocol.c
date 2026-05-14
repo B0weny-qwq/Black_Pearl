@@ -1,19 +1,12 @@
 /**
  * @file    ship_protocol.c
- * @brief   船端旧遥控器无线业务协议移植实现。
+ * @brief   鑸圭鏃ч仴鎺у櫒鏃犵嚎涓氬姟鍗忚绉绘瀹炵幇銆?
  * @author  boweny
  * @date    2026-05-07
  * @version v1.2
  *
  * @details
- * 本文件保持旧版 `Wireless/wirelessProtocal.c` 的配对、收包解析、
- * 固定 `0x12` 回传和 `0x11` 载荷语义，同时按当前根目录工程的真实状态
- * 接入如下行为：
- * - `0x11` 手动链路会执行轴滤波、差速映射，并在门控满足时叠加 yaw-hold。
- * - `0x13/0x14/0x15` 会驱动 `AutoDrive` 设置返航点、目标点和自动返航开关。
- * - 遥控失联、低电和空闲态会与 `AutoDrive`、`AHRS`、`Motor` 共同工作。
- * 因此本文件现在不是“只保留开环控船”的历史联调版，而是当前无线主业务入口。
- */
+ * 鏈枃浠朵繚鎸佹棫鐗?`Wireless/wirelessProtocal.c` 鐨勯厤瀵广€佹敹鍖呰В鏋愩€? * 鍥哄畾 `0x12` 鍥炰紶鍜?`0x11` 杞借嵎璇箟锛屽悓鏃舵寜褰撳墠鏍圭洰褰曞伐绋嬬殑鐪熷疄鐘舵€? * 鎺ュ叆濡備笅琛屼负锛? * - `0x11` 鎵嬪姩閾捐矾浼氭墽琛岃酱婊ゆ尝銆佸樊閫熸槧灏勶紝骞跺湪闂ㄦ帶婊¤冻鏃跺彔鍔?yaw-hold銆? * - `0x13/0x14/0x15` 浼氶┍鍔?`AutoDrive` 璁剧疆杩旇埅鐐广€佺洰鏍囩偣鍜岃嚜鍔ㄨ繑鑸紑鍏炽€? * - 閬ユ帶澶辫仈銆佷綆鐢靛拰绌洪棽鎬佷細涓?`AutoDrive`銆乣AHRS`銆乣Motor` 鍏卞悓宸ヤ綔銆? * 鍥犳鏈枃浠剁幇鍦ㄤ笉鏄€滃彧淇濈暀寮€鐜帶鑸光€濈殑鍘嗗彶鑱旇皟鐗堬紝鑰屾槸褰撳墠鏃犵嚎涓讳笟鍔″叆鍙ｃ€? */
 #include "ship_protocol.h"
 #include "wireless.h"
 #include "..\..\Device\GPS\GPS.h"
@@ -41,6 +34,12 @@
 #if !SHIP_PROTOCOL_ERROR_LOG_ENABLE
 #undef LOGE
 #define LOGE(tag, ...)
+#endif
+
+#if SHIP_PROTO_DEBUG_ENABLE
+#define SHIP_PROTO_DBG(...) LOGI(SHIP_TAG, __VA_ARGS__)
+#else
+#define SHIP_PROTO_DBG(...)
 #endif
 
 #if SHIP_PROTOCOL_DIAG_ENABLE
@@ -89,6 +88,7 @@
 #define SHIP_LOWPOWER_CHECK_TICKS      600U
 #define SHIP_POWER_SAMPLE_DIVIDER      100U
 #define SHIP_YAW_HOLD_FORWARD_ONLY     1U
+#define SHIP_CENTER_STOP_CONFIRM_FRAMES 2U
 #ifndef SHIP_YAW_HOLD_PERIOD_MS
 #define SHIP_YAW_HOLD_PERIOD_MS        100UL
 #endif
@@ -161,6 +161,7 @@ typedef struct
     int32 filtered_ud_q8;
     u8 pair_rsp_timeout_logged;
     u8 rx_idle_warned;
+    u8 remote_online;
     u8 throttle_online;
     u8 throttle_recover_done;
     u8 motor_initialized;
@@ -172,6 +173,7 @@ typedef struct
     ShipMotion_t pulse_motion;
     u32 pulse_expire_ms;
     u8 pulse_active;
+    u8 center_stop_count;
 } ShipRuntime_t;
 
 typedef struct
@@ -183,7 +185,7 @@ typedef struct
     u8 valid;
 } ShipPowerSample_t;
 
-static ShipRuntime_t g_ship_rt;
+static ShipRuntime_t xdata g_ship_rt;
 static PID_Controller_t xdata g_ship_yaw_pid;
 static u8 g_ship_power_sample_times = 0U;
 static u16 g_lowpower_check_times = 0U;
@@ -193,10 +195,14 @@ static ShipPowerSample_t g_ship_power_sample;
 static u8 g_manual_cruise_mode = SHIP_CRUISE_STOP;
 static u8 g_manual_in_cruise_run = 0U;
 static u8 g_manual_first_cruise_run = 0U;
+static u8 xdata g_ship_tx_frame[SHIP_PROTO_MAX_FRAME_LEN];
+static u8 xdata g_ship_rx_frame[SHIP_PROTO_MAX_FRAME_LEN];
+static u8 xdata g_ship_parse_frame[SHIP_LEGACY_PROTO_MAX_LEN];
 
 static s8 ShipProtocol_ApplyWorkSyncIdle(u8 log_rxdbg);
 static s8 ShipProtocol_ApplyWorkRx(u8 log_rxdbg);
 static void ShipProtocol_ReopenWorkRx(const char *reason, u8 log_rxdbg, u8 log_ok);
+static void ShipProtocol_MarkPairedByFrame(u8 cmd, const char *reason);
 static void ShipProtocol_ResetYawHold(const char *reason, u8 force_log);
 static void ShipProtocol_EnsureMotorInit(void);
 static int16 ShipProtocol_LimitSpeed(int16 speed);
@@ -210,6 +216,8 @@ static u8 ShipProtocol_AbsAxisDiff(u8 value);
 static int16 ShipProtocol_LegacyPwmToSpeed(u8 pwm);
 static u8 ShipProtocol_IsLowPower(void);
 static void ShipProtocol_LowPowerCheck(void);
+static const char *ShipProtocol_KeyNameAlways(u8 key);
+static u8 ShipProtocol_ConfirmCenterStop(u8 log_this_sample);
 #if SHIP_YAW_HOLD_ENABLE
 static u8 ShipProtocol_UpdateYawHoldPid(u32 now_ms, int16 *yaw_cd, u8 *pid_updated);
 static void ShipProtocol_LogMotorOutput(u8 mode, int16 yaw_cd, int16 throttle_speed, int16 yaw_output, int16 left_speed, int16 right_speed, u8 force_log);
@@ -250,6 +258,17 @@ static int16 ShipProtocol_WrapCd(int32 angle_cd)
     return (int16)angle_cd;
 }
 
+static u32 ShipProtocol_ElapsedMs(u32 now_ms, u32 start_ms)
+{
+    if (start_ms == 0UL) {
+        return 0UL;
+    }
+    if (now_ms < start_ms) {
+        return 0UL;
+    }
+    return (u32)(now_ms - start_ms);
+}
+
 static void ShipProtocol_ResetYawHold(const char *reason, u8 force_log)
 {
 #if SHIP_YAW_HOLD_ENABLE
@@ -268,6 +287,26 @@ static void ShipProtocol_ResetYawHold(const char *reason, u8 force_log)
     (void)reason;
     (void)force_log;
 #endif
+}
+
+static const char *ShipProtocol_KeyNameAlways(u8 key)
+{
+    switch (key) {
+    case SHIP_KEY_E_RESERVED:
+        return "E";
+    case SHIP_KEY_A_TOGGLE_LIGHT:
+        return "A";
+    case SHIP_KEY_B_UNUSED:
+        return "B";
+    case SHIP_KEY_C_PULSE_FORWARD:
+        return "C";
+    case SHIP_KEY_D_PULSE_BACKWARD:
+        return "D";
+    case SHIP_KEY_NULL:
+        return "NONE";
+    default:
+        return "UNKNOWN";
+    }
 }
 
 #if SHIP_YAW_HOLD_ENABLE
@@ -322,7 +361,8 @@ static void ShipProtocol_LogMotorOutput(u8 mode, int16 yaw_cd, int16 throttle_sp
 
     now_ms = Task_GetTickMs();
     if ((force_log == 0U) &&
-        ((now_ms - last_log_ms) < SHIP_YAW_HOLD_LOG_PERIOD_MS)) {
+        (SHIP_MOT_LOG_PERIOD_MS != 0U) &&
+        ((now_ms - last_log_ms) < SHIP_MOT_LOG_PERIOD_MS)) {
         return;
     }
     last_log_ms = now_ms;
@@ -532,6 +572,7 @@ static u8 ShipProtocol_IsLowPower(void)
 static void ShipProtocol_LowPowerCheck(void)
 {
     ShipProtocol_ServicePowerSample();
+    ShipProtocol_LogPowerSample(&g_ship_power_sample, 0U);
     g_lowpower_check_times++;
     if (g_lowpower_check_times > SHIP_LOWPOWER_CHECK_TICKS) {
         g_lowpower_check_times = 0U;
@@ -549,6 +590,35 @@ static void ShipProtocol_ResetAxisFilter(void)
 {
     g_ship_rt.filtered_lr_q8 = ((int32)SHIP_AXIS_CENTER << 8);
     g_ship_rt.filtered_ud_q8 = ((int32)SHIP_AXIS_CENTER << 8);
+}
+
+static u8 ShipProtocol_ConfirmCenterStop(u8 log_this_sample)
+{
+    if (g_ship_rt.motion == SHIP_MOTION_STOP) {
+        g_ship_rt.center_stop_count = 0U;
+        return 1U;
+    }
+
+    if (g_ship_rt.center_stop_count < SHIP_CENTER_STOP_CONFIRM_FRAMES) {
+        g_ship_rt.center_stop_count++;
+    }
+
+    if (g_ship_rt.center_stop_count < SHIP_CENTER_STOP_CONFIRM_FRAMES) {
+#if SHIP_PROTOCOL_DIAG_ENABLE
+        if (log_this_sample != 0U) {
+            LOGI(SHIP_TAG,
+                 "manual center debounce count=%u/%u keep=%s",
+                 (u16)g_ship_rt.center_stop_count,
+                 (u16)SHIP_CENTER_STOP_CONFIRM_FRAMES,
+                 ShipProtocol_MotionName(g_ship_rt.motion));
+        }
+#else
+        (void)log_this_sample;
+#endif
+        return 0U;
+    }
+
+    return 1U;
 }
 
 #if SHIP_PROTOCOL_DIAG_ENABLE
@@ -636,7 +706,8 @@ static u8 ShipProtocol_ShouldLogManualSample(u8 left_right, u8 front_back, u8 ke
     if ((left_right != last_left_right) ||
         (front_back != last_front_back) ||
         (key != last_key) ||
-        ((now_ms - last_log_ms) >= SHIP_REPEAT_LOG_MS)) {
+        (SHIP_RC_INPUT_LOG_PERIOD_MS == 0U) ||
+        ((now_ms - last_log_ms) >= SHIP_RC_INPUT_LOG_PERIOD_MS)) {
         last_left_right = left_right;
         last_front_back = front_back;
         last_key = key;
@@ -834,6 +905,21 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
     u32 now_ms;
     u8 pid_updated;
 
+    if ((left_right >= SHIP_LR_DEAD_LOW) && (left_right <= SHIP_LR_DEAD_HIGH) &&
+        (front_back >= SHIP_FB_DEAD_LOW) && (front_back <= SHIP_FB_DEAD_HIGH)) {
+        if (ShipProtocol_ConfirmCenterStop(log_this_sample) == 0U) {
+            return;
+        }
+        ShipProtocol_ResetAxisFilter();
+        g_manual_in_cruise_run = 0U;
+        g_now_pwm_accelerator = 0U;
+        ShipProtocol_LogManualDecision(left_right, front_back, g_ship_rt.key,
+                                       SHIP_MOTION_STOP, 0, log_this_sample);
+        ShipProtocol_StopMotion(SHIP_REASON_U8("manual center"), log_this_sample);
+        return;
+    }
+    g_ship_rt.center_stop_count = 0U;
+
     throttle_speed = ShipProtocol_ThrottleToSignedSpeed(ShipProtocol_FilterAxis(front_back, &g_ship_rt.filtered_ud_q8));
     steering_speed = ShipProtocol_SteeringToSignedSpeed(ShipProtocol_FilterAxis(left_right, &g_ship_rt.filtered_lr_q8));
     abs_throttle = (throttle_speed >= 0) ? throttle_speed : (int16)(-throttle_speed);
@@ -844,6 +930,7 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
     yaw_output = 0;
 
     if ((abs_throttle == 0) && (abs_steering == 0)) {
+        ShipProtocol_ResetAxisFilter();
         g_manual_in_cruise_run = 0U;
         g_now_pwm_accelerator = 0U;
         ShipProtocol_LogManualDecision(left_right, front_back, g_ship_rt.key,
@@ -885,6 +972,7 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
             g_ship_rt.motion = target_motion;
             ShipProtocol_LogMotion(target_motion, left_speed, right_speed);
             ShipProtocol_LogPwmSnapshot(1U);
+            ShipProtocol_LogMotorOutput((u8)target_motion, yaw_cd, throttle_speed, yaw_output, left_speed, right_speed, log_this_sample);
             return;
         }
     }
@@ -909,6 +997,7 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
     ShipProtocol_ApplyMotion(target_motion,
                              (abs_throttle >= abs_steering) ? abs_throttle : abs_steering,
                              log_this_sample);
+    ShipProtocol_LogMotorOutput((u8)target_motion, yaw_cd, throttle_speed, yaw_output, left_speed, right_speed, log_this_sample);
 }
 
 static void ShipProtocol_HandleKey(u8 front_back, u8 key)
@@ -920,7 +1009,6 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
 
     switch (key) {
     case SHIP_KEY_A_TOGGLE_LIGHT:
-        (void)front_back;
         ShipProtocol_LogLightPending();
         break;
     case SHIP_KEY_B_UNUSED:
@@ -1036,13 +1124,21 @@ static void ShipProtocol_ServicePowerSample(void)
 #if SHIP_PROTOCOL_DIAG_ENABLE
 static void ShipProtocol_LogPowerSample(const ShipPowerSample_t *sample, u8 force_log)
 {
-#if SHIP_PROTOCOL_DIAG_ENABLE && SHIP_ADC_LOG_ENABLE
-    if (force_log == 0U) {
-        return;
-    }
+#if SHIP_ADC_LOG_ENABLE
+    static u32 last_log_ms = 0UL;
+    u32 now_ms;
+
     if (sample == 0) {
         return;
     }
+    now_ms = Task_GetTickMs();
+    if ((force_log == 0U) &&
+        (SHIP_POWER_LOG_PERIOD_MS != 0U) &&
+        ((now_ms - last_log_ms) < SHIP_POWER_LOG_PERIOD_MS)) {
+        return;
+    }
+    last_log_ms = now_ms;
+
     if (sample->valid == 0U) {
         LOGW(SHIP_TAG, "adc p0.0 read fail raw=%u power_level=%u",
              (u16)sample->raw,
@@ -1094,9 +1190,9 @@ static void ShipProtocol_GetPairSeed(u8 *seed)
 }
 
 #if SHIP_PROTOCOL_DIAG_ENABLE
-static u16 ShipProtocol_ReadU16BE(const u8 *buf)
+static u16 ShipProtocol_ReadU16Legacy(const u8 *buf)
 {
-    return (u16)(((u16)buf[0] << 8) | buf[1]);
+    return (u16)(((u16)buf[1] << 8) | buf[0]);
 }
 #endif
 
@@ -1118,8 +1214,8 @@ static void ShipProtocol_ToLegacyNmeaCoord(u32 abs_deg1e7, u16 *coord1, u16 *coo
 
 static void ShipProtocol_WriteU16Legacy(u8 *dst, u16 value)
 {
-    dst[0] = (u8)(value >> 8);
-    dst[1] = (u8)(value & 0xFFU);
+    dst[0] = (u8)(value & 0xFFU);
+    dst[1] = (u8)(value >> 8);
 }
 
 #if SHIP_PROTOCOL_DIAG_ENABLE
@@ -1134,11 +1230,11 @@ static void ShipProtocol_LogCoordBE(const u8 *buf, u8 len)
     LOGI(SHIP_TAG,
          "coord lonEW=0x%02X lon=%u.%u latNS=0x%02X lat=%u.%u",
          (u16)buf[0],
-         ShipProtocol_ReadU16BE(&buf[1]),
-         ShipProtocol_ReadU16BE(&buf[3]),
+         ShipProtocol_ReadU16Legacy(&buf[1]),
+         ShipProtocol_ReadU16Legacy(&buf[3]),
          (u16)buf[5],
-         ShipProtocol_ReadU16BE(&buf[6]),
-         ShipProtocol_ReadU16BE(&buf[8]));
+         ShipProtocol_ReadU16Legacy(&buf[6]),
+         ShipProtocol_ReadU16Legacy(&buf[8]));
 #else
     (void)buf;
     (void)len;
@@ -1148,7 +1244,7 @@ static void ShipProtocol_LogCoordBE(const u8 *buf, u8 len)
 
 static s8 ShipProtocol_SendFrame(u8 channel, u8 cmd, const u8 *payload, u8 payload_len, u8 log_frame)
 {
-    u8 frame[SHIP_PROTO_MAX_FRAME_LEN];
+    u8 *frame;
     u8 idx;
     u8 body_len;
     u8 i;
@@ -1157,6 +1253,7 @@ static s8 ShipProtocol_SendFrame(u8 channel, u8 cmd, const u8 *payload, u8 paylo
         return WIRELESS_ERR_PARAM;
     }
 
+    frame = g_ship_tx_frame;
     body_len = (u8)(2U + payload_len);
     idx = 0U;
     frame[idx++] = SHIP_PROTO_HEAD;
@@ -1176,24 +1273,56 @@ static s8 ShipProtocol_SendFrame(u8 channel, u8 cmd, const u8 *payload, u8 paylo
     return Wireless_SendOnChannel(channel, frame, idx);
 }
 
-static void ShipProtocol_ApplyDefaultRf(void)
+static void ShipProtocol_CalcDefaultRf(u8 *channel, u8 *key0, u8 *key1)
 {
     u8 seed[4];
-    u8 channel;
 
     ShipProtocol_GetPairSeed(seed);
 
-    g_ship_rt.rf_send_key[0] =
+    *key0 =
         (u8)(((u8)((u8)(seed[0] << 4) >> 4)) + ((u8)(seed[3] >> 2) + (u8)(seed[3] % 0x03U)));
-    g_ship_rt.rf_send_key[1] =
+    *key1 =
         (u8)(((u8)((u8)(seed[1] << 4) >> 4)) + ((u8)(seed[2] >> 3) + (u8)(seed[0] % 0x06U)));
 
-    channel = (u8)(((u8)(((seed[3] + 0x06U) % 0x40U) +
-                         ((seed[2] >> 3) * 0x08U) +
-                         (((seed[1] | seed[0]) % 0x08U) / 2U))) % 0x40U);
+    *channel = (u8)(((u8)(((seed[3] + 0x06U) % 0x40U) +
+                          ((seed[2] >> 3) * 0x08U) +
+                          (((seed[1] | seed[0]) % 0x08U) / 2U))) % 0x40U);
+}
+
+static u8 ShipProtocol_RefreshDefaultRf(const char *stage, u8 log_mismatch)
+{
+    u8 channel;
+    u8 key0;
+    u8 key1;
+
+    ShipProtocol_CalcDefaultRf(&channel, &key0, &key1);
+    if ((log_mismatch != 0U) &&
+        ((g_ship_rt.rf_channel[0] != channel) ||
+         (g_ship_rt.rf_send_key[0] != key0) ||
+         (g_ship_rt.rf_send_key[1] != key1))) {
+        LOGW(SHIP_TAG,
+             "rf cache mismatch stage=%s cache_ch=%u calc_ch=%u cache_key=%u/%u calc_key=%u/%u",
+             stage,
+             (u16)g_ship_rt.rf_channel[0],
+             (u16)channel,
+             (u16)g_ship_rt.rf_send_key[0],
+             (u16)g_ship_rt.rf_send_key[1],
+             (u16)key0,
+             (u16)key1);
+    }
+
     g_ship_rt.rf_channel[0] = channel;
     g_ship_rt.rf_channel[1] = channel;
     g_ship_rt.rf_channel[2] = (u8)(channel + 0x40U);
+    g_ship_rt.rf_send_key[0] = key0;
+    g_ship_rt.rf_send_key[1] = key1;
+
+    return channel;
+}
+
+static void ShipProtocol_ApplyDefaultRf(void)
+{
+    (void)ShipProtocol_RefreshDefaultRf(SHIP_REASON_C("default"), 0U);
 }
 
 static s8 ShipProtocol_ApplyWorkSyncIdle(u8 log_rxdbg)
@@ -1202,6 +1331,7 @@ static s8 ShipProtocol_ApplyWorkSyncIdle(u8 log_rxdbg)
     u16 reg39;
     s8 rc;
 
+    (void)ShipProtocol_RefreshDefaultRf(SHIP_REASON_C("work-sync"), 1U);
     reg36 = (u16)(((u16)g_ship_rt.rf_send_key[0] << 8) | g_ship_rt.rf_send_key[0]);
     reg39 = (u16)(((u16)g_ship_rt.rf_send_key[1] << 8) | g_ship_rt.rf_send_key[1]);
 
@@ -1222,8 +1352,10 @@ static s8 ShipProtocol_ApplyWorkSyncIdle(u8 log_rxdbg)
 static s8 ShipProtocol_ApplyWorkRx(u8 log_rxdbg)
 {
     s8 rc;
+    u8 channel;
 
-    rc = Wireless_SetChannel(g_ship_rt.rf_channel[0]);
+    channel = ShipProtocol_RefreshDefaultRf(SHIP_REASON_C("work-rx"), 1U);
+    rc = Wireless_SetChannel(channel);
     if (rc == SUCCESS) {
         g_ship_rt.work_rx_configured = 1U;
         g_ship_rt.work_rx_reopen_ticks = 0U;
@@ -1249,6 +1381,42 @@ static void ShipProtocol_ReopenWorkRx(const char *reason, u8 log_rxdbg, u8 log_o
              reason,
              (u16)g_ship_rt.rf_channel[0]);
     }
+}
+
+static void ShipProtocol_MarkPairedByFrame(u8 cmd, const char *reason)
+{
+    u32 now_ms;
+
+    now_ms = Task_GetTickMs();
+    g_ship_rt.last_proto_rx_ms = now_ms;
+    g_ship_rt.rx_idle_warned = 0U;
+    g_ship_rt.throttle_recover_done = 0U;
+    if (g_ship_rt.remote_online == 0U) {
+        g_ship_rt.remote_online = 1U;
+        log_info((u8 *)SHIP_TAG,
+                 (u8 *)"remote link online by %s cmd=0x%02X",
+                 reason,
+                 (u16)cmd);
+    }
+
+    if (g_ship_rt.paired != 0U) {
+        return;
+    }
+
+    g_ship_rt.paired = 1U;
+    g_ship_rt.pair_left = 0U;
+    g_ship_rt.pair_wait_rsp_time = 0U;
+    g_ship_rt.pair_wait_start_ms = 0UL;
+    g_ship_rt.pair_rsp_timeout_logged = 0U;
+    g_ship_rt.state = SHIP_STATE_WORK_RX;
+    g_ship_rt.work_state_logged = 0U;
+    log_info((u8 *)SHIP_TAG,
+             (u8 *)"pair ok by %s cmd=0x%02X work_rx=%u key=%u/%u",
+             reason,
+             (u16)cmd,
+             (u16)g_ship_rt.rf_channel[0],
+             (u16)g_ship_rt.rf_send_key[0],
+             (u16)g_ship_rt.rf_send_key[1]);
 }
 
 #if SHIP_PROTOCOL_DIAG_ENABLE
@@ -1436,7 +1604,11 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
     }
     payload[idx++] = sat_report;
 
-    angle = (u16)(gps->course_deg_x100 / 100U);
+    if (MainLoop_IsHeadingReady() != 0U) {
+        angle = (u16)((MainLoop_GetHeadingDeg100() / 100U) % 360U);
+    } else {
+        angle = (u16)((gps->course_deg_x100 / 100U) % 360U);
+    }
     ShipProtocol_WriteU16Legacy(&payload[idx], angle);
     idx += 2U;
 
@@ -1469,8 +1641,8 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
         ShipProtocol_ToLegacyNmeaCoord(abs_lat, &lat_coord1, &lat_coord2);
     }
 
-    payload_lon_dir = 'E';
-    payload_lat_dir = 'W';
+    payload_lon_dir = lon_dir;
+    payload_lat_dir = lat_dir;
 
     payload[idx++] = (u8)payload_lon_dir;
     ShipProtocol_WriteU16Legacy(&payload[idx], lon_coord1);
@@ -1494,14 +1666,14 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
         return;
     }
 
-    ShipProtocol_LogPowerSample(&power, log_this_tx);
+    ShipProtocol_LogPowerSample(&power, 0U);
     if (log_this_tx != 0U) {
         LOGI(SHIP_TAG,
              "tx cmd=0x12 ch=%u payload_len=%u sat=%u angle=%u power=0x%02X auto=0x%02X",
              (u16)g_ship_rt.rf_channel[0],
              (u16)idx,
              (u16)payload[0],
-             (u16)(((u16)payload[1] << 8) | payload[2]),
+             (u16)(((u16)payload[2] << 8) | payload[1]),
              (u16)payload[13],
              (u16)payload[14]);
         LOGI(SHIP_TAG,
@@ -1569,6 +1741,7 @@ static void ShipProtocol_HandlePairRsp(const u8 *payload, u8 payload_len)
     ShipProtocol_LogPayloadBrief(SHIP_STAGE_U8("pair rsp rx"), SHIP_CMD_PAIR_RSP, payload, payload_len);
     g_ship_rt.pair_wait_rsp_time = 0U;
     g_ship_rt.pair_wait_start_ms = 0UL;
+    g_ship_rt.last_proto_rx_ms = Task_GetTickMs();
     g_ship_rt.paired = 1U;
     g_ship_rt.pair_left = 0U;
     g_ship_rt.wait_ticks = 0U;
@@ -1615,29 +1788,53 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
     g_ship_rt.valid = 1U;
     now_ms = Task_GetTickMs();
     g_ship_rt.last_throttle_rx_ms = now_ms;
-    g_ship_rt.last_proto_rx_ms = now_ms;
-    g_ship_rt.rx_idle_warned = 0U;
     g_ship_rt.throttle_recover_done = 0U;
     log_this_sample = ShipProtocol_ShouldLogManualSample(payload[0], payload[1], payload[2], now_ms);
     if (g_ship_rt.throttle_online == 0U) {
         g_ship_rt.throttle_online = 1U;
-        LOGI(SHIP_TAG, "remote link online by cmd=0x11");
+        log_info((u8 *)SHIP_TAG, (u8 *)"manual control online by cmd=0x11");
     }
 
     if (log_this_sample != 0U) {
-        LOGI(SHIP_TAG, "rc cmd=0x11 lr=%u ud=%u key=0x%02X(%s) paired=%u",
-             (u16)g_ship_rt.lr,
-             (u16)g_ship_rt.ud,
-             (u16)g_ship_rt.key,
-             ShipProtocol_KeyName(g_ship_rt.key),
-             (u16)g_ship_rt.paired);
-        LOGI(SHIP_TAG, "throttle_raw=%u steering_raw=%u throttle_val=%d steering_val=%d key=0x%02X(%s)",
-             (u16)g_ship_rt.ud,
-             (u16)g_ship_rt.lr,
-             (int16)g_ship_rt.ud - (int16)SHIP_AXIS_CENTER,
-             (int16)g_ship_rt.lr - (int16)SHIP_AXIS_CENTER,
-             (u16)g_ship_rt.key,
-             ShipProtocol_KeyName(g_ship_rt.key));
+        if (SHIP_RC_INPUT_LOG_PERIOD_MS != 0U) {
+            static u32 last_rc_log_ms = 0UL;
+            u32 now_ms = Task_GetTickMs();
+            if ((now_ms - last_rc_log_ms) >= SHIP_RC_INPUT_LOG_PERIOD_MS) {
+                last_rc_log_ms = now_ms;
+                log_info((u8 *)SHIP_TAG,
+                         (u8 *)"rc input cmd=0x11 raw_ud=%u raw_lr=%u throttle_val=%d steering_val=%d key=0x%02X(%s)",
+                         (u16)g_ship_rt.ud,
+                         (u16)g_ship_rt.lr,
+                         (int16)g_ship_rt.ud - (int16)SHIP_AXIS_CENTER,
+                         (int16)g_ship_rt.lr - (int16)SHIP_AXIS_CENTER,
+                         (u16)g_ship_rt.key,
+                         ShipProtocol_KeyNameAlways(g_ship_rt.key));
+            }
+        } else {
+            log_info((u8 *)SHIP_TAG,
+                     (u8 *)"rc input cmd=0x11 raw_ud=%u raw_lr=%u throttle_val=%d steering_val=%d key=0x%02X(%s)",
+                     (u16)g_ship_rt.ud,
+                     (u16)g_ship_rt.lr,
+                     (int16)g_ship_rt.ud - (int16)SHIP_AXIS_CENTER,
+                     (int16)g_ship_rt.lr - (int16)SHIP_AXIS_CENTER,
+                     (u16)g_ship_rt.key,
+                     ShipProtocol_KeyNameAlways(g_ship_rt.key));
+        }
+        log_info((u8 *)SHIP_TAG,
+                 (u8 *)"rc cmd=0x11 lr=%u ud=%u key=0x%02X(%s) paired=%u",
+                 (u16)g_ship_rt.lr,
+                 (u16)g_ship_rt.ud,
+                 (u16)g_ship_rt.key,
+                 ShipProtocol_KeyNameAlways(g_ship_rt.key),
+                 (u16)g_ship_rt.paired);
+        log_info((u8 *)SHIP_TAG,
+                 (u8 *)"throttle_raw=%u steering_raw=%u throttle_val=%d steering_val=%d key=0x%02X(%s)",
+                 (u16)g_ship_rt.ud,
+                 (u16)g_ship_rt.lr,
+                 (int16)g_ship_rt.ud - (int16)SHIP_AXIS_CENTER,
+                 (int16)g_ship_rt.lr - (int16)SHIP_AXIS_CENTER,
+                 (u16)g_ship_rt.key,
+                 ShipProtocol_KeyNameAlways(g_ship_rt.key));
     }
     if (AutoDrive_IsBusy() != 0U) {
         ShipProtocol_HandleKey(g_ship_rt.ud, g_ship_rt.key);
@@ -1679,6 +1876,7 @@ static void ShipProtocol_Dispatch(u8 cmd, const u8 *payload, u8 payload_len)
         if (payload_len < AUTODRIVE_LEGACY_POINT_WIRE_LEN) {
             break;
         }
+        LOGI(SHIP_TAG, "cmd=0x13 return-home rx len=%u", (u16)payload_len);
         ShipProtocol_LogCoordBE(payload, payload_len);
         AutoDrive_SetReturnPositionRaw(payload);
         break;
@@ -1686,6 +1884,7 @@ static void ShipProtocol_Dispatch(u8 cmd, const u8 *payload, u8 payload_len)
         if (payload_len < AUTODRIVE_LEGACY_POINT_WIRE_LEN) {
             break;
         }
+        LOGI(SHIP_TAG, "cmd=0x14 goto-point rx len=%u", (u16)payload_len);
         ShipProtocol_LogCoordBE(payload, payload_len);
         AutoDrive_SetFishPositionRaw(payload);
         break;
@@ -1694,6 +1893,9 @@ static void ShipProtocol_Dispatch(u8 cmd, const u8 *payload, u8 payload_len)
             LOGW(SHIP_TAG, "return-switch short len=%u", (u16)payload_len);
             break;
         }
+        LOGI(SHIP_TAG, "cmd=0x15 return-switch rx len=%u state=%u",
+             (u16)payload_len,
+             (u16)payload[0]);
         if (payload_len >= (u8)(1U + AUTODRIVE_LEGACY_POINT_WIRE_LEN)) {
             ShipProtocol_LogCoordBE(&payload[1], (u8)(payload_len - 1U));
         }
@@ -1733,15 +1935,29 @@ s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len)
     xor_recv = frame[frame_len - 2U];
     xor_calc = ShipProtocol_Xor(&frame[1], body_len);
     if (xor_recv != xor_calc) {
-        LOGW(SHIP_TAG, "bad xor cmd=0x%02X calc=0x%02X recv=0x%02X",
-             (u16)frame[2], (u16)xor_calc, (u16)xor_recv);
+        log_warn((u8 *)SHIP_TAG,
+                 (u8 *)"aa-bb xor bad cmd=0x%02X len=%u calc=0x%02X recv=0x%02X",
+                 (u16)frame[2],
+                 (u16)body_len,
+                 (u16)xor_calc,
+                 (u16)xor_recv);
         return WIRELESS_ERR_VERIFY;
     }
 
     cmd = frame[2];
     data_len = (u8)(body_len - 2U);
-    g_ship_rt.last_proto_rx_ms = Task_GetTickMs();
-    g_ship_rt.rx_idle_warned = 0U;
+    SHIP_PROTO_DBG("frame ok cmd=0x%02X len=%u data_len=%u xor=0x%02X",
+                   (u16)cmd,
+                   (u16)frame_len,
+                   (u16)data_len,
+                   (u16)xor_recv);
+    ShipProtocol_MarkPairedByFrame(cmd, "valid-frame");
+    if (cmd != SHIP_CMD_THROTTLE) {
+        log_info((u8 *)SHIP_TAG,
+                 (u8 *)"aa-bb xor ok cmd=0x%02X data_len=%u",
+                 (u16)cmd,
+                 (u16)data_len);
+    }
     if (cmd != SHIP_CMD_THROTTLE) {
         ShipProtocol_LogPayloadBrief(SHIP_STAGE_U8("rx frame ok"), cmd, &frame[3], data_len);
     }
@@ -1752,7 +1968,7 @@ s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len)
 static void ShipProtocol_ReceiveHandle(const u8 *rx_buf, u8 len)
 {
     u8 i;
-    u8 frame[SHIP_LEGACY_PROTO_MAX_LEN];
+    u8 *frame;
     u8 frame_index;
     u8 frame_left;
     u8 frame_finish;
@@ -1762,6 +1978,18 @@ static void ShipProtocol_ReceiveHandle(const u8 *rx_buf, u8 len)
     if (rx_buf == 0) {
         return;
     }
+
+    frame = g_ship_parse_frame;
+    SHIP_PROTO_DBG("rx raw len=%u b0=%02X b1=%02X b2=%02X b3=%02X b4=%02X b5=%02X b6=%02X b7=%02X",
+                   (u16)len,
+                   (u16)((len > 0U) ? rx_buf[0] : 0U),
+                   (u16)((len > 1U) ? rx_buf[1] : 0U),
+                   (u16)((len > 2U) ? rx_buf[2] : 0U),
+                   (u16)((len > 3U) ? rx_buf[3] : 0U),
+                   (u16)((len > 4U) ? rx_buf[4] : 0U),
+                   (u16)((len > 5U) ? rx_buf[5] : 0U),
+                   (u16)((len > 6U) ? rx_buf[6] : 0U),
+                   (u16)((len > 7U) ? rx_buf[7] : 0U));
 
     if (len > SHIP_LEGACY_PROTO_MAX_LEN) {
         len = 10U;
@@ -1813,10 +2041,26 @@ static void ShipProtocol_ReceiveHandle(const u8 *rx_buf, u8 len)
 
         if (frame_finish != 0U) {
             frame_finish = 0U;
+            SHIP_PROTO_DBG("frame build len=%u head=0x%02X tail=0x%02X lenfield=%u",
+                           (u16)frame_index,
+                           (u16)frame[0],
+                           (u16)frame[frame_index - 1U],
+                           (u16)frame[1]);
             check_sum = ShipProtocol_Xor(&frame[1], (u8)(frame_index - 3U));
+            if ((frame_index >= 5U) &&
+                (frame[1] >= 2U) &&
+                (frame[frame_index - 1U] == SHIP_PROTO_TAIL)) {
+                ShipProtocol_MarkPairedByFrame(frame[2], "aa-bb-frame");
+            }
             if ((check_sum == frame[frame_index - 2U]) &&
                 (frame[frame_index - 1U] == SHIP_PROTO_TAIL)) {
                 (void)ShipProtocol_ParseFrame(frame, frame_index);
+            } else {
+                SHIP_PROTO_DBG("frame drop len=%u calc=0x%02X recv=0x%02X tail=0x%02X",
+                               (u16)frame_index,
+                               (u16)check_sum,
+                               (u16)frame[frame_index - 2U],
+                               (u16)frame[frame_index - 1U]);
             }
             frame_index = 0U;
             frame_left = 0U;
@@ -1826,14 +2070,16 @@ static void ShipProtocol_ReceiveHandle(const u8 *rx_buf, u8 len)
 
 void ShipProtocol_Poll(void)
 {
-    u8 frame[SHIP_PROTO_MAX_FRAME_LEN];
+    u8 *frame;
     u8 frame_len;
     s8 rc;
 
+    frame = g_ship_rx_frame;
     do {
         frame_len = 0U;
         rc = Wireless_Receive(frame, SHIP_PROTO_MAX_FRAME_LEN, &frame_len);
         if (rc == SUCCESS) {
+            SHIP_PROTO_DBG("rx pop len=%u", (u16)frame_len);
             ShipProtocol_ReceiveHandle(frame, frame_len);
         }
     } while (rc == SUCCESS);
@@ -1841,10 +2087,11 @@ void ShipProtocol_Poll(void)
 
 static void ShipProtocol_PollRxFrames(void)
 {
-    u8 frame[SHIP_PROTO_MAX_FRAME_LEN];
+    u8 *frame;
     u8 frame_len;
     s8 rc;
 
+    frame = g_ship_rx_frame;
     do {
         frame_len = 0U;
         rc = Wireless_Receive(frame, SHIP_PROTO_MAX_FRAME_LEN, &frame_len);
@@ -1883,6 +2130,7 @@ static void ShipProtocol_InitRuntime(void)
     g_ship_rt.last_throttle_rx_ms = 0UL;
     g_ship_rt.pair_rsp_timeout_logged = 0U;
     g_ship_rt.rx_idle_warned = 0U;
+    g_ship_rt.remote_online = 0U;
     g_ship_rt.throttle_online = 0U;
     g_ship_rt.throttle_recover_done = 0U;
     g_ship_rt.motor_initialized = 0U;
@@ -1894,6 +2142,7 @@ static void ShipProtocol_InitRuntime(void)
     g_ship_rt.pulse_motion = SHIP_MOTION_STOP;
     g_ship_rt.pulse_expire_ms = 0UL;
     g_ship_rt.pulse_active = 0U;
+    g_ship_rt.center_stop_count = 0U;
     g_ship_power_sample_times = 0U;
     g_lowpower_check_times = 0U;
     g_now_pwm_accelerator = 0U;
@@ -2033,7 +2282,7 @@ void ShipProtocol_RunScheduler(void)
         g_ship_rt.pair_wait_rsp_time--;
     } else if ((g_ship_rt.pair_wait_start_ms != 0UL) &&
                (g_ship_rt.pair_rsp_timeout_logged == 0U) &&
-               ((now_ms - g_ship_rt.pair_wait_start_ms) >= SHIP_PAIR_RSP_EXPIRE_LOG_MS) &&
+               (ShipProtocol_ElapsedMs(now_ms, g_ship_rt.pair_wait_start_ms) >= SHIP_PAIR_RSP_EXPIRE_LOG_MS) &&
                (g_ship_rt.paired == 0U)) {
         g_ship_rt.pair_rsp_timeout_logged = 1U;
         LOGW(SHIP_TAG, "pair rsp window expired, no rsp");
@@ -2061,45 +2310,65 @@ void ShipProtocol_RunScheduler(void)
     }
 
     now_ms = Task_GetTickMs();
+    {
+        u32 rx_silence_ms;
 
-    if (g_ship_rt.state == SHIP_STATE_WORK_RX) {
-        if ((g_ship_rt.last_proto_rx_ms != 0UL) &&
-            (g_ship_rt.rx_idle_warned == 0U) &&
-            ((now_ms - g_ship_rt.last_proto_rx_ms) >= SHIP_RX_IDLE_WARN_MS)) {
-            g_ship_rt.rx_idle_warned = 1U;
-            LOGW(SHIP_TAG, "work-rx idle %lums, no valid frame", (u32)(now_ms - g_ship_rt.last_proto_rx_ms));
-            ShipProtocol_LogRxDebug(SHIP_STAGE_U8("rx-idle"));
-        }
+        rx_silence_ms = ShipProtocol_ElapsedMs(now_ms, g_ship_rt.last_proto_rx_ms);
 
-        if ((g_ship_rt.throttle_online != 0U) &&
-            (g_ship_rt.last_throttle_rx_ms != 0UL) &&
-            ((now_ms - g_ship_rt.last_throttle_rx_ms) >= SHIP_THROTTLE_TIMEOUT_MS)) {
-            g_ship_rt.throttle_online = 0U;
-            ShipProtocol_ResetAxisFilter();
-            LOGW(SHIP_TAG, "remote link timeout by cmd=0x11, dt=%lums",
-                 (u32)(now_ms - g_ship_rt.last_throttle_rx_ms));
-            ShipProtocol_StopMotion(SHIP_REASON_U8("remote timeout"), 1U);
-            ShipProtocol_LogRxDebug(SHIP_STAGE_U8("throttle-timeout"));
-        }
+        if (g_ship_rt.state == SHIP_STATE_WORK_RX) {
+            if ((g_ship_rt.last_proto_rx_ms != 0UL) &&
+                (g_ship_rt.rx_idle_warned == 0U) &&
+                (rx_silence_ms >= SHIP_RX_IDLE_WARN_MS)) {
+                g_ship_rt.rx_idle_warned = 1U;
+                LOGW(SHIP_TAG, "work-rx idle %lums, no aa-bb frame", rx_silence_ms);
+                ShipProtocol_LogRxDebug(SHIP_STAGE_U8("rx-idle"));
+            }
 
-        if ((g_ship_rt.paired != 0U) &&
-            (g_ship_rt.throttle_recover_done == 0U) &&
-            (g_ship_rt.last_throttle_rx_ms != 0UL) &&
-            ((now_ms - g_ship_rt.last_throttle_rx_ms) >= SHIP_THROTTLE_RECOVER_MS)) {
-            g_ship_rt.throttle_recover_done = 1U;
-            ShipProtocol_ApplyDefaultRf();
-            g_ship_rt.work_rx_reopen_ticks = 0U;
-            LOGW(SHIP_TAG,
-                 "legacy remote recovery after %lums silence, re-open work-rx",
-                 (u32)(now_ms - g_ship_rt.last_throttle_rx_ms));
-            ShipProtocol_ReopenWorkRx(SHIP_REASON_C("legacy remote recovery"), 1U, 1U);
-        }
+            if ((g_ship_rt.remote_online != 0U) &&
+                (g_ship_rt.last_proto_rx_ms != 0UL) &&
+                (rx_silence_ms >= SHIP_THROTTLE_TIMEOUT_MS)) {
+                g_ship_rt.remote_online = 0U;
+                if (g_ship_rt.throttle_online != 0U) {
+                    g_ship_rt.throttle_online = 0U;
+                    ShipProtocol_ResetAxisFilter();
+                    ShipProtocol_StopMotion(SHIP_REASON_U8("remote link timeout"), 1U);
+                }
+                LOGW(SHIP_TAG, "remote link timeout by aa-bb-frame, dt=%lums",
+                     rx_silence_ms);
+                ShipProtocol_LogRxDebug(SHIP_STAGE_U8("remote-timeout"));
+            }
 
-        if ((g_ship_rt.throttle_online != 0U) &&
-            (g_ship_rt.valid != 0U) &&
-            (g_ship_rt.pulse_active == 0U) &&
-            (AutoDrive_IsBusy() == 0U)) {
-            ShipProtocol_ApplyManualControl(g_ship_rt.lr, g_ship_rt.ud, 0U);
+            if ((g_ship_rt.throttle_online != 0U) &&
+                (g_ship_rt.last_throttle_rx_ms != 0UL) &&
+                ((now_ms - g_ship_rt.last_throttle_rx_ms) >= SHIP_THROTTLE_TIMEOUT_MS)) {
+                g_ship_rt.throttle_online = 0U;
+                ShipProtocol_ResetAxisFilter();
+                LOGW(SHIP_TAG, "manual control timeout by cmd=0x11, dt=%lums",
+                     (u32)(now_ms - g_ship_rt.last_throttle_rx_ms));
+                ShipProtocol_StopMotion(SHIP_REASON_U8("manual timeout"), 1U);
+                ShipProtocol_LogRxDebug(SHIP_STAGE_U8("throttle-timeout"));
+            }
+
+            if ((g_ship_rt.paired != 0U) &&
+                (g_ship_rt.throttle_recover_done == 0U) &&
+                (g_ship_rt.last_proto_rx_ms != 0UL) &&
+                (rx_silence_ms >= SHIP_THROTTLE_RECOVER_MS)) {
+                g_ship_rt.throttle_recover_done = 1U;
+                ShipProtocol_ApplyDefaultRf();
+                g_ship_rt.work_rx_reopen_ticks = 0U;
+                LOGW(SHIP_TAG,
+                     "legacy remote recovery after %lums link silence, re-open work-rx",
+                     rx_silence_ms);
+                ShipProtocol_ReopenWorkRx(SHIP_REASON_C("legacy remote recovery"), 1U, 1U);
+            }
+
+            if ((g_ship_rt.throttle_online != 0U) &&
+                (g_ship_rt.valid != 0U) &&
+                (g_ship_rt.pulse_active == 0U) &&
+                (AutoDrive_IsBusy() == 0U)) {
+                ShipProtocol_ApplyManualControl(g_ship_rt.lr, g_ship_rt.ud, 0U);
+            }
+            ShipProtocol_LogPowerSample(&g_ship_power_sample, 0U);
         }
 
     }

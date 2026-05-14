@@ -91,7 +91,7 @@
  * - 当左右摇杆偏差不超过该值时，认为用户想直线前进，允许进入 yaw 自稳
  * - 当前建议值为 10，等价于大约 10% 的转向输入
  */
-#define SHIP_YAW_HOLD_STEER_GATE       10U
+#define SHIP_YAW_HOLD_STEER_GATE       15U
 
 /**
  * @brief  yaw 自稳比例增益
@@ -486,7 +486,7 @@
 /**
  * @brief  无线协议调试日志开关
  */
-#define SHIP_PROTOCOL_DIAG_ENABLE      0
+#define SHIP_PROTOCOL_DIAG_ENABLE      1
 
 /**
  * @brief  无线协议错误日志开关
@@ -602,6 +602,22 @@
  * @brief  ADC 电池日志开关
  */
 #define SHIP_ADC_LOG_ENABLE            1
+
+/**
+ * @brief  串口/姿态/传感器日志频率控制
+ * @details
+ * - 这些宏单位均为 ms
+ * - 0 表示不限制，1 以上表示最小打印间隔
+ */
+#define SHIP_RX_LOG_PERIOD_MS          100U
+#define SHIP_RX_CRC_LOG_THRESHOLD      10U
+#define SHIP_MOT_LOG_PERIOD_MS         100U
+#define SHIP_RC_INPUT_LOG_PERIOD_MS    100U
+#define SHIP_POWER_LOG_PERIOD_MS       10000U
+#define SHIP_MAG_LOG_PERIOD_MS         1000U
+#define SHIP_IMU_LOG_PERIOD_MS         1000U
+#define SHIP_PROTO_DEBUG_ENABLE        0U
+#define SHIP_PROTO_DEBUG_PERIOD_MS     100U
 /** @} */
 
 /* Legacy compatibility */

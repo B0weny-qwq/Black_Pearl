@@ -190,7 +190,10 @@ AA 11 12 <15字节载荷> xor BB
 
 - `ShipProtocol_ReceiveHandle()` 会在射频载荷内逐字节找 `0xAA`。
 - 找到帧头后按 `len` 字段收够一帧。
-- 校验 `xor` 和帧尾 `0xBB` 后才调用 `ShipProtocol_Dispatch()`。
+- 收到完整 `AA ... BB` 头尾包就说明遥控空口有活动，上位机“遥控链路显示在线”按这个刷新，不要求必须是 `0x11`。
+- `AA ... BB` 只能作为显示层在线/链路活动依据；业务分发仍必须校验 `len`、`xor` 和帧尾 `0xBB`。
+- 校验 `xor` 和帧尾 `0xBB` 通过后才调用 `ShipProtocol_Dispatch()`。
+- 固件电机安全保活只认有效 `0x11` 控制帧，不能用 `0x0F`、`0x12` 或其它非控制帧代替。
 - 任何合法帧分发结束后都会立即回发一次 `0x12`。
 
 ## 7. 命令号总表
@@ -291,6 +294,7 @@ payload[2] = key  // 按键码
 当前控制路径：
 
 - 收到 `0x11` 后刷新 `last_throttle_rx_ms` 和 `last_proto_rx_ms`。
+- 上位机“遥控链路显示在线”按 `AA ... BB` 包活动刷新；这里的 `0x11` 只负责控制输入和电机安全保活。
 - 若 AutoDrive 正忙，只处理按键和链路保活，不接管手动电机。
 - 若短脉冲未激活，进入 `ShipProtocol_ApplyManualControl()`。
 - 当前工作区的手动控制不是旧版纯开环：它会做轴滤波、死区曲线、油门/转向混合，并在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、`|steering| <= SHIP_YAW_HOLD_STEER_GATE` 且前进油门成立时叠加手动航向保持。
@@ -300,7 +304,8 @@ payload[2] = key  // 按键码
 
 | 条件 | 行为 |
 |------|------|
-| 超过 `SHIP_THROTTLE_TIMEOUT_MS=1500ms` 未收到 `0x11` | 判定遥控离线，停机 |
+| 收到完整 `AA ... BB` 头尾包 | 上位机显示层刷新遥控链路在线/活动时间 |
+| 超过 `SHIP_THROTTLE_TIMEOUT_MS=1500ms` 未收到有效 `0x11` | 固件判定控制帧超时，停机 |
 | 配对后超过 `SHIP_THROTTLE_RECOVER_MS=3000ms` 没有新油门帧 | 重新整理默认 RF 参数并重开工作 RX |
 | 任意合法协议帧处理结束 | 立即回发一次 `0x12` |
 
@@ -470,11 +475,14 @@ AutoDrive 激活条件：
 [SHIP] scheduler init ...
 [SHIP] pair req start ...
 [SHIP] pair req frame=AA 06 10 ...
-[SHIP] pair ok, enter work channel ...
+[SHIP] pair ok by aa-bb-frame cmd=... work_rx=... key=...
+[SHIP] manual control online by cmd=0x11
 [SHIP] rc cmd=0x11 lr=... ud=... key=...
 [SHIP] tx cmd=0x12 ch=... payload_len=15 ...
 [SHIP] gps payload bytes=...
-[SHIP] remote link timeout by cmd=0x11 ...
+[SHIP] remote link online by aa-bb-frame cmd=...
+[SHIP] remote link timeout by aa-bb-frame, dt=...ms
+[SHIP] manual control timeout by cmd=0x11, dt=...ms
 ```
 
 ## 15. 联调验收清单
@@ -488,8 +496,9 @@ AutoDrive 激活条件：
 
 遥控：
 
+- 上位机“遥控链路”显示收到完整 `AA ... BB` 头尾包就应刷新在线，不要只盯 `0x11`。
 - 遥控器动作时能看到 `rc cmd=0x11 lr=... ud=... key=...`。
-- 失联超过 `1500ms` 后电机停机。
+- 有效 `0x11` 失联超过 `1500ms` 后电机停机。
 - `A/B/C/D/E` 按键日志和动作符合本文档表格。
 
 GPS 回传：
@@ -514,6 +523,7 @@ GPS 回传：
 - 不要改 `AA | len | cmd | payload | xor | BB` 帧格式。
 - 不要改 `len = 2 + payload_len`。
 - 不要改 `xor` 计算范围。
+- 不要把上位机“显示在线”和固件 `0x11` 控制保活混成同一个状态；显示层按 `AA ... BB` 包活动，电机安全按有效 `0x11`。
 - 不要改命令号 `0x0F~0x15`。
 - 不要向 `0x12` 增加字段。
 - 不要把 `0x12` 半球字段改成真实 `N/S/E/W`。

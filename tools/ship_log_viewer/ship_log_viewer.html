@@ -192,6 +192,30 @@
       line-height: 1.2;
     }
 
+    .state-pill {
+      width: 100%;
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font: inherit;
+      font-size: 18px;
+      font-weight: 900;
+      text-align: left;
+      background: #efe4d0;
+      color: var(--accent-deep);
+      cursor: default;
+    }
+
+    .state-pill.on {
+      background: #dff1e3;
+      color: var(--good);
+    }
+
+    .state-pill.off {
+      background: #f3e1de;
+      color: var(--bad);
+    }
+
     .table {
       width: 100%;
       border-collapse: collapse;
@@ -316,7 +340,7 @@
 
       <div class="tips">
         <div class="tip">Web Serial 需要通过根目录启动脚本打开本页，浏览器用 Chrome 或 Edge。</div>
-        <div class="tip">“已配对”不等于“遥控器在线”，遥控器在线只看最近是否收到 0x11 和超时日志。</div>
+        <div class="tip">“已配对”不等于“遥控器在线”。页面显示在线按最近是否收到完整 AA...BB 头尾包刷新，电机安全保活另看有效 0x11。</div>
         <div class="tip">页面保留 2 万条历史，但只批量刷新最近可见日志，避免现场卡顿。</div>
       </div>
     </section>
@@ -358,7 +382,7 @@
           <div class="card">
             <div class="label">遥控链路</div>
             <div id="rcValue" class="value">离线</div>
-            <div id="rcMeta" class="meta">等待 0x11 手动帧</div>
+            <div id="rcMeta" class="meta">等待 AA...BB 头尾包</div>
           </div>
           <div class="card">
             <div class="label">遥控输入油门</div>
@@ -373,7 +397,12 @@
           <div class="card">
             <div class="label">动作判定</div>
             <div id="motionValue" class="value">--</div>
-            <div id="motionMeta" class="meta">等待 0x11</div>
+            <div id="motionMeta" class="meta">等待 AA...BB 头尾包</div>
+          </div>
+          <div class="card">
+            <div class="label">自稳定状态</div>
+            <button id="selfStabilizeValue" class="value state-pill off" disabled>OFF</button>
+            <div id="selfStabilizeMeta" class="meta">等待 |steering| < 15</div>
           </div>
           <div class="card">
             <div class="label">按键状态</div>
@@ -529,13 +558,15 @@
         pair: "未配对",
         pairMeta: "等待串口数据",
         rcValue: "离线",
-        rcMeta: "等待 0x11 手动帧",
+        rcMeta: "等待 AA...BB 头尾包",
         throttleInputValue: "--",
         throttleInputMeta: "等待 throttle_raw 日志",
         throttleOutputValue: "--",
         throttleOutputMeta: "等待 MOT 输出日志",
         motionValue: "--",
-        motionMeta: "等待 0x11",
+        motionMeta: "等待 AA...BB 头尾包",
+        selfStabilizeValue: "OFF",
+        selfStabilizeMeta: "等待 |steering| < 15",
         keyValue: "--",
         keyMeta: "等待 key 日志",
         txValue: "--",
@@ -602,6 +633,8 @@
       throttleOutputMeta: document.getElementById("throttleOutputMeta"),
       motionValue: document.getElementById("motionValue"),
       motionMeta: document.getElementById("motionMeta"),
+      selfStabilizeValue: document.getElementById("selfStabilizeValue"),
+      selfStabilizeMeta: document.getElementById("selfStabilizeMeta"),
       keyValue: document.getElementById("keyValue"),
       keyMeta: document.getElementById("keyMeta"),
       txValue: document.getElementById("txValue"),
@@ -750,6 +783,10 @@
       el.throttleOutputMeta.textContent = state.last.throttleOutputMeta;
       el.motionValue.textContent = state.last.motionValue;
       el.motionMeta.textContent = state.last.motionMeta;
+      el.selfStabilizeValue.textContent = state.last.selfStabilizeValue;
+      el.selfStabilizeMeta.textContent = state.last.selfStabilizeMeta;
+      el.selfStabilizeValue.classList.remove("on", "off");
+      el.selfStabilizeValue.classList.add(state.last.selfStabilizeValue === "ON" ? "on" : "off");
       el.keyValue.textContent = state.last.keyValue;
       el.keyMeta.textContent = state.last.keyMeta;
       el.txValue.textContent = state.last.txValue;
@@ -804,13 +841,13 @@
     function markRemoteOnline(detailText) {
       state.remoteSeenAt = Date.now();
       state.last.rcValue = "在线";
-      state.last.remoteInfo = detailText || "在线，已收到 0x11";
+      state.last.remoteInfo = detailText || "在线，已收到 AA...BB 头尾包";
       markDirty("cards");
     }
 
     function markRemoteOffline(reasonText) {
       state.last.rcValue = "离线";
-      state.last.remoteInfo = reasonText || "离线，0x11 超时";
+      state.last.remoteInfo = reasonText || "离线，AA...BB 超时";
       markDirty("cards");
     }
 
@@ -822,7 +859,7 @@
         state.remoteSeenAt = 0;
         if (state.last.rcValue !== "离线") {
           state.last.rcMeta = `页面超时 ${state.remoteTimeoutMs}ms`;
-          state.last.warnInfo = "页面按老版链路判定遥控超时";
+          state.last.warnInfo = "页面按 AA...BB 头尾包活动判定遥控超时";
           markRemoteOffline(`离线，页面超时 ${state.remoteTimeoutMs}ms`);
           pushTimeline(`页面判定遥控离线，dt=${state.remoteTimeoutMs}ms`);
         }
@@ -855,6 +892,16 @@
         2: "manual yaw hold"
       };
       return map[mode] || `mode ${mode}`;
+    }
+
+    function updateSelfStabilizeFromSteering(steeringValue) {
+      const steering = Number(steeringValue);
+      const absSteering = Number.isFinite(steering) ? Math.abs(steering) : NaN;
+      const isOn = Number.isFinite(absSteering) && absSteering < 15;
+      state.last.selfStabilizeValue = isOn ? "ON" : "OFF";
+      state.last.selfStabilizeMeta = Number.isFinite(absSteering)
+        ? `|steering|=${absSteering} < 15`
+        : "steering value invalid";
     }
 
     function updateKeyFromFrame(code, name, source) {
@@ -1037,6 +1084,11 @@
       const wlLog = line.match(/^\[WL\] ([IWE]): (.+)$/);
       if (wlLog) {
         pushTimeline(`无线：${wlLog[2]}`);
+        const wlRx = wlLog[2].match(/rx pkt cnt=(\d+) len=(\d+) data=(.+)$/);
+        if (wlRx && /\bAA\b/i.test(wlRx[3]) && /\bBB\b/i.test(wlRx[3])) {
+          markRemoteOnline(`在线，WL RX AA...BB cnt=${wlRx[1]} len=${wlRx[2]}`);
+          state.last.lastRxCmd = `WL rx cnt=${wlRx[1]} len=${wlRx[2]}`;
+        }
         if (wlLog[1] !== "I") {
           state.last.warnInfo = `[WL] ${wlLog[2]}`;
         } else if (/pair|signal|scan|work|init|test/i.test(wlLog[2])) {
@@ -1077,12 +1129,40 @@
         important = true;
       }
 
+      const pairFrame = line.match(/\[SHIP\] I: aa-bb xor ok cmd=(0x[0-9A-Fa-f]{2}) data_len=(\d+)/);
+      if (pairFrame) {
+        state.last.pair = "已配对";
+        state.last.pairMeta = `AA...BB 帧校验通过，cmd=${cmdName(pairFrame[1])} data_len=${pairFrame[2]}`;
+        state.last.remoteInfo = `AA...BB 帧在线，cmd=${cmdName(pairFrame[1])}`;
+        state.last.lastRxCmd = `${cmdName(pairFrame[1])} data_len=${pairFrame[2]}`;
+        state.manualCount += 1;
+        markRemoteOnline(`在线，收到 AA...BB 校验通过 ${pairFrame[1]}`);
+        if (pairFrame[1] === "0x0F") {
+          state.last.channelInfo = "配对响应帧已收到";
+        }
+        if (pairFrame[1] === "0x12") {
+          state.last.txMeta = `AA...BB 回传帧，data_len=${pairFrame[2]}`;
+        }
+        pushTimeline(`AA...BB 帧：cmd=${pairFrame[1]} data_len=${pairFrame[2]}`);
+        important = true;
+      }
+
       const pairOk = line.match(/\[SHIP\] I: pair ok, enter work channel rx_ch=(\d+) tx_ch=(\d+)/);
       if (pairOk) {
         state.last.pair = "已配对";
         state.last.pairMeta = `RX ${pairOk[1]} / TX ${pairOk[2]}，这里只代表已配对`;
         state.last.channelInfo = `工作信道 ${pairOk[1]}`;
         pushTimeline(`配对成功，进入工作信道 ch=${pairOk[1]}`);
+        important = true;
+      }
+
+      const pairOkByFrame = line.match(/\[SHIP\] I: pair ok by ([a-zA-Z0-9-]+) cmd=(0x[0-9A-Fa-f]{2}) work_rx=(\d+) key=(\d+)\/(\d+)/);
+      if (pairOkByFrame) {
+        state.last.pair = "已配对";
+        state.last.pairMeta = `${pairOkByFrame[1]} ${cmdName(pairOkByFrame[2])}，work_rx=${pairOkByFrame[3]} key=${pairOkByFrame[4]}/${pairOkByFrame[5]}`;
+        state.last.channelInfo = `工作信道 ${pairOkByFrame[3]} / key ${pairOkByFrame[4]}/${pairOkByFrame[5]}`;
+        markRemoteOnline(`在线，${pairOkByFrame[1]} ${pairOkByFrame[2]}`);
+        pushTimeline(`配对成功：${pairOkByFrame[1]} cmd=${pairOkByFrame[2]} work_rx=${pairOkByFrame[3]}`);
         important = true;
       }
 
@@ -1116,28 +1196,50 @@
 
       const remoteOnline = line.match(/\[SHIP\] I: remote link online by cmd=0x11/);
       if (remoteOnline) {
-        markRemoteOnline("在线，已开始收到 0x11");
-        pushTimeline("遥控链路上线，开始收到 0x11");
+        markRemoteOnline("在线，已收到 0x11 控制帧");
+        pushTimeline("遥控链路上线，收到 0x11 控制帧");
         important = true;
       }
 
-      const timeout = line.match(/\[SHIP\] W: remote link timeout by cmd=0x11, dt=(\d+)ms/);
+      const remoteOnlineByFrame = line.match(/\[SHIP\] I: remote link online by ([a-zA-Z0-9-]+) cmd=(0x[0-9A-Fa-f]{2})/);
+      if (remoteOnlineByFrame) {
+        markRemoteOnline(`在线，AA...BB ${remoteOnlineByFrame[1]} ${remoteOnlineByFrame[2]}`);
+        pushTimeline(`遥控链路上线，AA...BB ${remoteOnlineByFrame[1]} ${remoteOnlineByFrame[2]}`);
+        important = true;
+      }
+
+      const manualOnline = line.match(/\[SHIP\] I: manual control online by cmd=0x11/);
+      if (manualOnline) {
+        markRemoteOnline("在线，收到有效 0x11 控制帧");
+        pushTimeline("手动控制上线，收到 0x11");
+        important = true;
+      }
+
+      const timeout = line.match(/\[SHIP\] W: remote link timeout by (?:aa-bb-frame|valid frame), dt=(\d+)ms/);
       if (timeout) {
         state.last.rcMeta = `超时 ${timeout[1]}ms`;
-        state.last.warnInfo = `遥控超时 ${timeout[1]}ms`;
+        state.last.warnInfo = `AA...BB 超时 ${timeout[1]}ms`;
         state.remoteSeenAt = 0;
-        markRemoteOffline(`离线，0x11 超时 ${timeout[1]}ms`);
+        markRemoteOffline(`离线，AA...BB 超时 ${timeout[1]}ms`);
         pushTimeline(`遥控超时 ${timeout[1]}ms`);
         important = true;
       }
 
-      const rc = line.match(/\[SHIP\] I: rc cmd=0x11 lr=(\d+) ud=(\d+) key=(0x[0-9A-Fa-f]{2})\(([^)]+)\) paired=(\d+)/);
+      const manualTimeout = line.match(/\[SHIP\] W: manual control timeout by cmd=0x11, dt=(\d+)ms/);
+      if (manualTimeout) {
+        state.last.warnInfo = `0x11 控制帧超时 ${manualTimeout[1]}ms，电机安全停机`;
+        pushTimeline(`0x11 控制帧超时 ${manualTimeout[1]}ms，电机安全停机`);
+        important = true;
+      }
+
+      const rc = line.match(/\[SHIP\] I: rc input cmd=0x11 raw_ud=(\d+) raw_lr=(\d+) throttle_val=([-\d]+) steering_val=([-\d]+) key=(0x[0-9A-Fa-f]{2})\(([^)]+)\)/);
       if (rc) {
         state.manualCount += 1;
-        state.last.rcMeta = `lr=${rc[1]} ud=${rc[2]} key=${rc[3]}(${rc[4]}) paired=${rc[5]}`;
-        updateKeyFromFrame(rc[3], rc[4], "0x11");
-        markRemoteOnline(`在线，最近 0x11：lr=${rc[1]} ud=${rc[2]} key=${rc[4]}`);
-        pushTimeline(`收到 0x11：lr=${rc[1]} ud=${rc[2]} key=${rc[4]} paired=${rc[5]}`);
+        markRemoteOnline("在线，收到有效 0x11 控制帧");
+        state.last.rcMeta = `raw_ud=${rc[1]} raw_lr=${rc[2]} throttle=${rc[3]} steering=${rc[4]} key=${rc[5]}(${rc[6]})`;
+        updateSelfStabilizeFromSteering(Number(rc[4]));
+        updateKeyFromFrame(rc[5], rc[6], "0x11");
+        pushTimeline(`收到 0x11：raw_ud=${rc[1]} raw_lr=${rc[2]} key=${rc[6]}`);
         important = true;
       }
 
@@ -1146,6 +1248,7 @@
         state.last.throttleInputValue = `${throttle[3]}`;
         state.last.throttleInputMeta = `raw_ud=${throttle[1]} raw_lr=${throttle[2]} steering=${throttle[4]} key=${throttle[6]}`;
         state.last.rcMeta = `throttle=${throttle[3]} steering=${throttle[4]} key=${throttle[5]}(${throttle[6]})`;
+        updateSelfStabilizeFromSteering(throttle[4]);
         updateKeyFromFrame(throttle[5], throttle[6], "throttle");
         important = true;
       }
@@ -1160,6 +1263,14 @@
         state.last.motionValue = motorModeText;
         state.last.motionMeta = `left=${motorOut[5]} right=${motorOut[6]} yaw=${motorOut[2]} out=${motorOut[4]}`;
         pushTimeline(`MOT ${motorModeText}: base=${motorThrottle} out=${motorOut[4]} left=${motorOut[5]} right=${motorOut[6]}`);
+        important = true;
+      }
+
+      const motorYawHold = line.match(/\[SHIP\] I: yaw hold tgt=([-\d]+) yr=([-\d]+) out=([-\d]+) throttle=([-\d]+) steer=([-\d]+) gate=(\d+) left=([-\d]+) right=([-\d]+)/);
+      if (motorYawHold) {
+        state.last.motionValue = "yaw-hold";
+        state.last.motionMeta = `tgt=${motorYawHold[1]} yr=${motorYawHold[2]} out=${motorYawHold[3]} left=${motorYawHold[7]} right=${motorYawHold[8]}`;
+        pushTimeline(`yaw hold：yr=${motorYawHold[2]} out=${motorYawHold[3]} left=${motorYawHold[7]} right=${motorYawHold[8]}`);
         important = true;
       }
 
@@ -1301,6 +1412,14 @@
         state.last.magValue = `${mag[1]}, ${mag[2]}, ${mag[3]}`;
         state.last.magMeta = `norm1=${mag[4]}`;
         pushTimeline(`磁力计：X=${mag[1]} Y=${mag[2]} Z=${mag[3]} norm=${mag[4]}`);
+        important = true;
+      }
+
+      const magRaw = line.match(/\[MAG\] I: raw=([-\d]+) ([-\d]+) ([-\d]+) norm=(\d+) yaw=([+\-\d.]+) self=(\d+)/);
+      if (magRaw) {
+        state.last.magValue = `${magRaw[1]}, ${magRaw[2]}, ${magRaw[3]}`;
+        state.last.magMeta = `norm=${magRaw[4]} yaw=${magRaw[5]} self=${magRaw[6]}`;
+        pushTimeline(`MAG：raw=${magRaw[1]} ${magRaw[2]} ${magRaw[3]} yaw=${magRaw[5]} self=${magRaw[6]}`);
         important = true;
       }
 
@@ -1472,13 +1591,15 @@
         pair: "未配对",
         pairMeta: "等待串口数据",
         rcValue: "离线",
-        rcMeta: "等待 0x11 手动帧",
+        rcMeta: "等待 AA...BB 头尾包",
         throttleInputValue: "--",
         throttleInputMeta: "等待 throttle_raw 日志",
         throttleOutputValue: "--",
         throttleOutputMeta: "等待 MOT 输出日志",
         motionValue: "--",
-        motionMeta: "等待 0x11",
+        motionMeta: "等待 AA...BB 头尾包",
+        selfStabilizeValue: "OFF",
+        selfStabilizeMeta: "等待 |steering| < 15",
         keyValue: "--",
         keyMeta: "等待 key 日志",
         txValue: "--",

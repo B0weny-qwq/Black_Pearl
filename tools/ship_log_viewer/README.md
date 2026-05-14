@@ -231,15 +231,37 @@ meta 里还会显示：
 
 ### `遥控链路`
 
-只看 `0x11` 控制帧是否持续收到。
+显示层按遥控空口活动刷新：收到完整 `AA ... BB` 头尾包就认为遥控链路有活动，不要求必须是 `0x11`。
+
+注意：
+
+- `AA ... BB` 用于上位机显示在线/活动。
+- 有效 `0x11` 用于控制输入和固件电机安全保活。
+- 不要把“显示在线”和“控制帧保活”混成一个状态。
 
 状态来源：
 
-- `remote link online by cmd=0x11`
-- `remote link timeout by cmd=0x11`
+- `remote link online by aa-bb-frame cmd=...`
+- `remote link timeout by aa-bb-frame, dt=...ms`
+- `[WL] I: rx pkt ... data=AA ... BB`
+- `[SHIP] I: rc input cmd=0x11 ...`
+- `[SHIP] I: manual control online by cmd=0x11`
 - 页面本地超时判定
 
 这个比“配对状态”更重要。
+
+日志到页面字段对照：
+
+| 日志 | 页面更新 |
+|------|----------|
+| `[WL] I: rx pkt ... data=AA ... BB` | `遥控链路=在线`，刷新页面在线计时 |
+| `[SHIP] I: remote link online by aa-bb-frame cmd=...` | `遥控链路=在线`，显示触发命令 |
+| `[SHIP] I: pair ok by aa-bb-frame cmd=... work_rx=... key=.../...` | `配对状态=已配对`，更新工作信道/key，同时刷新遥控在线 |
+| `[SHIP] I: aa-bb xor ok cmd=... data_len=...` | 更新最近收到命令，并刷新遥控在线 |
+| `[SHIP] I: rc input cmd=0x11 ...` | 更新遥控输入油门、按键、自稳定状态，并刷新遥控在线 |
+| `[SHIP] I: manual control online by cmd=0x11` | 标记手动控制上线，并刷新遥控在线 |
+| `[SHIP] W: remote link timeout by aa-bb-frame, dt=...ms` | `遥控链路=离线` |
+| `[SHIP] W: manual control timeout by cmd=0x11, dt=...ms` | 只提示 `0x11` 控制帧超时停机，不单独把页面遥控链路改离线 |
 
 ### `遥控输入油门`
 
@@ -572,10 +594,14 @@ meta 里还会显示：
 
 看：
 
-- `remote link online by cmd=0x11`
-- `remote link timeout by cmd=0x11`
+- `remote link online by aa-bb-frame cmd=...`
+- `rx pkt ... data=AA ... BB`
+- `remote link timeout by aa-bb-frame, dt=...ms`
+- `manual control timeout by cmd=0x11, dt=...ms` 只表示控制帧超时停机，不等于页面必须显示遥控离线
 
-如果只有“已配对”但没有“遥控在线”，说明遥控器没有真正持续发控制。
+如果只有“已配对”但没有“遥控在线”，说明上位机最近没有看到完整 `AA ... BB` 遥控包。
+
+如果“遥控在线”但电机停机，再看 `0x11` 是否持续有效；显示在线不等于控制帧保活。
 
 ## 10.4 看遥控输入
 
@@ -630,13 +656,14 @@ meta 里还会显示：
 说明：
 
 - 无线已经建立工作信道
-- 但最近没有收到 `0x11`
+- 但上位机最近没有看到完整 `AA ... BB` 遥控包
 
 优先检查：
 
 - 遥控器是否开机
 - 遥控器是否真的在发
 - 是否配对后未进入正常控制状态
+- 如果能看到 `AA ... BB` 但仍显示离线，优先修上位机在线判定，不要只用 `0x11` 当在线依据
 
 ### 11.2 遥控输入有变化，但实际输出不变
 

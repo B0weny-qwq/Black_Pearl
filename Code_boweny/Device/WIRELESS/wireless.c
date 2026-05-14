@@ -1,23 +1,24 @@
 /**
  * @file    wireless.c
- * @brief   LT8920 ������·������ʵ�֡�
+ * @brief   LT8920 无线链路管理层实现。
  * @author  boweny
  * @date    2026-05-06
  * @version v1.1
  *
  * @details
- * ���ļ��� LT8920 оƬ��֮��ά����ʼ��������ѡ���շ�״̬��
- * ���ն��С�������ں͵��Խӿڡ���ң����ҵ����Ҫ��ָ���ŵ����͡�
- * ͬ���Ĵ��� idle д�롢���� RX �򿪵����̶��������װ��Э���ʹ�á�
+ * 本文件在 LT8920 芯片层之上维护初始化、天线选择、收发状态、
+ * 接收队列、发送入口和调试接口。旧遥控器业务需要的指定信道发送、
+ * 同步寄存器 idle 写入、工作 RX 打开等流程都在这里封装给协议层使用。
  *
  * @note
- * `Wireless_Receive()` ���ص��� LT8920 RF payload������ͬ������
- * `AA | len | cmd | payload | xor | BB` ҵ��Э��֡��
+ * `Wireless_Receive()` 返回的是 LT8920 RF payload，不等同于完整
+ * `AA | len | cmd | payload | xor | BB` 业务协议帧。
  */
 #include "wireless.h"
 #include "lt8920.h"
 #include "wireless_port.h"
 #include "..\..\Function\Log\Log.h"
+#include "..\..\..\User\Task.h"
 
 static Wireless_State_t g_wireless_state;
 static u8 g_wireless_rx_len[WIRELESS_RX_QUEUE_DEPTH];
@@ -171,7 +172,7 @@ static s8 Wireless_SetRxModeOnChannel(u8 channel)
 static void Wireless_EnableTxFrontend(void)
 {
 #if !WIRELESS_FRONTEND_BYPASS_TEST
-    /* 兼容旧版 LT8920_TxData() 的时序：RX_EN 保持高电平，只脉�?TX_EN�?*/
+    /* 鍏煎鏃х増 LT8920_TxData() 鐨勬椂搴忥細RX_EN 淇濇寔楂樼數骞筹紝鍙剦鍐?TX_EN銆?*/
     WirelessPort_SetRxEn(1U);
     WirelessPort_SetTxEn(0U);
     WirelessPort_DelayUs(5U);
@@ -308,6 +309,12 @@ s8 Wireless_Init(void)
     return SUCCESS;
 #endif
 
+#if WIRELESS_FRONTEND_BYPASS_TEST
+    g_wireless_state.antenna = WIRELESS_ANT1;
+    g_wireless_state.scan_has_signal = 1U;
+    g_wireless_state.antenna_rssi_ant1 = 0U;
+    g_wireless_state.antenna_rssi_ant2 = 0U;
+#else
     rc = Wireless_RescanAntenna();
     if (rc != SUCCESS) {
         g_wireless_state.last_error = rc;
@@ -317,6 +324,7 @@ s8 Wireless_Init(void)
         LOGE(WIRELESS_TAG, "antenna scan fail rc=%d", rc);
         return rc;
     }
+#endif
 
     rc = Wireless_SetRxMode();
     if (rc != SUCCESS) {
@@ -354,9 +362,12 @@ s8 Wireless_Deinit(void)
 
 s8 Wireless_Poll(void)
 {
+    static u32 rx_brief_last_log_ms = 0UL;
+    static u8 rx_crc_streak = 0U;
     u16 status;
     u8 packet_len;
     u8 packet_buf[LT8920_MAX_PAYLOAD_LEN];
+    u32 now_ms;
     s8 rc;
 
     if (!g_wireless_state.initialized) {
@@ -396,16 +407,44 @@ s8 Wireless_Poll(void)
 
     if ((status & LT8920_STATUS_CRC_ERROR) != 0U) {
         g_wireless_state.crc_error_count++;
-        LOGW(WIRELESS_TAG, "rx crc err st=0x%04X mode=%u",
-             status,
-             (u16)g_wireless_state.mode);
+        if (rx_crc_streak < 0xFFU) {
+            rx_crc_streak++;
+        }
+        if ((SHIP_RX_CRC_LOG_THRESHOLD == 0U) ||
+            (rx_crc_streak >= SHIP_RX_CRC_LOG_THRESHOLD)) {
+            LOGW(WIRELESS_TAG, "rx crc err streak=%u st=0x%04X mode=%u",
+                 (u16)rx_crc_streak,
+                 status,
+                 (u16)g_wireless_state.mode);
+            rx_crc_streak = 0U;
+        }
         (void)Wireless_SetRxMode();
         return SUCCESS;
     }
 
+    rx_crc_streak = 0U;
+
     rc = LT8920_ReadPacket(packet_buf, LT8920_MAX_PAYLOAD_LEN, &packet_len);
     if (rc == SUCCESS) {
+        now_ms = Task_GetTickMs();
         g_wireless_state.rx_ok_count++;
+        if ((rx_brief_last_log_ms == 0UL) ||
+            (SHIP_RX_LOG_PERIOD_MS == 0U) ||
+            ((now_ms - rx_brief_last_log_ms) >= SHIP_RX_LOG_PERIOD_MS)) {
+            rx_brief_last_log_ms = now_ms;
+            LOGI(WIRELESS_TAG,
+                 "rx pkt cnt=%u len=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
+                 (u16)g_wireless_state.rx_ok_count,
+                 (u16)packet_len,
+                 (u16)((packet_len > 0U) ? packet_buf[0] : 0U),
+                 (u16)((packet_len > 1U) ? packet_buf[1] : 0U),
+                 (u16)((packet_len > 2U) ? packet_buf[2] : 0U),
+                 (u16)((packet_len > 3U) ? packet_buf[3] : 0U),
+                 (u16)((packet_len > 4U) ? packet_buf[4] : 0U),
+                 (u16)((packet_len > 5U) ? packet_buf[5] : 0U),
+                 (u16)((packet_len > 6U) ? packet_buf[6] : 0U),
+                 (u16)((packet_len > 7U) ? packet_buf[7] : 0U));
+        }
 #if WIRELESS_RX_TRACE_ENABLE
         LOGI(WIRELESS_TAG,
              "rx pkt len=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
@@ -847,6 +886,25 @@ s8 Wireless_RescanAntenna(void)
         return WIRELESS_ERR_STATE;
     }
 
+#if WIRELESS_FRONTEND_BYPASS_TEST
+    g_wireless_state.antenna = WIRELESS_ANT1;
+    g_wireless_state.scan_has_signal = 1U;
+    g_wireless_state.antenna_rssi_ant1 = 0U;
+    g_wireless_state.antenna_rssi_ant2 = 0U;
+    g_wireless_state.ready = 0U;
+    rc = Wireless_SetAntenna(WIRELESS_ANT1);
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    rc = Wireless_SetRxMode();
+    if (rc != SUCCESS) {
+        return rc;
+    }
+    g_wireless_state.ready = 1U;
+    LOGI(WIRELESS_TAG, "frontend bypass: rescan disabled, force ANT1 rx");
+    return SUCCESS;
+#endif
+
     g_wireless_state.ready = 0U;
     rc = Wireless_SetIdleMode();
     if (rc != SUCCESS) {
@@ -909,12 +967,40 @@ s8 Wireless_RescanAntenna(void)
 s8 Wireless_SearchSignalPoll(void)
 {
     static u16 poll_div = 0U;
+    static u8 search_retry_count = 0U;
+    static u8 initial_scan_counted = 0U;
     s8 rc;
 
     if (!g_wireless_state.initialized) {
+        search_retry_count = 0U;
+        initial_scan_counted = 0U;
         return WIRELESS_ERR_STATE;
     }
+#if WIRELESS_FRONTEND_BYPASS_TEST
+    g_wireless_state.scan_has_signal = 1U;
+    search_retry_count = 0U;
+    initial_scan_counted = 0U;
+    return SUCCESS;
+#endif
     if (g_wireless_state.scan_has_signal) {
+        search_retry_count = 0U;
+        initial_scan_counted = 0U;
+        return SUCCESS;
+    }
+
+    if (initial_scan_counted == 0U) {
+        initial_scan_counted = 1U;
+        search_retry_count = 1U;
+    }
+    if (search_retry_count >= WIRELESS_SEARCH_MAX_RETRY) {
+        g_wireless_state.scan_has_signal = 1U;
+        (void)Wireless_SetAntenna(WIRELESS_ANT1);
+        (void)Wireless_SetRxMode();
+        LOGW(WIRELESS_TAG, "search retry limit %u, enter normal rx ant=%u rssi=%u/%u",
+             (u16)WIRELESS_SEARCH_MAX_RETRY,
+             (u16)g_wireless_state.antenna,
+             g_wireless_state.antenna_rssi_ant1,
+             g_wireless_state.antenna_rssi_ant2);
         return SUCCESS;
     }
 
@@ -931,10 +1017,24 @@ s8 Wireless_SearchSignalPoll(void)
         return rc;
     }
     if (g_wireless_state.scan_has_signal) {
+        search_retry_count = 0U;
+        initial_scan_counted = 0U;
         LOGI(WIRELESS_TAG, "signal detected ant=%u rssi=%u/%u",
              (u16)g_wireless_state.antenna,
              g_wireless_state.antenna_rssi_ant1,
              g_wireless_state.antenna_rssi_ant2);
+    } else {
+        search_retry_count++;
+        if (search_retry_count >= WIRELESS_SEARCH_MAX_RETRY) {
+            g_wireless_state.scan_has_signal = 1U;
+            (void)Wireless_SetAntenna(WIRELESS_ANT1);
+            (void)Wireless_SetRxMode();
+            LOGW(WIRELESS_TAG, "search retry limit %u, enter normal rx ant=%u rssi=%u/%u",
+                 (u16)WIRELESS_SEARCH_MAX_RETRY,
+                 (u16)g_wireless_state.antenna,
+                 g_wireless_state.antenna_rssi_ant1,
+                 g_wireless_state.antenna_rssi_ant2);
+        }
     }
     return SUCCESS;
 }
@@ -991,9 +1091,9 @@ s8 Wireless_RunMinimalTest(void)
         return WIRELESS_ERR_VERIFY;
     }
 
-    /* Reg7 同时混合了模式控制位和信道字段，
-     * 不是那种“写进去再原样读回来”的寄存器，
-     * 所以不要拿它当�?SPI 写路径的唯一验证依据�?     */
+    /* Reg7 鍚屾椂娣峰悎浜嗘ā寮忔帶鍒朵綅鍜屼俊閬撳瓧娈碉紝
+     * 涓嶆槸閭ｇ鈥滃啓杩涘幓鍐嶅師鏍疯鍥炴潵鈥濈殑瀵勫瓨鍣紝
+     * 鎵€浠ヤ笉瑕佹嬁瀹冨綋浣?SPI 鍐欒矾寰勭殑鍞竴楠岃瘉渚濇嵁銆?     */
     rc = LT8920_SetChannel(0x12U);
     if (rc != SUCCESS) {
         LOGE(WIRELESS_TAG, "test set ch fail rc=%d", rc);
@@ -1084,6 +1184,7 @@ s8 Wireless_RunMinimalTest(void)
 s8 Wireless_SetChannel(u8 channel)
 {
     s8 rc;
+    u16 reg7;
 
     if (!g_wireless_state.initialized) {
         return WIRELESS_ERR_STATE;
@@ -1093,6 +1194,14 @@ s8 Wireless_SetChannel(u8 channel)
     if (rc != SUCCESS) {
         g_wireless_state.last_error = rc;
         return rc;
+    }
+
+    if ((SHIP_PROTO_DEBUG_ENABLE != 0U) &&
+        (LT8920_ReadReg(7U, &reg7) == SUCCESS)) {
+        LOGI(WIRELESS_TAG, "set ch target=%u reg7=0x%04X actual=%u",
+             (u16)channel,
+             reg7,
+             (u16)(reg7 & 0x007FU));
     }
 
     return SUCCESS;
@@ -1235,4 +1344,3 @@ s8 Wireless_GetRxDebug(Wireless_RxDebug_t *dbg)
     dbg->channel = (u8)(reg7 & 0x007FU);
     return SUCCESS;
 }
-
