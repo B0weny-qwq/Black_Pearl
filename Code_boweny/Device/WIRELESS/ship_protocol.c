@@ -1670,8 +1670,10 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
         ShipProtocol_ToLegacyNmeaCoord(abs_lat, &lat_coord1, &lat_coord2);
     }
 
-    payload_lon_dir = lon_dir;
-    payload_lat_dir = lat_dir;
+    /* Match the legacy handheld parser exactly: 0x12 keeps fixed E/W marker bytes.
+     * Real hemisphere is still preserved in runtime logs for diagnosis. */
+    payload_lon_dir = 'E';
+    payload_lat_dir = 'W';
 
     payload[idx++] = (u8)payload_lon_dir;
     ShipProtocol_WriteU16Legacy(&payload[idx], lon_coord1);
