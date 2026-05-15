@@ -18,7 +18,7 @@
 
 #define	UART_BUF_type	edata       //设置串口收发数据缓存空间，可选 edata 或者 xdata
 
-#define	UART_QUEUE_MODE	0           //设置串口发送模式，0：阻塞模式，1：队列模式
+#define	UART_QUEUE_MODE	1           //设置串口发送模式，0：阻塞模式，1：队列模式
 
 #define	PRINTF_SELECT  UART1		//选择 printf 函数所使用的串口，参数 UART1~UART4
 

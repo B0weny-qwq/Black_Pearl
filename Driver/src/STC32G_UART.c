@@ -232,6 +232,7 @@ u8 UART_Configuration(u8 UARTx, COMx_InitDefine *COMx)
 void TX1_write2buff(u8 dat)	//串口1发送函数
 {
     #if(UART_QUEUE_MODE == 1)
+	if((((u8)(COM1.TX_write + 1U) >= (u8)COM_TX1_Lenth) ? 0U : (u8)(COM1.TX_write + 1U)) == COM1.TX_send)	return;
 	TX1_Buffer[COM1.TX_write] = dat;	//装发送缓冲，使用队列式数据发送，一次性发送数据长度不要超过缓冲区大小（COM_TXn_Lenth）
 	if(++COM1.TX_write >= COM_TX1_Lenth)	COM1.TX_write = 0;
 
@@ -260,6 +261,7 @@ void PrintString1(u8 *puts)
 void TX2_write2buff(u8 dat)	//串口2发送函数
 {
     #if(UART_QUEUE_MODE == 1)
+	if((((u8)(COM2.TX_write + 1U) >= (u8)COM_TX2_Lenth) ? 0U : (u8)(COM2.TX_write + 1U)) == COM2.TX_send)	return;
 	TX2_Buffer[COM2.TX_write] = dat;	//装发送缓冲，使用队列式数据发送，一次性发送数据长度不要超过缓冲区大小（COM_TXn_Lenth）
 	if(++COM2.TX_write >= COM_TX2_Lenth)	COM2.TX_write = 0;
 
@@ -288,6 +290,7 @@ void PrintString2(u8 *puts)
 void TX3_write2buff(u8 dat)	//串口3发送函数
 {
     #if(UART_QUEUE_MODE == 1)
+	if((((u8)(COM3.TX_write + 1U) >= (u8)COM_TX3_Lenth) ? 0U : (u8)(COM3.TX_write + 1U)) == COM3.TX_send)	return;
 	TX3_Buffer[COM3.TX_write] = dat;	//装发送缓冲，使用队列式数据发送，一次性发送数据长度不要超过缓冲区大小（COM_TXn_Lenth）
 	if(++COM3.TX_write >= COM_TX3_Lenth)	COM3.TX_write = 0;
 
@@ -316,6 +319,7 @@ void PrintString3(u8 *puts)
 void TX4_write2buff(u8 dat)	//串口4发送函数
 {
     #if(UART_QUEUE_MODE == 1)
+	if((((u8)(COM4.TX_write + 1U) >= (u8)COM_TX4_Lenth) ? 0U : (u8)(COM4.TX_write + 1U)) == COM4.TX_send)	return;
 	TX4_Buffer[COM4.TX_write] = dat;	//装发送缓冲，使用队列式数据发送，一次性发送数据长度不要超过缓冲区大小（COM_TXn_Lenth）
 	if(++COM4.TX_write >= COM_TX4_Lenth)	COM4.TX_write = 0;
 

@@ -145,8 +145,8 @@ void Motor_Init(void)
 
     Motor_LeftSetForwardPolarity(1);
     Motor_RightSetForwardPolarity(1);
-    Motor_LeftOutputEnable(1);
-    Motor_RightOutputEnable(1);
+    Motor_LeftOutputEnable(0);
+    Motor_RightOutputEnable(0);
     Motor_StopAll();
 
     NVIC_PWM_Init(PWMA, DISABLE, Priority_0);
@@ -157,15 +157,22 @@ void Motor_SetSpeed(Motor_Id_t motor, int16 speed)
     u16 duty;
 
     speed = Motor_LimitSpeed(speed);
+    if (speed == 0) {
+        Motor_Stop(motor);
+        return;
+    }
+
     duty = Motor_SpeedToDuty(speed);
 
     if (motor == MOTOR_LEFT) {
         g_motor_pwm_duty.PWM3_Duty = duty;
         UpdatePwm(PWM3, &g_motor_pwm_duty);
+        Motor_LeftOutputEnable(1);
         g_left_speed = speed;
     } else {
         g_motor_pwm_duty.PWM4_Duty = duty;
         UpdatePwm(PWM4, &g_motor_pwm_duty);
+        Motor_RightOutputEnable(1);
         g_right_speed = speed;
     }
 }
@@ -181,10 +188,12 @@ void Motor_Stop(Motor_Id_t motor)
     if (motor == MOTOR_LEFT) {
         g_motor_pwm_duty.PWM3_Duty = MOTOR_PWM_PERIOD / 2U;
         UpdatePwm(PWM3, &g_motor_pwm_duty);
+        Motor_LeftOutputEnable(0);
         g_left_speed = 0;
     } else {
         g_motor_pwm_duty.PWM4_Duty = MOTOR_PWM_PERIOD / 2U;
         UpdatePwm(PWM4, &g_motor_pwm_duty);
+        Motor_RightOutputEnable(0);
         g_right_speed = 0;
     }
 }
