@@ -3,6 +3,36 @@ build/
 Debug/
 Release/
 
+# Keil / RVMDK build outputs
+RVMDK/list/
+RVMDK/Objects/
+RVMDK/Listings/
+RVMDK/DebugConfig/
+*.crf
+*.lst
+*.obj
+*.o
+*.d
+*.dep
+*.lnp
+*.map
+*.htm
+*.build_log.htm
+*.uvguix.*
+*.uvoptx
+*.uvgui.*
+*.uvopt
+*.bak
+*.plg
+*.iex
+*.i
+*.ii
+*.sct
+*.axf
+*.tmp
+*.swp
+*.uvgui_*
+
 # output
 *.hex
 *.bin
