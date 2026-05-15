@@ -547,7 +547,7 @@
 /**
  * @brief  无线协议调试日志开关
  */
-#define SHIP_PROTOCOL_DIAG_ENABLE      1
+#define SHIP_PROTOCOL_DIAG_ENABLE      0
 
 /**
  * @brief  无线协议错误日志开关

@@ -48,14 +48,6 @@ static u32 g_last_poll_tick_ms = 0UL;
 static u32 g_last_link_tick_ms = 0UL;
 static u8 g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
 
-static u16 AutoDrive_Abs16(int16 value)
-{
-    if (value < 0) {
-        return (u16)(-value);
-    }
-    return (u16)value;
-}
-
 static u16 AutoDrive_ReadU16Wire(const u8 *data_m)
 {
     /* The controller protocol sends 0x13/0x14/0x15 point fields big-endian. */
@@ -270,9 +262,8 @@ static u8 AutoDrive_UpdateTargetHeading(const AutoDrive_PointRaw_t *current_poin
     return 1U;
 }
 
-static void AutoDrive_ApplyHeadingHold(u32 now_ms, u16 base_speed)
+static void AutoDrive_ApplyHeadingHold(u16 base_speed)
 {
-    (void)now_ms;
     if (g_autodrive_target_heading_valid == 0U) {
         AutoDrive_StopMotion();
         return;
@@ -896,7 +887,7 @@ void AutoDrive_Poll(void)
         ShipProtocol_ResetYawHoldController();
         g_last_run_update_seq = gps->update_sequence;
         g_autoDrive_state = AUTO_DRIVE_RUNING;
-        AutoDrive_ApplyHeadingHold(now_ms, AUTODRIVE_CRUISE_BASE_SPEED);
+        AutoDrive_ApplyHeadingHold(AUTODRIVE_CRUISE_BASE_SPEED);
         break;
 
     case AUTO_DRIVE_GET_DIRECTION:
@@ -942,7 +933,7 @@ void AutoDrive_Poll(void)
             g_last_run_update_seq = gps->update_sequence;
         }
 
-        AutoDrive_ApplyHeadingHold(now_ms, AUTODRIVE_CRUISE_BASE_SPEED);
+        AutoDrive_ApplyHeadingHold(AUTODRIVE_CRUISE_BASE_SPEED);
         break;
 
     default:

@@ -2339,7 +2339,7 @@ static void ShipProtocol_LogAutoDriveSnapshot(const char *stage)
 
     AutoDrive_GetDebugSnapshot(&snapshot);
     LOGI(SHIP_TAG,
-         "ad %s state=%u mode=%u sw=0x%02X fail=%u reason=%u gps=%u sat=%u can=%u dist=%u cur=%c%u.%u/%c%u.%u tgt=%c%u.%u/%c%u.%u",
+         "ad %s st=%u md=%u sw=0x%02X fail=%u rsn=%u gps=%u sat=%u can=%u dist=%u",
          stage,
          (u16)snapshot.state,
          (u16)snapshot.mode,
@@ -2349,13 +2349,17 @@ static void ShipProtocol_LogAutoDriveSnapshot(const char *stage)
          (u16)snapshot.gps_ready,
          (u16)snapshot.sat_count,
          (u16)snapshot.can_activate_target,
-         (u16)snapshot.distance_to_target_m,
+         (u16)snapshot.distance_to_target_m);
+    LOGI(SHIP_TAG,
+         "ad cur=%c%u.%u/%c%u.%u",
          (char)snapshot.current_point.lon_ew,
          snapshot.current_point.lon_whole,
          snapshot.current_point.lon_frac,
          (char)snapshot.current_point.lat_ns,
          snapshot.current_point.lat_whole,
-         snapshot.current_point.lat_frac,
+         snapshot.current_point.lat_frac);
+    LOGI(SHIP_TAG,
+         "ad tgt=%c%u.%u/%c%u.%u",
          (char)snapshot.target_point.lon_ew,
          snapshot.target_point.lon_whole,
          snapshot.target_point.lon_frac,
