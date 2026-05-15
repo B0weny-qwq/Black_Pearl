@@ -1,1 +1,0 @@
-"..\App\Gyro\gyro_i2c.c" OMF2 OPTIMIZE (8,SPEED) BROWSE INCDIR(..\Driver\Inc;..\App\Config;..\App\DcMotor;..\App\Gyro;..\App\Wireless\LT8920) DEBUG PRINT(.\list\gyro_i2c.lst) TABS (2) OBJECT(.\list\gyro_i2c.obj)

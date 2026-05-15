@@ -1,1 +1,0 @@
-"App\Gyro\gyro.c" LARGE OPTIMIZE (8,SPEED) BROWSE INCDIR(.\Driver\Inc;.\App\Config;.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Wireless;.\App\Gyro;.\App\Gps;.\App\AutoDrive;.\App\ADC;.\App\eeprom) DEFINE (HW_V16,SHIP_MID,BOARD_12V) DEBUG OBJECTEXTEND PRINT(.\Listings\gyro.lst) TABS (2) OBJECT(.\Objects\gyro.obj)

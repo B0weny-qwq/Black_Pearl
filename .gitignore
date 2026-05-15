@@ -8,6 +8,7 @@ RVMDK/list/
 RVMDK/Objects/
 RVMDK/Listings/
 RVMDK/DebugConfig/
+ship_Gps_V2.1_20260406-115200/
 *.crf
 *.lst
 *.obj

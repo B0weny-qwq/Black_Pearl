@@ -1,1 +1,0 @@
-"App\PWM\pwm_Timer.c" LARGE OPTIMIZE (8,SPEED) BROWSE INCDIR(.\Driver\Inc;.\App\Config;.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Gyro) DEBUG OBJECTEXTEND PRINT(.\Listings\pwm_Timer.lst) TABS (2) OBJECT(.\Objects\pwm_Timer.obj)
