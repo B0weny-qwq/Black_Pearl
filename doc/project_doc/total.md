@@ -2,8 +2,8 @@
  * @file    total.md
  * @brief   Black Pearl v1.1 当前工程总览
  * @author  boweny
- * @date    2026-05-13
- * @version v1.7.62
+ * @date    2026-05-15
+ * @version v1.7.63
  */
 
 # Black Pearl v1.1 当前工程总览
@@ -16,7 +16,7 @@
 - 当前运行档为 `Wireless + GPS + MAG + IMU + AHRS`，无线旧遥控器协议、GPS 回传和 AHRS 航向链同时启用。
 - 旧遥控器空口数据格式已按 `ship_Gps_V2.1_20260406-115200` 复核：命令号、帧格式、`0x12` 15 字节 GPS 回传、`0x13/0x14/0x15` 点位格式保持旧版 wire 兼容。
 - `0x12` 半球字段继续固定为 `E/W`，这是旧版 `nmea41_Get_EW()='E'`、`nmea41_Get_NS()='W'` 的兼容行为，不是新协议格式。
-- 当前工作区 `0x11` wire payload 仍是旧版 `lr/ud/key`，但手动控制应用层已开启 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，并以 `SHIP_YAW_HOLD_STEER_GATE=10U` 作为直线自稳门限；当左右输入偏差不超过该门限且油门为前进时，会在当前电机 PWM 上叠加 yaw-hold 输出。当前控制周期为 `SHIP_YAW_HOLD_PERIOD_MS=150UL`，`Kp/死区/日志节流` 也统一收在 `User/FeatureSwitch.h` 顶部，便于现场调参。
+- 当前工作区 `0x11` wire payload 仍是旧版 `lr/ud/key`，但手动控制应用层已开启 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，并以 `SHIP_YAW_HOLD_STEER_GATE=15U` 作为直线自稳门限；当左右输入偏差不超过该门限且油门为前进时，会在当前电机 PWM 上叠加 yaw-hold 输出。当前控制周期为 `SHIP_YAW_HOLD_PERIOD_MS=100UL`，yaw 误差先按 `SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 归一化到 `±1000` 控制量，再按当前基础油门和电机满量程余量换算成左右差速，避免小角度偏航直接打满或高油门单侧锁死。
 - `AutoDrive` 并非独立主循环入口，而是隐藏在 `ShipProtocol_RunScheduler()` 内初始化与轮询；`0x13/0x14/0x15`、低电返航和链路超时都会走到这条链。
 
 ## 2. 当前开关
@@ -40,21 +40,24 @@
 #define SHIP_THROTTLE_PWM_ENABLE       1
 #define SHIP_YAW_HOLD_ENABLE           1
 #define SHIP_YAW_HOLD_MANUAL_ENABLE    1
-#define SHIP_YAW_HOLD_PERIOD_MS        150UL
+#define SHIP_YAW_HOLD_PERIOD_MS        100UL
 #define SHIP_YAW_HOLD_LOG_ENABLE       1
 #define SHIP_YAW_HOLD_LOG_PERIOD_MS    1000UL
-#define SHIP_YAW_HOLD_OUTPUT_LIMIT     100
-#define SHIP_YAW_HOLD_STEER_GATE       10U
-#define SHIP_YAW_HOLD_KP_Q10           4
-#define SHIP_YAW_HOLD_DEADBAND_CD      150
+#define SHIP_YAW_HOLD_OUTPUT_LIMIT     1000
+#define SHIP_YAW_HOLD_FULL_ERROR_CD    1000
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 500
+#define SHIP_YAW_HOLD_STEER_GATE       15U
+#define SHIP_YAW_HOLD_KP_Q10           1024
+#define SHIP_YAW_HOLD_DEADBAND_CD      80
 #define SHIP_YAW_HOLD_KI_Q10           0
 #define SHIP_YAW_HOLD_KD_Q10           0
 ```
 
 - `ENABLE_GPS_MODULE=1` 表示 GPS 初始化、轮询和 `0x12` 状态回传均进入当前固件。
 - `SHIP_PROTOCOL_COMPAT_ENABLE=0` 表示当前使用调度器链路 `ShipProtocol_RunScheduler()`，不是额外兼容轮询入口。
-- `SHIP_YAW_HOLD_MANUAL_ENABLE=1` 是当前应用行为与旧版纯开环手动控制的主要差异点；当前直线自稳触发条件是 `|steering| <= 10` 且油门为前进。
-- `SHIP_YAW_HOLD_KP_Q10=4` 继续保持保守 P-only，`SHIP_YAW_HOLD_DEADBAND_CD=150` 用于压住静止抖动，`SHIP_YAW_HOLD_LOG_PERIOD_MS=1000UL` 用于限制 `[MOT]` 诊断输出频率。
+- `SHIP_YAW_HOLD_MANUAL_ENABLE=1` 是当前应用行为与旧版纯开环手动控制的主要差异点；当前直线自稳触发条件是 `|steering| <= 15` 且油门为前进。
+- `SHIP_YAW_HOLD_OUTPUT_LIMIT=1000` 与 `Motor_SetSpeed()` 满量程统一；`SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 表示 10.00° 偏航才达到满控制输入；`SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=500` 表示满输出时差速最多为当前基础油门的 50%，并继续受电机上限余量限制。
+- `SHIP_YAW_HOLD_KP_Q10=1024` 为 P-only 的 1.0 倍控制量增益，`SHIP_YAW_HOLD_DEADBAND_CD=80` 用于压住 0.80° 内的小抖动，`SHIP_YAW_HOLD_LOG_PERIOD_MS=1000UL` 用于限制 `[MOT]` 诊断输出频率。
 
 ## 3. 启动顺序
 
@@ -110,6 +113,7 @@ MainLoop_RunOnce()
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-15 | `v1.7.63` | 修正手动 yaw 自稳单位和量程：角度误差归一到 `±1000`，差速按当前基础油门、电机余量和满量程映射，避免小偏航直接满输出或单侧锁死。 |
 | 2026-05-13 | `v1.7.62` | 复核各 device README、补齐 `AutoDrive/README.md`，同步 `AutoDrive` 实际接入路径和头文件注释口径。 |
 | 2026-05-13 | `v1.7.61` | 同步手动自稳开启、转向门限 10 和 PWM 输出口径，更新当前真实开关、主循环和已知差异。 |
 | 2026-05-12 | `v1.7.59` | yaw-hold 参数收口到 `FeatureSwitch.h`，补齐中文注释。 |

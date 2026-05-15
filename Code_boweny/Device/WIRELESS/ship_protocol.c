@@ -98,6 +98,12 @@
 #ifndef SHIP_YAW_HOLD_LOG_PERIOD_MS
 #define SHIP_YAW_HOLD_LOG_PERIOD_MS    1000UL
 #endif
+#ifndef SHIP_YAW_HOLD_FULL_ERROR_CD
+#define SHIP_YAW_HOLD_FULL_ERROR_CD    1000
+#endif
+#ifndef SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 500
+#endif
 #ifndef SHIP_AUTODRIVE_DIAG_ENABLE
 #define SHIP_AUTODRIVE_DIAG_ENABLE     1
 #endif
@@ -177,6 +183,8 @@ typedef struct
     u8 motor_initialized;
     u8 yaw_hold_active;
     int16 yaw_hold_target_cd;
+    int16 yaw_hold_error_cd;
+    int16 yaw_hold_error_ctrl;
     int16 yaw_hold_output;
     u32 yaw_hold_last_update_ms;
     ShipMotion_t motion;
@@ -217,10 +225,11 @@ static void ShipProtocol_ResetYawHold(const char *reason, u8 force_log);
 static void ShipProtocol_EnsureMotorInit(void);
 static int16 ShipProtocol_LimitSpeed(int16 speed);
 static int16 ShipProtocol_WrapCd(int32 angle_cd);
+static int16 ShipProtocol_YawErrorToControl(int16 yaw_error_cd);
 static void ShipProtocol_ReadPowerSample(ShipPowerSample_t *sample);
 static void ShipProtocol_ServicePowerSample(void);
 static u8 ShipProtocol_AdcRawToPowerLevel(u16 adc_raw);
-static int16 ShipProtocol_YawOutputToSpeed(int16 yaw_output, int16 throttle_speed);
+static int16 ShipProtocol_YawControlToSpeed(int16 yaw_control, int16 base_speed);
 static void ShipProtocol_UpdateManualAcceleratorRaw(u8 left_right, u8 front_back);
 static u8 ShipProtocol_AbsAxisDiff(u8 value);
 static int16 ShipProtocol_LegacyPwmToSpeed(u8 pwm);
@@ -293,6 +302,8 @@ static void ShipProtocol_ResetYawHold(const char *reason, u8 force_log)
     }
     g_ship_rt.yaw_hold_active = 0U;
     g_ship_rt.yaw_hold_target_cd = 0;
+    g_ship_rt.yaw_hold_error_cd = 0;
+    g_ship_rt.yaw_hold_error_ctrl = 0;
     g_ship_rt.yaw_hold_output = 0;
     g_ship_rt.yaw_hold_last_update_ms = 0UL;
     PID_Reset(&g_ship_yaw_pid);
@@ -327,6 +338,7 @@ static u8 ShipProtocol_UpdateYawHoldPid(u32 now_ms, int16 *yaw_cd, u8 *pid_updat
 {
     int16 current_yaw_cd;
     int16 yaw_error_cd;
+    int16 yaw_error_ctrl;
 
     if (pid_updated != 0) {
         *pid_updated = 0U;
@@ -343,6 +355,8 @@ static u8 ShipProtocol_UpdateYawHoldPid(u32 now_ms, int16 *yaw_cd, u8 *pid_updat
     if (g_ship_rt.yaw_hold_active == 0U) {
         g_ship_rt.yaw_hold_active = 1U;
         g_ship_rt.yaw_hold_target_cd = current_yaw_cd;
+        g_ship_rt.yaw_hold_error_cd = 0;
+        g_ship_rt.yaw_hold_error_ctrl = 0;
         g_ship_rt.yaw_hold_output = 0;
         g_ship_rt.yaw_hold_last_update_ms = now_ms - SHIP_YAW_HOLD_PERIOD_MS;
         PID_Reset(&g_ship_yaw_pid);
@@ -353,11 +367,17 @@ static u8 ShipProtocol_UpdateYawHoldPid(u32 now_ms, int16 *yaw_cd, u8 *pid_updat
         g_ship_rt.yaw_hold_last_update_ms = now_ms;
         yaw_error_cd = ShipProtocol_WrapCd((int32)g_ship_rt.yaw_hold_target_cd -
                                            (int32)current_yaw_cd);
-        if ((yaw_error_cd <= SHIP_YAW_HOLD_DEADBAND_CD) &&
-            (yaw_error_cd >= (int16)(-SHIP_YAW_HOLD_DEADBAND_CD))) {
-            yaw_error_cd = 0;
+        yaw_error_ctrl = ShipProtocol_YawErrorToControl(yaw_error_cd);
+        g_ship_rt.yaw_hold_error_cd = yaw_error_cd;
+        g_ship_rt.yaw_hold_error_ctrl = yaw_error_ctrl;
+        if (yaw_error_ctrl == 0) {
+            PID_Reset(&g_ship_yaw_pid);
+            g_ship_rt.yaw_hold_output = 0;
+        } else {
+            g_ship_rt.yaw_hold_output = PID_UpdateTarget(&g_ship_yaw_pid,
+                                                         yaw_error_ctrl,
+                                                         0);
         }
-        g_ship_rt.yaw_hold_output = PID_UpdateTarget(&g_ship_yaw_pid, yaw_error_cd, 0);
         if (pid_updated != 0) {
             *pid_updated = 1U;
         }
@@ -381,11 +401,15 @@ static void ShipProtocol_LogMotorOutput(u8 mode, int16 yaw_cd, int16 throttle_sp
     last_log_ms = now_ms;
 
     log_info((u8 *)"MOT",
-             (u8 *)"m=%u y=%d t=%d o=%d l=%d r=%d",
+             (u8 *)"m=%u y=%d tgt=%d err=%d in=%d pid=%d diff=%d t=%d l=%d r=%d",
              (u16)mode,
              yaw_cd,
-             throttle_speed,
+             g_ship_rt.yaw_hold_target_cd,
+             g_ship_rt.yaw_hold_error_cd,
+             g_ship_rt.yaw_hold_error_ctrl,
+             g_ship_rt.yaw_hold_output,
              yaw_output,
+             throttle_speed,
              left_speed,
              right_speed);
 #else
@@ -420,7 +444,7 @@ static void ShipProtocol_ServiceIdleYawHold(u32 now_ms)
         return;
     }
 
-    yaw_output = ShipProtocol_YawOutputToSpeed(g_ship_rt.yaw_hold_output, 0);
+    yaw_output = ShipProtocol_YawControlToSpeed(g_ship_rt.yaw_hold_output, 0);
     left_speed = ShipProtocol_LimitSpeed(yaw_output);
     right_speed = ShipProtocol_LimitSpeed((int16)(-yaw_output));
 
@@ -459,28 +483,84 @@ static int16 ShipProtocol_LimitSpeed(int16 speed)
     return speed;
 }
 
-static int16 ShipProtocol_YawOutputToSpeed(int16 yaw_output, int16 throttle_speed)
+static int16 ShipProtocol_YawErrorToControl(int16 yaw_error_cd)
+{
+    int16 sign;
+    int32 abs_error_cd;
+    int32 active_range_cd;
+    int32 control;
+
+    if (yaw_error_cd == 0) {
+        return 0;
+    }
+
+    sign = (yaw_error_cd > 0) ? 1 : -1;
+    abs_error_cd = (yaw_error_cd > 0) ? (int32)yaw_error_cd : -(int32)yaw_error_cd;
+    if (abs_error_cd <= (int32)SHIP_YAW_HOLD_DEADBAND_CD) {
+        return 0;
+    }
+
+    if ((int32)SHIP_YAW_HOLD_FULL_ERROR_CD <= (int32)SHIP_YAW_HOLD_DEADBAND_CD) {
+        return (int16)(sign * SHIP_YAW_HOLD_OUTPUT_LIMIT);
+    }
+
+    active_range_cd = (int32)SHIP_YAW_HOLD_FULL_ERROR_CD -
+                      (int32)SHIP_YAW_HOLD_DEADBAND_CD;
+    abs_error_cd -= (int32)SHIP_YAW_HOLD_DEADBAND_CD;
+    if (abs_error_cd >= active_range_cd) {
+        return (int16)(sign * SHIP_YAW_HOLD_OUTPUT_LIMIT);
+    }
+
+    control = (abs_error_cd * (int32)SHIP_YAW_HOLD_OUTPUT_LIMIT) / active_range_cd;
+    if (control > (int32)SHIP_YAW_HOLD_OUTPUT_LIMIT) {
+        control = (int32)SHIP_YAW_HOLD_OUTPUT_LIMIT;
+    }
+
+    return (int16)(sign * (int16)control);
+}
+
+static int16 ShipProtocol_YawControlToSpeed(int16 yaw_control, int16 base_speed)
 {
     int32 scale;
-    int16 yaw_speed;
-    int16 yaw_limit;
+    int32 yaw_limit;
+    int32 yaw_speed;
+    int32 diff_limit_permille;
+    int32 speed_headroom;
 
-    scale = (int32)MOTOR_SPEED_MAX;
-    if (throttle_speed > 0) {
-        scale = (int32)throttle_speed;
-    } else if (throttle_speed < 0) {
-        scale = (int32)(-throttle_speed);
+    scale = (base_speed >= 0) ? (int32)base_speed : -(int32)base_speed;
+    if (scale == 0L) {
+        scale = (int32)MOTOR_SPEED_MAX;
     }
 
-    yaw_speed = ShipProtocol_LimitSpeed((int16)(((int32)yaw_output * scale) / 100L));
-    yaw_limit = (int16)(scale / 2L);
+    diff_limit_permille = (int32)SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE;
+    if (diff_limit_permille < 0L) {
+        diff_limit_permille = 0L;
+    } else if (diff_limit_permille > 1000L) {
+        diff_limit_permille = 1000L;
+    }
+
+    yaw_limit = (scale * diff_limit_permille) / 1000L;
+    if (base_speed != 0) {
+        speed_headroom = (int32)MOTOR_SPEED_MAX - scale;
+        if (speed_headroom < 0L) {
+            speed_headroom = 0L;
+        }
+        if (yaw_limit > speed_headroom) {
+            yaw_limit = speed_headroom;
+        }
+    }
+    if (yaw_limit <= 0L) {
+        return 0;
+    }
+
+    yaw_speed = ((int32)yaw_control * yaw_limit) / (int32)SHIP_YAW_HOLD_OUTPUT_LIMIT;
     if (yaw_speed > yaw_limit) {
         yaw_speed = yaw_limit;
-    } else if (yaw_speed < (int16)(-yaw_limit)) {
-        yaw_speed = (int16)(-yaw_limit);
+    } else if (yaw_speed < -yaw_limit) {
+        yaw_speed = -yaw_limit;
     }
 
-    return yaw_speed;
+    return ShipProtocol_LimitSpeed((int16)yaw_speed);
 }
 
 static u8 ShipProtocol_AbsAxisDiff(u8 value)
@@ -988,20 +1068,25 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
                 yaw_base_speed = (int16)(-yaw_base_speed);
             }
 
-            yaw_output = ShipProtocol_YawOutputToSpeed(g_ship_rt.yaw_hold_output, yaw_base_speed);
+            yaw_output = ShipProtocol_YawControlToSpeed(g_ship_rt.yaw_hold_output, yaw_base_speed);
             left_speed = ShipProtocol_LimitSpeed((int16)(yaw_base_speed + yaw_output));
             right_speed = ShipProtocol_LimitSpeed((int16)(yaw_base_speed - yaw_output));
             target_motion = (throttle_speed >= 0) ? SHIP_MOTION_FORWARD : SHIP_MOTION_BACKWARD;
             if (log_this_sample != 0U) {
                 LOGI(SHIP_TAG,
-                     "yaw hold tgt=%d yr=%d out=%d throttle=%d base=%d steer=%d gate=%u left=%d right=%d",
+                     "yaw hold tgt=%d yr=%d err=%d in=%d pid=%d diff=%d throttle=%d base=%d steer=%d gate=%u full=%u dlim=%u left=%d right=%d",
                      g_ship_rt.yaw_hold_target_cd,
                      yaw_cd,
+                     g_ship_rt.yaw_hold_error_cd,
+                     g_ship_rt.yaw_hold_error_ctrl,
+                     g_ship_rt.yaw_hold_output,
                      yaw_output,
                      throttle_speed,
                      yaw_base_speed,
                      steering_speed,
                      (u16)SHIP_YAW_HOLD_STEER_GATE,
+                     (u16)SHIP_YAW_HOLD_FULL_ERROR_CD,
+                     (u16)SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE,
                      left_speed,
                      right_speed);
             }
@@ -2321,6 +2406,8 @@ static void ShipProtocol_InitRuntime(void)
     g_ship_rt.motor_initialized = 0U;
     g_ship_rt.yaw_hold_active = 0U;
     g_ship_rt.yaw_hold_target_cd = 0;
+    g_ship_rt.yaw_hold_error_cd = 0;
+    g_ship_rt.yaw_hold_error_ctrl = 0;
     g_ship_rt.yaw_hold_output = 0;
     g_ship_rt.yaw_hold_last_update_ms = 0UL;
     g_ship_rt.motion = SHIP_MOTION_STOP;
@@ -2340,8 +2427,8 @@ static void ShipProtocol_InitRuntime(void)
              SHIP_YAW_HOLD_KD_Q10,
              -SHIP_YAW_HOLD_OUTPUT_LIMIT,
              SHIP_YAW_HOLD_OUTPUT_LIMIT,
-             -(int32)(SHIP_YAW_HOLD_OUTPUT_LIMIT * 64),
-             (int32)(SHIP_YAW_HOLD_OUTPUT_LIMIT * 64));
+             -((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L),
+             ((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L));
 #endif
 
     LOGI(SHIP_TAG,

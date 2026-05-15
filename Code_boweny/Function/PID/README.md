@@ -144,17 +144,34 @@ right_input    = clamp(throttle_speed - steering_speed)
 yaw_hold_target_cd = current_yaw_cd
 ```
 
-后续每到 `SHIP_YAW_HOLD_PERIOD_MS` 更新一次 PID：
+后续每到 `SHIP_YAW_HOLD_PERIOD_MS` 更新一次 PID。注意这里有两套单位：
+
+- `yaw_error_cd`：真实航向误差，单位是 0.01°。
+- `yaw_error_ctrl`：进入 PID 的归一化控制量，范围是 `-SHIP_YAW_HOLD_OUTPUT_LIMIT ~ +SHIP_YAW_HOLD_OUTPUT_LIMIT`。
+
+先把角度误差按实际满量程映射到控制量：
 
 ```text
 yaw_error_cd = wrap(yaw_hold_target_cd - current_yaw_cd)
 if abs(yaw_error_cd) <= SHIP_YAW_HOLD_DEADBAND_CD:
-    yaw_error_cd = 0
+    yaw_error_ctrl = 0
+else:
+    yaw_error_ctrl =
+        sign(yaw_error_cd)
+        * (abs(yaw_error_cd) - SHIP_YAW_HOLD_DEADBAND_CD)
+        * SHIP_YAW_HOLD_OUTPUT_LIMIT
+        / (SHIP_YAW_HOLD_FULL_ERROR_CD - SHIP_YAW_HOLD_DEADBAND_CD)
 
-pid_output = PID_UpdateTarget(yaw_pid, yaw_error_cd, 0)
+yaw_error_ctrl = clamp(yaw_error_ctrl,
+                       -SHIP_YAW_HOLD_OUTPUT_LIMIT,
+                       +SHIP_YAW_HOLD_OUTPUT_LIMIT)
+
+pid_output = PID_UpdateTarget(yaw_pid, yaw_error_ctrl, 0)
 ```
 
-注意：这里 PID 的输出只是航向修正强度，不是电机油门。
+当前标定下，`SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 表示偏航 10.00° 才达到满控制输入，`SHIP_YAW_HOLD_OUTPUT_LIMIT=1000` 与 `Motor_SetSpeed()` 的满量程一致。这样不会再出现 1~2° 偏差就把 PID 打满的情况。
+
+注意：这里 PID 的输出只是归一化航向修正强度，不是电机油门。
 
 ### 5. 自稳定输出如何叠加到油门
 
@@ -166,12 +183,17 @@ if throttle_speed < 0:
     base = -base
 ```
 
-然后把 PID 输出按基础油门比例换算成差速修正：
+然后把 PID 输出按当前基础油门和最大差速比例换算成真实电机 `speed`：
 
 ```text
-yaw_output = pid_output * abs(base) / 100
-yaw_output = clamp(yaw_output, -abs(base)/2, abs(base)/2)
+yaw_limit  = abs(base) * SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE / 1000
+if base != 0:
+    yaw_limit = min(yaw_limit, MOTOR_SPEED_MAX - abs(base))
+yaw_output = pid_output * yaw_limit / SHIP_YAW_HOLD_OUTPUT_LIMIT
+yaw_output = clamp(yaw_output, -yaw_limit, +yaw_limit)
 ```
+
+当前 `SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=500`，所以 PID 满输出时差速修正最多是当前基础油门的 50%，同时还会受电机满量程余量限制。例如 `base=600` 时最大 `yaw_output=300`，最终左右最多变成 `900/300`；`base=850` 时电机上限余量只有 150，最大 `yaw_output=150`，最终最多是 `1000/700`，不会让 `base + PID` 长时间被独立夹死在满量程。
 
 最终输出：
 

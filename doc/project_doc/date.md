@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-05-13
- * @version v1.7.62
+ * @date    2026-05-15
+ * @version v1.7.63
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -41,6 +41,29 @@
 - **[船体 yaw 自稳参数收口]** `SHIP_YAW_HOLD_*` 参数统一收在 `User/FeatureSwitch.h`，并将 `SHIP_YAW_HOLD_KP_Q10` 从 `31` 下调到 `12`，保持 P-only，先把差速自稳从“偏猛”收回到可调区间。
 - **[日志节流]** `SHIP_YAW_HOLD_LOG_PERIOD_MS` 继续保留，用于限制 `[MOT]` 诊断输出频率，避免上位机被高频 motor 日志刷屏。
 - **[FeatureSwitch 中文化]** `User/FeatureSwitch.h` 重写为中文 Doxygen 风格，逐组补齐核心模块、轮询、IMU、无线、协议、配对、yaw 自稳和旧兼容参数说明，避免后续再出现“只写了一个注释”的不完整配置说明。
+
+---
+
+## [2026-05-15] - v1.7.63 手动 yaw 自稳单位与满量程修复
+
+### Bug 修复
+- **[PID 单位混用]** 手动 yaw 自稳之前直接把 `yaw_error_cd`（0.01°）喂给 PID，而 PID 输出限幅按 `±100` 百分比使用，导致刚超过 1.5° 死区就容易打满。修复：先把角度误差按 `SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 归一化到 `±SHIP_YAW_HOLD_OUTPUT_LIMIT`，再进入 PID。
+- **[差速输出锁死]** 原差速换算只按基础油门比例限幅，没有考虑 `MOTOR_SPEED_MAX - abs(base)` 的真实余量，高油门下 `base + PID` 会被电机满量程长期夹死。修复：差速上限同时受 `SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE` 和电机剩余余量约束。
+- **[诊断信息不足]** `[MOT]` 和 yaw-hold 日志之前只显示 `yaw/out/left/right`，无法直接判断是角度误差、归一输入、PID 输出还是差速映射出问题。修复：增加 `tgt/err/in/pid/diff/base` 等字段。
+
+### 优化改进
+- **[控制量程统一]** `SHIP_YAW_HOLD_OUTPUT_LIMIT` 调整为 `1000`，与 `Motor_SetSpeed()` 的 `±1000` 满量程统一；`SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 表示 10.00° 偏航达到满控制输入。
+- **[参数收敛]** 手动自稳维持 P-only：`SHIP_YAW_HOLD_KP_Q10=1024`、`SHIP_YAW_HOLD_KD_Q10=0`、`SHIP_YAW_HOLD_DEADBAND_CD=80`，避免微分噪声和小角度误差直接打满。
+- **[高油门保护]** `SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=500` 表示满 PID 输出最多给当前基础油门 50% 差速，同时仍保证不超过电机上限余量。
+
+### 变更记录
+- **[ship_protocol.c]** 新增 `ShipProtocol_YawErrorToControl()` 和 `ShipProtocol_YawControlToSpeed()`，把 yaw 控制链路拆成“角度误差归一化”和“PID 输出转电机差速”两层。
+- **[FeatureSwitch.h]** 同步新增 `SHIP_YAW_HOLD_FULL_ERROR_CD`、`SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE`，并更新 yaw-hold 参数。
+- **[PID README / total.md]** 同步记录手动自稳真实流程、单位、满量程和高油门余量限制。
+
+### 开发者备注
+- 遥控器 `0x11` 油门目标更新仍只跟随油门帧；底层电机 PWM 仍由硬件定时器按 PWM 频率连续输出。
+- 当前修复目标是让自稳定输出进入线性可调区，不再“偏一点就单侧锁死”；若现场修正方向相反，应优先核对 yaw 正方向与左右电机转向映射。
 
 ---
 

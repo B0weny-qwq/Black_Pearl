@@ -82,7 +82,24 @@
  * @brief  差速输出限幅
  * @details 左右电机差速总输出限制，防止 yaw 修正过猛。
  */
-#define SHIP_YAW_HOLD_OUTPUT_LIMIT     100
+#define SHIP_YAW_HOLD_OUTPUT_LIMIT     1000
+
+/**
+ * @brief  yaw 自稳达到满修正输入的偏航误差（centi-degree）
+ * @details
+ * - 单位为 0.01 度，1000 表示 10.00 度
+ * - yaw 误差会先归一化到 -1000 ~ +1000，再进入 PID
+ * - 这样 PID 数值和电机 speed 满量程保持一致，避免小角度直接顶满
+ */
+#define SHIP_YAW_HOLD_FULL_ERROR_CD    1000
+
+/**
+ * @brief  yaw 自稳最大差速比例（permille）
+ * @details
+ * - 500 表示 PID 满输出时，差速修正最多为当前基础油门的 50%
+ * - 可防止自稳态把单侧电机直接压死或拉满
+ */
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 500
 
 /**
  * @brief  手动自稳的转向门限
@@ -99,13 +116,13 @@
  * - Q10 定点
  * - 当前值偏保守，先保证不明显过冲
  */
-#define SHIP_YAW_HOLD_KP_Q10           2048
+#define SHIP_YAW_HOLD_KP_Q10           1024
 
 /**
  * @brief  yaw 自稳误差死区（centi-degree）
  * @details 小误差直接忽略，降低静止抖动和输出突增
  */
-#define SHIP_YAW_HOLD_DEADBAND_CD      150
+#define SHIP_YAW_HOLD_DEADBAND_CD      80
 
 /**
  * @brief  yaw 自稳积分增益
@@ -117,7 +134,7 @@
  * @brief  yaw 自稳微分增益
  * @details 当前关闭，避免噪声放大。
  */
-#define SHIP_YAW_HOLD_KD_Q10           256
+#define SHIP_YAW_HOLD_KD_Q10           0
 /** @} */
 
 /* Core modules */
