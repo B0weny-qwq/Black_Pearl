@@ -73,6 +73,12 @@ void Motor_SetSpeed(Motor_Id_t motor, int16 speed);
 void Motor_SetBothSpeed(int16 left_speed, int16 right_speed);
 
 /**
+ * @brief   将最新全局目标速度刷新到底层 PWM 输出。
+ * @return  none
+ */
+void Motor_Service(void);
+
+/**
  * @brief      停止指定电机。
  * @param[in]  motor  电机编号，取值见 Motor_Id_t。
  * @return     none

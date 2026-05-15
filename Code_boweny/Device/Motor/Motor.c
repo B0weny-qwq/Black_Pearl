@@ -18,6 +18,9 @@
 static PWMx_Duty g_motor_pwm_duty;
 static int16 g_left_speed = 0;
 static int16 g_right_speed = 0;
+static int16 g_left_target_speed = 0;
+static int16 g_right_target_speed = 0;
+static u8 g_motor_ready = 0U;
 
 static u16 Motor_SpeedToDuty(int16 speed)
 {
@@ -82,10 +85,8 @@ static void Motor_RightOutputEnable(u8 enable)
     }
 }
 
-static void Motor_LeftSetForwardPolarity(u8 forward)
+static void Motor_LeftSetForwardPolarity(void)
 {
-    (void)forward;
-
     /* Left motor wiring is fixed on the board:
      * PWM3N -> MLA -> HIN, PWM3P -> MLB -> LIN#
      * To get a real complementary pair at the pins, HIN must see the
@@ -94,16 +95,49 @@ static void Motor_LeftSetForwardPolarity(u8 forward)
     PWMA_CC3NP_LowValid();
 }
 
-static void Motor_RightSetForwardPolarity(u8 forward)
+static void Motor_RightSetForwardPolarity(void)
 {
-    (void)forward;
-
     /* Right motor wiring is mirrored on the board:
      * PWM4P -> MRB -> HIN, PWM4N -> MRA -> LIN#
      * Keep both outputs in high-valid polarity so the P/N hardware
      * complement maps directly to HIN/LIN# active levels. */
     PWMA_CC4P_HighValid();
     PWMA_CC4NP_HighValid();
+}
+
+static void Motor_ApplySpeed(Motor_Id_t motor, int16 speed)
+{
+    u16 duty;
+
+    speed = Motor_LimitSpeed(speed);
+    if (speed == 0) {
+        if (motor == MOTOR_LEFT) {
+            g_motor_pwm_duty.PWM3_Duty = MOTOR_PWM_PERIOD / 2U;
+            UpdatePwm(PWM3, &g_motor_pwm_duty);
+            Motor_LeftOutputEnable(0);
+            g_left_speed = 0;
+        } else {
+            g_motor_pwm_duty.PWM4_Duty = MOTOR_PWM_PERIOD / 2U;
+            UpdatePwm(PWM4, &g_motor_pwm_duty);
+            Motor_RightOutputEnable(0);
+            g_right_speed = 0;
+        }
+        return;
+    }
+
+    duty = Motor_SpeedToDuty(speed);
+
+    if (motor == MOTOR_LEFT) {
+        g_motor_pwm_duty.PWM3_Duty = duty;
+        UpdatePwm(PWM3, &g_motor_pwm_duty);
+        Motor_LeftOutputEnable(1);
+        g_left_speed = speed;
+    } else {
+        g_motor_pwm_duty.PWM4_Duty = duty;
+        UpdatePwm(PWM4, &g_motor_pwm_duty);
+        Motor_RightOutputEnable(1);
+        g_right_speed = speed;
+    }
 }
 
 void Motor_Init(void)
@@ -143,10 +177,15 @@ void Motor_Init(void)
     PWMA_OC4_OUT_0();
     PWMA_OC4N_OUT_0();
 
-    Motor_LeftSetForwardPolarity(1);
-    Motor_RightSetForwardPolarity(1);
+    Motor_LeftSetForwardPolarity();
+    Motor_RightSetForwardPolarity();
     Motor_LeftOutputEnable(0);
     Motor_RightOutputEnable(0);
+    g_left_speed = 0;
+    g_right_speed = 0;
+    g_left_target_speed = 0;
+    g_right_target_speed = 0;
+    g_motor_ready = 1U;
     Motor_StopAll();
 
     NVIC_PWM_Init(PWMA, DISABLE, Priority_0);
@@ -154,47 +193,36 @@ void Motor_Init(void)
 
 void Motor_SetSpeed(Motor_Id_t motor, int16 speed)
 {
-    u16 duty;
-
     speed = Motor_LimitSpeed(speed);
-    if (speed == 0) {
-        Motor_Stop(motor);
-        return;
-    }
-
-    duty = Motor_SpeedToDuty(speed);
-
     if (motor == MOTOR_LEFT) {
-        g_motor_pwm_duty.PWM3_Duty = duty;
-        UpdatePwm(PWM3, &g_motor_pwm_duty);
-        Motor_LeftOutputEnable(1);
-        g_left_speed = speed;
+        g_left_target_speed = speed;
     } else {
-        g_motor_pwm_duty.PWM4_Duty = duty;
-        UpdatePwm(PWM4, &g_motor_pwm_duty);
-        Motor_RightOutputEnable(1);
-        g_right_speed = speed;
+        g_right_target_speed = speed;
     }
 }
 
 void Motor_SetBothSpeed(int16 left_speed, int16 right_speed)
 {
-    Motor_SetSpeed(MOTOR_LEFT, left_speed);
-    Motor_SetSpeed(MOTOR_RIGHT, right_speed);
+    g_left_target_speed = Motor_LimitSpeed(left_speed);
+    g_right_target_speed = Motor_LimitSpeed(right_speed);
+}
+
+void Motor_Service(void)
+{
+    if (g_motor_ready == 0U) {
+        return;
+    }
+
+    Motor_ApplySpeed(MOTOR_LEFT, g_left_target_speed);
+    Motor_ApplySpeed(MOTOR_RIGHT, g_right_target_speed);
 }
 
 void Motor_Stop(Motor_Id_t motor)
 {
     if (motor == MOTOR_LEFT) {
-        g_motor_pwm_duty.PWM3_Duty = MOTOR_PWM_PERIOD / 2U;
-        UpdatePwm(PWM3, &g_motor_pwm_duty);
-        Motor_LeftOutputEnable(0);
-        g_left_speed = 0;
+        g_left_target_speed = 0;
     } else {
-        g_motor_pwm_duty.PWM4_Duty = MOTOR_PWM_PERIOD / 2U;
-        UpdatePwm(PWM4, &g_motor_pwm_duty);
-        Motor_RightOutputEnable(0);
-        g_right_speed = 0;
+        g_right_target_speed = 0;
     }
 }
 

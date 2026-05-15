@@ -5,6 +5,7 @@
 #include "..\Code_boweny\Device\QMC6309\QMC6309.h"
 #include "..\Code_boweny\Device\QMI8658\QMI8658.h"
 #include "..\Code_boweny\Device\GPS\GPS.h"
+#include "..\Code_boweny\Device\Motor\Motor.h"
 #include "..\Code_boweny\Device\WIRELESS\wireless.h"
 #include "..\Code_boweny\Device\WIRELESS\ship_protocol.h"
 #include "..\Code_boweny\Function\AHRS\AHRS.h"
@@ -655,5 +656,6 @@ void MainLoop_RunOnce(void)
     }
 #endif
 
+    Motor_Service();
     Task_Pro_Handler_Callback();
 }
