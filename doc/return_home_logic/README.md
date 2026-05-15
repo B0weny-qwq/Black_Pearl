@@ -1,442 +1,356 @@
 # 返航与循迹逻辑整理
 
-这份文档把两个版本的返航/去点逻辑单独拎出来：
+这份文档只回答一件事：当前工程和老工程在返航/去点/GPS 回传上，到底要求什么数据格式，哪些地方必须严格对齐，哪些地方不能随便改。
+
+对照版本：
 
 - 当前工程：`Black_Pearl_v1.1`
 - 老工程：`ship_Gps_V2.1_20260406-115200`
+- 这次确认的“GPS 格式正确”参考提交：`0c972b1`，时间是 `2026-05-07 14:27:18 +0800`
 
-重点只看三件事：
+最关键结论先写在前面：
 
-- 返航/去点命令是从哪里收进来的
-- 关键数据字段长什么样
-- 状态机是怎么启动、运行、退出的
+1. `0x12` GPS 回传和 `0x13/0x14/0x15` 点位下发都按大端处理。
+2. `0x12` 必须按老工程回传格式发，否则手持/上位机会把经纬度显示错。
+3. `0x13/0x14/0x15` 必须按遥控器协议的大端点位格式收，否则返航/去点会存错点位。
+4. 返航能不能真正跑起来，除了字节序，还取决于 GPS、卫星数、距离门槛是否满足。
 
 ---
 
-## 1. 当前工程逻辑
-
-### 1.1 调用链总图
-
-当前工程里，返航不是独立主循环，而是挂在 `ShipProtocol` 调度里跑。
+## 1. 当前工程调用关系
 
 ```mermaid
 flowchart TD
-    A["main()"] --> B["SYS_Init()"]
-    B --> C["MainLoop_Bootstrap()"]
-    C --> D["while(1) MainLoop_RunOnce()"]
+    A["main()"] --> B["MainLoop_RunOnce()"]
+    B --> C["GPS_Poll()"]
+    B --> D["Wireless_Poll()"]
+    B --> E["ShipProtocol_RunScheduler()"]
 
-    D --> E["GPS_Poll()"]
-    D --> F["Wireless_Poll()"]
-    D --> G["ShipProtocol_RunScheduler()"]
+    E --> F["解析 AA | len | cmd | payload | xor | BB"]
+    F --> G["0x11 手动控制"]
+    F --> H["0x13 设置返航点并尝试返航"]
+    F --> I["0x14 设置目标点并尝试去点"]
+    F --> J["0x15 保存自动返航开关/返航点"]
 
-    G --> G1["首次进入: ShipProtocol_InitRuntime()"]
-    G1 --> G2["AutoDrive_Init()"]
+    H --> H1["AutoDrive_SetReturnPositionRaw()"]
+    I --> I1["AutoDrive_SetFishPositionRaw()"]
+    J --> J1["AutoDrive_SetSwitchRaw()"]
 
-    G --> H["解析无线协议帧"]
-    H --> H1["0x11 手动控制"]
-    H1 --> H2["AutoDrive_LinkAliveKick()"]
+    E --> K["低电检查"]
+    K --> K1["AutoDrive_TriggerReturn()"]
 
-    H --> H3["0x13 设置返航点并尝试返航"]
-    H3 --> H4["AutoDrive_SetReturnPositionRaw()"]
+    E --> L["链路保活计时"]
+    L --> L1["AutoDrive_LinkAliveTick()"]
+    L1 --> L2["超时触发 AutoDrive_TriggerReturn()"]
 
-    H --> H5["0x14 设置目标点并尝试去点"]
-    H5 --> H6["AutoDrive_SetFishPositionRaw()"]
-
-    H --> H7["0x15 设置自动返航开关/保存返航点"]
-    H7 --> H8["AutoDrive_SetSwitchRaw()"]
-
-    G --> I["低电检查"]
-    I --> I1["AutoDrive_TriggerReturn()"]
-
-    G --> J["链路保活计时"]
-    J --> J1["AutoDrive_LinkAliveTick()"]
-    J1 --> J2["超时后 AutoDrive_TriggerReturn()"]
-
-    G --> K["AutoDrive_Poll()"]
+    E --> M["AutoDrive_Poll()"]
+    F --> N["处理完任意合法命令后回 0x12"]
 ```
 
-### 1.2 当前工程关键接收数据
+---
 
-#### A. `0x13` 设置返航点并立即尝试返航
+## 2. 当前工程关键协议要求
 
-payload 长度：`10` 字节
+## 2.1 `0x12` GPS 回传要求
+
+`0x12` 是船发给手持/上位机的 GPS 状态帧，固定 `15` 字节 payload。
+
+当前工程已经按老工程 `0c972b1` 对齐，要求如下：
+
+| 偏移 | 字段 | 长度 | 要求 |
+|------|------|------|------|
+| `0` | `sat_count` | 1 | 优先用 `satellites_used_gsa`，否则 `satellites_used`，最大截到 `24` |
+| `1..2` | `angle` | 2 | `GPS course` 的整数角度，`高字节在前` |
+| `3` | `lon_dir` | 1 | 固定写 `'E'` |
+| `4..5` | `lon1` | 2 | 经度整数段 `dddmm`，`高字节在前` |
+| `6..7` | `lon2` | 2 | 经度小数段 `mmmm`，`高字节在前` |
+| `8` | `lat_dir` | 1 | 固定写 `'W'` |
+| `9..10` | `lat1` | 2 | 纬度整数段 `ddmm`，`高字节在前` |
+| `11..12` | `lat2` | 2 | 纬度小数段 `mmmm`，`高字节在前` |
+| `13` | `power_level` | 1 | 电量等级 `0..4` |
+| `14` | `auto_state` | 1 | `0=未自动驾驶`，`1=返航`，`2=去目标点` |
+
+### 重要说明
+
+1. `0x12` 的 5 个 `u16` 字段：
+   - `angle`
+   - `lon1`
+   - `lon2`
+   - `lat1`
+   - `lat2`
+   都必须是 `高字节在前`。
+
+2. `0x12` 的方向字节不能写真实半球。
+   老手持解析就是按固定字节位读的，当前工程也必须继续发：
+   - 经度方向固定 `'E'`
+   - 纬度方向固定 `'W'`
+
+3. 真正的南北/东西半球信息仍然保留在运行日志里，用于调试，不放进 `0x12` 方向字节。
+
+4. `angle` 目前严格对齐 `0c972b1`：
+   - 直接使用 `gps->course_deg_x100 / 100U`
+   - 不再混用当前 AHRS/融合航向
+
+5. 坐标优先级：
+   - 优先使用 `GPS.c` 解析出的 `legacy_lon1/lon2/lat1/lat2`
+   - 如果原始 NMEA 拆分不可用，再由 `deg1e7` 反算成旧格式 `dddmm.mmmm / ddmm.mmmm`
+
+### `0x12` payload 示例布局
 
 ```text
-byte0   lon_dir         'E' / 'W'
-byte1   lon_whole_L
-byte2   lon_whole_H
-byte3   lon_frac_L
-byte4   lon_frac_H
-byte5   lat_dir         'N' / 'S'
-byte6   lat_whole_L
-byte7   lat_whole_H
-byte8   lat_frac_L
-byte9   lat_frac_H
+byte0   sat_count
+byte1   angle_H
+byte2   angle_L
+byte3   'E'
+byte4   lon1_H
+byte5   lon1_L
+byte6   lon2_H
+byte7   lon2_L
+byte8   'W'
+byte9   lat1_H
+byte10  lat1_L
+byte11  lat2_H
+byte12  lat2_L
+byte13  power_level
+byte14  auto_state
 ```
 
-说明：
+### 看到 GPS 格式错误时优先检查什么
 
-- 当前工程现在已经对齐老工程
-- 这 4 个 `u16` 字段按“低字节在前”解析
-- 也就是原始 `GPS_POSITION` 内存字节布局
+1. 上位机/手持是不是把 `0x12` 的 `u16` 字段按小端解了。
+2. 有没有把 `lon_dir/lat_dir` 改成真实 `E/W/N/S`。
+3. 有没有把 `angle` 又改回 AHRS/融合航向。
 
-#### B. `0x14` 设置目标点并立即尝试去点
+---
 
-payload 格式和 `0x13` 完全一样，也是 `10` 字节点位。
+## 2.2 `0x13` 设置返航点要求
 
-#### C. `0x15` 设置自动返航开关 / 保存返航点
+`0x13` 是手持/上位机发给船端的返航点，下发 payload 固定 `10` 字节。
 
-payload 有两种常用长度：
+这里按遥控器协议的大端点位格式收，也就是 `高字节在前`。
 
-- `1` 字节：只改开关
-- `11` 字节：开关 + 返航点
+| 偏移 | 字段 | 长度 | 要求 |
+|------|------|------|------|
+| `0` | `lon_dir` | 1 | `'E'` 或 `'W'` |
+| `1..2` | `lon_whole` | 2 | `高字节在前` |
+| `3..4` | `lon_frac` | 2 | `高字节在前` |
+| `5` | `lat_dir` | 1 | `'N'` 或 `'S'` |
+| `6..7` | `lat_whole` | 2 | `高字节在前` |
+| `8..9` | `lat_frac` | 2 | `高字节在前` |
+
+payload 布局：
+
+```text
+byte0   lon_dir
+byte1   lon_whole_H
+byte2   lon_whole_L
+byte3   lon_frac_H
+byte4   lon_frac_L
+byte5   lat_dir
+byte6   lat_whole_H
+byte7   lat_whole_L
+byte8   lat_frac_H
+byte9   lat_frac_L
+```
+
+收到后调用：
+
+- `AutoDrive_SetReturnPositionRaw()`
+
+---
+
+## 2.3 `0x14` 设置目标点要求
+
+`0x14` 是钓点/目标点命令，和 `0x13` 完全同格式，也是 `10` 字节，也是 `高字节在前`。
+
+收到后调用：
+
+- `AutoDrive_SetFishPositionRaw()`
+
+---
+
+## 2.4 `0x15` 自动返航开关/保存返航点要求
+
+`0x15` 有两种常见长度：
+
+1. `1` 字节：只改自动返航开关
+2. `11` 字节：开关 + 返航点
+
+### 只带开关时
+
+```text
+byte0   auto_ret_onoff
+```
+
+### 带返航点时
 
 ```text
 byte0   auto_ret_onoff
 byte1   lon_dir
-byte2   lon_whole_L
-byte3   lon_whole_H
-byte4   lon_frac_L
-byte5   lon_frac_H
+byte2   lon_whole_H
+byte3   lon_whole_L
+byte4   lon_frac_H
+byte5   lon_frac_L
 byte6   lat_dir
-byte7   lat_whole_L
-byte8   lat_whole_H
-byte9   lat_frac_L
-byte10  lat_frac_H
+byte7   lat_whole_H
+byte8   lat_whole_L
+byte9   lat_frac_H
+byte10  lat_frac_L
 ```
+
+这里返航点的 4 个 `u16` 也必须是 `高字节在前`。
 
 开关语义：
 
 - `0x30`：关闭自动返航
 - `!= 0x30`：允许自动返航触发
 
-#### D. `0x12` 上报给遥控/上位机的 GPS 状态
+收到后调用：
 
-当前工程发出去的 `0x12` 也是老格式，关键是它和 `0x13/0x14/0x15` 现在已经一致。
-
-payload 长度：`15` 字节
-
-```text
-byte0   sat_count
-byte1   angle_L
-byte2   angle_H
-byte3   lon_dir
-byte4   lon_whole_L
-byte5   lon_whole_H
-byte6   lon_frac_L
-byte7   lon_frac_H
-byte8   lat_dir
-byte9   lat_whole_L
-byte10  lat_whole_H
-byte11  lat_frac_L
-byte12  lat_frac_H
-byte13  power_level
-byte14  auto_state
-```
-
-这点很关键：
-
-- `0x12` 回传是老格式
-- `0x13/0x14/0x15` 接收现在也按老格式
-- 所以“回传点位再原样存回去”这条链现在是通的
-
-#### E. `0x16` 上报给上位机的返航诊断状态
-
-这是当前工程新增的诊断上行帧，专门给上位机显示和落盘记录用。
-
-payload 固定 `36` 字节：
-
-```text
-byte0   diag_version           当前为 0x01
-byte1   autodrive_state
-byte2   autodrive_mode
-byte3   auto_ret_onoff
-byte4   fail_flag
-byte5   last_reason
-byte6   gps_ready
-byte7   sat_count
-byte8   can_activate_target
-byte9   reserved
-byte10  distance_to_target_L
-byte11  distance_to_target_H
-byte12  current_heading_L
-byte13  current_heading_H
-byte14  target_heading_L
-byte15  target_heading_H
-byte16  current_point[0]
-...
-byte25  current_point[9]
-byte26  target_point[0]
-...
-byte35  target_point[9]
-```
-
-其中：
-
-- `current_point[10]` 和 `target_point[10]` 都是老工程点位格式
-- 也就是：
-  `dir + whole_L + whole_H + frac_L + frac_H + dir + whole_L + whole_H + frac_L + frac_H`
-
-`last_reason` 当前约定：
-
-- `0` 无
-- `1` 收到 `0x13`
-- `2` 收到 `0x14`
-- `3` 收到 `0x15` 并保存返航点
-- `4` 链路超时触发返航
-- `5` 低电触发返航
-- `6` 通用返航触发
-- `7` 到点结束
-- `8` 超时失败
-- `9` 主动停止/关闭
-
-### 1.3 当前工程返航启动条件
-
-进入返航/去点前，会过 `AutoDrive_IsCanActive()`。
-
-必须同时满足：
-
-- 当前状态是 `AUTO_DRIVE_IDLE`
-- 目标点合法：`lon_dir` 必须是 `E/W`，`lon_whole != 0`
-- 当前 GPS 点合法
-- 卫星数 `>= 7`
-- 当前经纬度不为 `0`
-- 当前点到目标点距离 `> 10m`
-- 当前点到目标点距离 `< 800m`
-
-自动返航触发入口有两类：
-
-- 主动命令触发：`0x13`
-- 被动触发：
-  - 低电时 `AutoDrive_TriggerReturn()`
-  - 链路超时约 `30s` 时 `AutoDrive_TriggerReturn()`
-
-### 1.4 当前工程状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> START: 0x13 / 0x14 / TriggerReturn\n且 IsCanActive==1
-    START --> GET_DIRECTION
-    GET_DIRECTION --> RUNNING
-    RUNNING --> IDLE: 到点(<3m)
-    RUNNING --> IDLE: 超时失败
-    RUNNING --> GET_DIRECTION: 过程中再次需要转向
-```
-
-状态说明：
-
-- `IDLE`：待机，持续刷新当前 GPS 位置为 idle 点
-- `START`：刚启动，先计算目标大方向
-- `GET_DIRECTION`：先原地/小角度修正方向
-- `RUNNING`：边跑边根据新 GPS 点修正航向
-
-### 1.5 当前工程航向来源
-
-当前工程现在已经按“老工程思路”拆成两段：
-
-1. `START` 起步调头阶段：
-
-   - 优先用 `AHRS` 朝向，作为老工程罗盘角 `nowAveAngel` 的等价来源
-   - 如果 `AHRS` 不可用，再退回 `GPS course`
-   - 都不可用时按 `0` 度处理
-
-2. `RUNNING` 运行修正阶段：
-
-   - 优先用 `GPS course`
-   - 如果 `GPS course` 不可用，再退回“上一点 -> 当前点”的点位差分航向
-
-这和老工程的原意基本一致：
-
-- 起步先看罗盘/姿态角
-- 跑起来优先看 GPS 角度
-- GPS 角度拿不到再用两次 GPS 点差来估算
+- `AutoDrive_SetSwitchRaw()`
 
 ---
 
-## 2. 老工程逻辑
+## 3. 为什么现在统一按大端
 
-### 2.1 调用链总图
+这次以遥控器协议为准：我们这里就是大端协议。
 
-老工程是典型 10ms 超级循环，返航逻辑直接在主循环里跑。
+当前工程统一成：
 
-```mermaid
-flowchart TD
-    A["main()"] --> B["System_Config_Init()"]
-    B --> C["LT89xx_INIT()"]
-    C --> D["Compass_Init()"]
-    D --> E["autodrv_init()"]
-    E --> F["while(1)"]
+1. `0x12` 回传：`高字节在前`
+2. `0x13/0x14/0x15` 下发：`高字节在前`
+3. `0x16` 诊断上报里的点位字段：`高字节在前`
 
-    F --> G["10ms tick"]
-    G --> H["Radio_progress()"]
-    H --> H1["接收无线包"]
-    H1 --> H2["WirelessProtocal_Resolve_Handle()"]
-
-    H2 --> H3["0x13 -> autoDrive_Set_ReturnPosition()"]
-    H2 --> H4["0x14 -> autoDrive_Set_FishPosition()"]
-    H2 --> H5["0x15 -> autoDrive_Set_Switch()"]
-
-    G --> I["Gps_Uart_Data_Resolve()"]
-    G --> J["autoDrive_Handle()"]
-    G --> K["WirelessProtocal_Accelerator_OutTime_Handle()"]
-    K --> K1["30s失联 -> autoDrive_active()"]
-    K --> K2["低电 -> autoDrive_active()"]
-```
-
-### 2.2 老工程关键接收数据
-
-老工程 `0x13 / 0x14 / 0x15` 的点位格式本质上也是同一套 `GPS_POSITION` 原始字节流。
-
-#### A. `0x13` 设置返航点
-
-老工程直接：
-
-```c
-memcpy((uint8_t *)&returnPosition, data_m, sizeof(GPS_POSITION));
-```
-
-也就是说：
-
-- 根本没有大端/小端转换
-- 收到什么字节，就按结构体原样落进去
-
-#### B. `0x14` 设置目标点
-
-同样直接：
-
-```c
-memcpy((uint8_t *)&fishPosition, data_m, sizeof(GPS_POSITION));
-```
-
-#### C. `0x15` 设置开关并保存返航点
-
-老工程逻辑：
-
-```c
-autodrv_cfg.auto_ret_onoff = data_m[0];
-memcpy((uint8_t *)&autodrv_cfg.ret_point, &data_m[1], sizeof(GPS_POSITION));
-```
-
-这里要注意一件事：
-
-- 老工程默认假设 `0x15` payload 足够长
-- 它没有像当前工程这样先检查 `len >= 11`
-
-#### D. 老工程 `0x12` GPS 上报
-
-老工程发 `0x12` 时，也是把各个 `uint16_t` 直接 `memcpy` 进 payload。
-
-所以老工程的本质规则是：
-
-- 上报坐标：原始结构体字节序
-- 接收点位：原始结构体字节序
-- 存点：原始结构体字节序
-
-这就是老工程能正常返航的根本原因。
-
-### 2.3 老工程返航启动条件
-
-老工程 `autoDrive_is_can_active()` 的门槛和当前工程非常接近：
-
-- 当前状态必须是 `AUTO_DRIVE_IDLE`
-- 目标点经度方向必须是 `E/W`
-- `jingdu_Left != 0`
-- `idle_Gps_Position.jingdu_Left != 0`
-- GPS 卫星数 `>= 7`
-- 距离 `> 10m`
-- 距离 `< 800m`
-
-自动返航触发来源：
-
-- 收到 `0x13`
-- `WirelessProtocal_Accelerator_OutTime_Handle()` 检测到失联约 `30s`
-- 低电时调用 `autoDrive_active()`
-
-### 2.4 老工程状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> START: 0x13 / 0x14 / autoDrive_active()
-    START --> GET_DIRECTION
-    GET_DIRECTION --> RUNNING
-    RUNNING --> IDLE: 到点(<3m)
-    RUNNING --> IDLE: 超时失败
-```
-
-状态名称和当前工程基本一致：
-
-- `AUTO_DRIVE_IDLE`
-- `AUTO_DRIVE_START`
-- `AUTO_DRIVE_GET_DIRECTION`
-- `AUTO_DRIVE_RUNING`
-
-### 2.5 老工程航向来源
-
-老工程偏“传统 GPS/罗盘混合”：
-
-- 起步方向更依赖罗盘平均角 `nowAveAngel`
-- 运行中优先取 `nmea41_Get_Angel()`
-- GPS 角度不可用时，再退回用两次 GPS 点差计算航向
-
-和当前工程相比：
-
-- 老工程没有现在这套 AHRS 优先级封装
-- 当前工程航向接口更规整
+这样上位机/遥控器按同一种点位格式组包，船端日志、保存点位、返航、去钓点都会按同一个数值解释。
 
 ---
 
-## 3. 当前版和老版的核心差异
+## 4. 返航能否工作的真正门槛
 
-### 3.1 已经对齐的部分
-
-- `0x13 / 0x14 / 0x15` 点位接收格式已经对齐老工程
-- 当前工程现在按老工程那种原始字节流解释点位
-- 因此和 `0x12` 回传格式重新一致
-- `START` 起步调头优先级已经调回老工程思路
-- `RUNNING` 运行中航向来源已经调回“GPS 优先，点差兜底”
-- “位移太小先直跑”的门槛已经调回老工程那种 1 米级判断
-
-### 3.2 仍然存在的架构差异
-
-- 当前工程把返航挂进 `ShipProtocol_RunScheduler()`
-- 老工程是在 10ms 超级循环里直接跑 `autoDrive_Handle()`
-- 当前工程航向源更偏 `GPS + AHRS`
-- 老工程航向源更偏 `GPS + 罗盘`
-- 当前工程 `0x15` 存点前会检查长度
-- 老工程默认 `0x15` 一定带完整点位
-
-### 3.3 对返航能否工作的影响
-
-真正决定“能不能返航”的最关键点有两个：
+决定“能不能返航”的关键点有两个：
 
 1. 点位字节序必须一致
 2. GPS/卫星/距离门槛必须满足
 
-如果要继续往“返航跑得像不像老工程”这条线看，下一层关键点是：
+### 4.1 点位字节序必须一致
 
-3. 起步调头时的朝向来源要接近老工程
-4. 运行中航向修正优先级要接近老工程
+如果 `0x13/0x14/0x15` 收到的点位解析错了，会出现：
 
-当前工程现在已经把这 4 点都收回到老工程思路附近了。
+- 存进去的返航点经纬度异常
+- 计算距离异常
+- 计算方向异常
+- 看起来收到命令了，但就是不进入返航/去点
+
+如果 `0x12` 回传字节序错了，会出现：
+
+- 手持/上位机显示经纬度错位
+- 显示出来的角度不对
+- 但不一定影响船端自己返航
+
+### 4.2 GPS/卫星/距离门槛必须满足
+
+当前工程进入返航/去点前，会经过 `AutoDrive_IsCanActive()`，要求至少满足：
+
+- 当前状态必须是 `AUTO_DRIVE_IDLE`
+- 目标点方向有效：经度方向必须是 `E/W`
+- 目标点经度整数段不能为 `0`
+- 当前 GPS 可用
+- 卫星数至少 `7`
+- 当前经纬度不能全零
+- 当前点到目标点距离 `> 10m`
+- 当前点到目标点距离 `< 800m`
+
+所以“收到了 `0x13`”不等于“一定返航”。
 
 ---
 
-## 4. 关键文件
+## 5. 当前工程与老工程对齐状态
+
+## 5.1 已严格对齐老工程的部分
+
+- `0x12` 的 `u16` 字段已恢复成老工程 `高字节在前`
+- `0x12` 的角度来源已恢复成老工程 `GPS course`
+- `0x12` 的方向字节继续固定 `'E'` / `'W'`
+- `0x13/0x14/0x15` 点位收包已统一为遥控器协议大端，也就是 `高字节在前`
+- `0x13/0x14/0x15` 收到后都走当前 `AutoDrive` 真实入口
+
+## 5.2 不能再随便改的点
+
+1. 不要把 `0x12` 的 `u16` 改成低字节在前。
+2. 不要把 `0x13/0x14/0x15` 的点位 `u16` 改成低字节在前。
+3. 不要把 `0x12` 的方向字节改成真实半球。
+4. 不要把 `0x12` 的角度源换成 AHRS/融合航向后又不更新手持协议。
+5. 不要以为“回传格式正确”就等于“返航一定会跑”，还要检查 GPS 门槛。
+
+---
+
+## 6. 联调时建议怎么验
+
+## 6.1 验 `0x12`
+
+看上位机/手持是否按下面方式解包：
+
+```text
+angle = (byte1 << 8) | byte2
+lon1  = (byte4 << 8) | byte5
+lon2  = (byte6 << 8) | byte7
+lat1  = (byte9 << 8) | byte10
+lat2  = (byte11 << 8) | byte12
+```
+
+如果它按下面这种解，就一定错：
+
+```text
+angle = (byte2 << 8) | byte1
+```
+
+## 6.2 验 `0x13/0x14/0x15`
+
+看上位机发点位时是否按下面方式组包：
+
+```text
+lon_whole_H, lon_whole_L
+lon_frac_H,  lon_frac_L
+lat_whole_H, lat_whole_L
+lat_frac_H,  lat_frac_L
+```
+
+如果它发成低字节在前，船端存点就会错。
+
+## 6.3 验返航门槛
+
+发完点位后，如果没返航，优先查：
+
+1. 当前 GPS 是否有效
+2. 卫星数是否 `>= 7`
+3. 当前点和目标点距离是否在 `10m ~ 800m`
+4. 当前状态是否已经不在 `AUTO_DRIVE_IDLE`
+
+---
+
+## 7. 关键文件
 
 当前工程：
 
-- `User/Main.c`
-- `User/MainLoop.c`
 - `Code_boweny/Device/WIRELESS/ship_protocol.c`
 - `Code_boweny/Device/AutoDrive/autodrive.c`
-- `Code_boweny/Device/AutoDrive/autodrive_cfg.c`
 - `Code_boweny/Device/GPS/GPS.c`
+- `Code_boweny/Device/AutoDrive/autodrive_cfg.c`
 
 老工程：
 
-- `ship_Gps_V2.1_20260406-115200/App/Main/main.c`
 - `ship_Gps_V2.1_20260406-115200/App/Wireless/wirelessProtocal.c`
 - `ship_Gps_V2.1_20260406-115200/App/AutoDrive/autoDrive.c`
-- `ship_Gps_V2.1_20260406-115200/App/Gps/nmea41_protocal.h`
+
+## 8. 本次文档更新目的
+
+这份 README 现在明确写死了下面这条规则，后面改协议时必须先看这里：
+
+- `0x12`：显示协议，`高字节在前`
+- `0x13/0x14/0x15`：存点协议，`高字节在前`
+
+只要把这条弄反，马上就会出现：
+
+- 手持显示经纬度错误
+- 上位机存点错误
+- 返航/去点不生效

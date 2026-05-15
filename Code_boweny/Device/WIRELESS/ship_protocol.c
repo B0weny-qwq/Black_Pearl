@@ -1383,7 +1383,7 @@ static void ShipProtocol_GetPairSeed(u8 *seed)
 #if SHIP_PROTOCOL_DIAG_ENABLE
 static u16 ShipProtocol_ReadU16Legacy(const u8 *buf)
 {
-    return (u16)(((u16)buf[1] << 8) | buf[0]);
+    return (u16)(((u16)buf[0] << 8) | buf[1]);
 }
 #endif
 
@@ -1405,8 +1405,8 @@ static void ShipProtocol_ToLegacyNmeaCoord(u32 abs_deg1e7, u16 *coord1, u16 *coo
 
 static void ShipProtocol_WriteU16Legacy(u8 *dst, u16 value)
 {
-    dst[0] = (u8)(value & 0xFFU);
-    dst[1] = (u8)(value >> 8);
+    dst[0] = (u8)(value >> 8);
+    dst[1] = (u8)(value & 0xFFU);
 }
 
 /* Legacy 0x12 GPS report is not raw struct bytes.

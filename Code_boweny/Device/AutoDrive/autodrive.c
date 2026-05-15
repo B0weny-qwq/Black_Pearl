@@ -59,8 +59,8 @@ static u16 AutoDrive_Abs16(int16 value)
 
 static u16 AutoDrive_ReadU16Wire(const u8 *data_m)
 {
-    /* Match legacy ship firmware: raw GPS_POSITION bytes on wire. */
-    return (u16)(((u16)data_m[1] << 8) | data_m[0]);
+    /* The controller protocol sends 0x13/0x14/0x15 point fields big-endian. */
+    return (u16)(((u16)data_m[0] << 8) | data_m[1]);
 }
 
 static void AutoDrive_PointFromLegacyWire(AutoDrive_PointRaw_t *point,
