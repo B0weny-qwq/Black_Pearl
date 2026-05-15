@@ -1,0 +1,305 @@
+C51 COMPILER V9.52.0.0   PWM                                                               04/17/2026 09:18:00 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE PWM
+OBJECT MODULE PLACED IN .\Objects\pwm.obj
+COMPILER INVOKED BY: E:\Keil_v5\C51\BIN\C51.EXE App\PWM\pwm.c LARGE BROWSE INCDIR(.\Driver\Inc;.\App\Config;.\App\DcMoto
+                    -r;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Wireless;.\App\Gyro;.\App\Gps;
+                    -.\App\AutoDrive;.\App\ADC;.\App\eeprom;.\App\compass) DEFINE(HW_V16,MID_SHIP,MAG_QMC_6309,GPS_DK2_RMC) DEBUG OBJECTEXTEN
+                    -D PRINT(.\Listings\pwm.lst) OBJECT(.\Objects\pwm.obj)
+
+line level    source
+
+   1          #include "pwm.h"
+   2          #include "timer.h"
+   3          #include "pwm_Speed.h"
+   4          
+   5          PWMx_Duty PWMA_Duty;
+   6          uint8_t idata dcMotor_PWM_CruiseControl_Mode = CRUISE_STOP;
+   7          
+   8          uint8_t idata lastDirection = 255;
+   9          
+  10          void DCMotor_Pwm_Init(void){
+  11   1              PWMx_InitDefine PWMx_InitStructure;
+  12   1          PWMA_Duty.PWM1_Duty = 0;
+  13   1          PWMA_Duty.PWM2_Duty = 0;
+  14   1      
+  15   1              PWMx_InitStructure.PWM_Mode    =        CCMRn_PWM_MODE1;        //模式,               CCMRn_FREEZE,CCMRn_MATCH_VALID,CCMRn_MATCH_I
+             -NVALID,CCMRn_ROLLOVER,CCMRn_FORCE_INVALID,CCMRn_FORCE_VALID,CCMRn_PWM_MODE1,CCMRn_PWM_MODE2
+  16   1              PWMx_InitStructure.PWM_Duty    = PWMA_Duty.PWM1_Duty;   //PWM占空比时�?, 0~Period
+  17   1              PWMx_InitStructure.PWM_EnoSelect   = ENO4P|ENO4N;       //输出通道选择,   ENO1P,ENO1N,ENO3P,ENO3N,ENO3P,ENO
+             -3N,ENO4P,ENO4N / ENO5P,ENO6P,ENO7P,ENO8P
+  18   1              PWM_Configuration(PWM4, &PWMx_InitStructure);                   //初�?�化PWM,  PWMA,PWMB
+  19   1      
+  20   1      
+  21   1              PWMx_InitStructure.PWM_Mode    =        CCMRn_PWM_MODE1;        //模式,               CCMRn_FREEZE,CCMRn_MATCH_VALID,CCMRn_MATCH_I
+             -NVALID,CCMRn_ROLLOVER,CCMRn_FORCE_INVALID,CCMRn_FORCE_VALID,CCMRn_PWM_MODE1,CCMRn_PWM_MODE2
+  22   1              PWMx_InitStructure.PWM_Duty    = PWMA_Duty.PWM2_Duty;   //PWM占空比时�?, 0~Period
+  23   1              PWMx_InitStructure.PWM_EnoSelect   = ENO3P|ENO3N;       //输出通道选择,   ENO1P,ENO1N,ENO3P,ENO3N,ENO3P,ENO
+             -3N,ENO4P,ENO4N / ENO5P,ENO6P,ENO7P,ENO8P
+  24   1              PWM_Configuration(PWM3, &PWMx_InitStructure);                   //初�?�化PWM,  PWMA,PWMB
+  25   1      
+  26   1              PWMx_InitStructure.PWM_Period   = 3072;                         //周期时间,   0~65535
+  27   1              PWMx_InitStructure.PWM_DeadTime = 100;                                  //死区发生器�?�置, 0~255
+  28   1              PWMx_InitStructure.PWM_MainOutEnable= ENABLE;                   //主输出使�?, ENABLE,DISABLE
+  29   1              PWMx_InitStructure.PWM_CEN_Enable   = ENABLE;                   //使能计数�?, ENABLE,DISABLE
+  30   1              PWM_Configuration(PWMA, &PWMx_InitStructure);                   //初�?�化PWM通用寄存�?,  PWMA,PWMB
+  31   1      
+  32   1          PWM4_SW(PWM4_SW_P26_P27); //left
+  33   1              PWM3_SW(PWM3_SW_P24_P25); //right
+  34   1              NVIC_PWM_Init(PWMA,DISABLE,Priority_0);
+  35   1      
+  36   1          DcMotor_Direction_Set(DIRECTION_FORWARD);
+  37   1          DcMotor_MRight_PWM_Set(FALSE,0);
+  38   1          DcMotor_MRight_PWM_Set(FALSE,0);
+  39   1      }
+  40          
+  41          void DcMotor_MRight_PWM_Set(uint8_t onoff,uint8_t accelerator){
+  42   1          // P12 = onoff;
+  43   1      //      uint16 target_duty;                                                                                     // add 20260204
+  44   1      //      
+  45   1      //      target_duty = 1200+15*accelerator;                      // add 20260204
+  46   1          if(onoff){
+  47   2      //                      /*      chang 20260204 start*/
+  48   2      //                      if(PWMA_Duty.PWM3_Duty < target_duty)
+C51 COMPILER V9.52.0.0   PWM                                                               04/17/2026 09:18:00 PAGE 2   
+
+  49   2      //                      {
+  50   2      //                              PWMA_Duty.PWM3_Duty +=DUTY_STEP;
+  51   2      //                      }
+  52   2      //                      if(PWMA_Duty.PWM3_Duty > target_duty)
+  53   2      //                              PWMA_Duty.PWM3_Duty = target_duty;
+  54   2      //                      else
+  55   2      //                      {
+  56   2      //                              PWMA_Duty.PWM3_Duty = target_duty;
+  57   2      //                      }
+  58   2              PWMA_Duty.PWM3_Duty = 1200+15*accelerator;
+  59   2                              /*      chang 20260204 stop*/
+  60   2          }else{
+  61   2              PWMA_Duty.PWM3_Duty = 0;
+  62   2          }
+  63   1          UpdatePwm(PWMA, &PWMA_Duty);
+  64   1      }
+  65          
+  66          void DcMotor_MLeft_PWM_Set(uint8_t onoff,uint8_t accelerator){
+  67   1              // P11 = onoff;
+  68   1      //              uint16 target_duty;                                                                                     // add 20260204
+  69   1      //              target_duty = 1200+15*accelerator;                      // add 20260204
+  70   1          if(onoff){
+  71   2      //                      /*      chang 20260204 start*/
+  72   2      //                      if(PWMA_Duty.PWM1_Duty < target_duty)
+  73   2      //                      {
+  74   2      //                              PWMA_Duty.PWM1_Duty +=DUTY_STEP;
+  75   2      //                      }
+  76   2      //                      else
+  77   2      //                      {
+  78   2      //                              PWMA_Duty.PWM1_Duty = target_duty;
+  79   2      //                      }
+  80   2      //                      if(PWMA_Duty.PWM1_Duty > target_duty)
+  81   2      //                              PWMA_Duty.PWM1_Duty = target_duty;
+  82   2              PWMA_Duty.PWM1_Duty =  1200+15*accelerator;
+  83   2                              /*      chang 20260204 stop*/
+  84   2          }else{
+  85   2              PWMA_Duty.PWM1_Duty = 0;
+  86   2          }
+  87   1          UpdatePwm(PWMA, &PWMA_Duty);
+  88   1      }
+  89          
+  90          
+  91          
+  92          void DcMotor_Direction_Set(uint8_t direction){
+  93   1      
+  94   1          if(lastDirection != direction){
+  95   2                                      #ifdef          BOARD_12V
+                                              if (lastDirection != 255)
+                                              {               
+                                                              DcMotor_MRight_PWM_Set(FALSE,0);
+                                                              DcMotor_MRight_PWM_Set(FALSE,0);
+                                                              SysTimer_delay10ms(20);
+                                              }
+                                              #endif
+ 103   2              lastDirection = direction;
+ 104   2          }else{
+ 105   2              return;
+ 106   2          }
+ 107   1          switch (lastDirection)
+ 108   1          {
+ 109   2              #if MOTOR_POSITIVE == TRUE
+ 110   2                  case DIRECTION_FORWARD:{
+C51 COMPILER V9.52.0.0   PWM                                                               04/17/2026 09:18:00 PAGE 3   
+
+ 111   3              #else
+                          case DIRECTION_BACK:{                
+                      #endif
+ 114   3      
+ 115   3      
+ 116   3                  PWMA_CC4E_Disable();                //关闭输入捕获/比较输出
+ 117   3                              PWMA_ENO &= ~ENO4P;
+ 118   3                              PWMA_CC4NE_Enable();            //开�?输入捕获/比较输出
+ 119   3                              PWMA_ENO |= ENO4N;
+ 120   3      
+ 121   3                  PWMA_CC3E_Enable();                 //开�?输入捕获/比较输出
+ 122   3                              PWMA_ENO |= ENO3P;
+ 123   3                  PWMA_CC3NE_Disable();               //关闭输入捕获/比较输出
+ 124   3                              PWMA_ENO &= ~ENO3N;
+ 125   3      
+ 126   3      
+ 127   3      
+ 128   3              }
+ 129   2              break;
+ 130   2              #if MOTOR_POSITIVE == TRUE
+ 131   2                  case DIRECTION_BACK:{
+ 132   3              #else
+                          case DIRECTION_FORWARD:{
+                      #endif
+ 135   3              
+ 136   3      
+ 137   3                  PWMA_CC4E_Enable();                 
+ 138   3                              PWMA_ENO |= ENO4P;
+ 139   3                  PWMA_CC4NE_Disable();               //关闭输入捕获/比较输出
+ 140   3                              PWMA_ENO &= ~ENO4N;
+ 141   3      
+ 142   3                              PWMA_CC3E_Disable();            //关闭输入捕获/比较输出
+ 143   3                              PWMA_ENO &= ~ENO3P;
+ 144   3                  PWMA_CC3NE_Enable();                //开�?输入捕获/比较输出
+ 145   3                              PWMA_ENO |= ENO3N;
+ 146   3              }
+ 147   2              break;
+ 148   2              #if MOTOR_LEFTRIGHT == TRUE
+                          case DIRECTION_LEFT:{
+                      #else
+ 151   2                  case DIRECTION_RIGHT:{
+ 152   3              #endif
+ 153   3             
+ 154   3                  PWMA_CC4E_Enable();                 
+ 155   3                              PWMA_ENO |= ENO4P;
+ 156   3                  PWMA_CC4NE_Disable();               //关闭输入捕获/比较输出
+ 157   3                              PWMA_ENO &= ~ENO4N;
+ 158   3      
+ 159   3                  PWMA_CC3E_Enable();                 //开�?输入捕获/比较输出
+ 160   3                              PWMA_ENO |= ENO3P;
+ 161   3                  PWMA_CC3NE_Disable();               //关闭输入捕获/比较输出
+ 162   3                              PWMA_ENO &= ~ENO3N;
+ 163   3              }
+ 164   2              break;
+ 165   2      
+ 166   2              #if MOTOR_LEFTRIGHT == TRUE
+                          case DIRECTION_RIGHT:{
+                      #else
+ 169   2                  case DIRECTION_LEFT:{
+ 170   3              #endif
+ 171   3              
+ 172   3                  PWMA_CC4E_Disable();                //关闭输入捕获/比较输出
+C51 COMPILER V9.52.0.0   PWM                                                               04/17/2026 09:18:00 PAGE 4   
+
+ 173   3                              PWMA_ENO &= ~ENO4P;
+ 174   3                              PWMA_CC4NE_Enable();            //开�?输入捕获/比较输出
+ 175   3                              PWMA_ENO |= ENO4N;
+ 176   3      
+ 177   3                  
+ 178   3                              PWMA_CC3E_Disable();            //关闭输入捕获/比较输出
+ 179   3                              PWMA_ENO &= ~ENO3P;
+ 180   3                  PWMA_CC3NE_Enable();                //开�?输入捕获/比较输出
+ 181   3                              PWMA_ENO |= ENO3N;
+ 182   3              }
+ 183   2              break;
+ 184   2      
+ 185   2          }
+ 186   1      }
+ 187          
+ 188          #if 0                                   //自动循航未开
+              void DcMotor_PWM_CruiseControl_Set_Handle(void){
+                  dcMotor_PWM_CruiseControl_Mode++;
+                  DcMotor_Direction_Set(DIRECTION_FORWARD);
+                  if(dcMotor_PWM_CruiseControl_Mode > CRUISE_HIGH){
+                      dcMotor_PWM_CruiseControl_Mode = CRUISE_STOP;
+                  }
+                  switch (dcMotor_PWM_CruiseControl_Mode)
+                  {
+                      case CRUISE_STOP:{
+                          nowPwmAccelerator_Set(0);
+                                      DcMotor_MRight_PWM_Set(FALSE,0);
+                                      DcMotor_MLeft_PWM_Set(FALSE,0);
+                      }
+                      break;
+              
+                      case CRUISE_LOW:{
+                          nowPwmAccelerator_Set(60);
+                                      comPass_cache_init_angel();
+                      }
+                      break;
+              
+                      case CRUISE_MIDDLE:{
+                          nowPwmAccelerator_Set(80);
+                                      //comPass_cache_init_angel();
+                      }
+                      break;
+              
+                      case CRUISE_HIGH:{
+                          nowPwmAccelerator_Set(100);
+                                      //comPass_cache_init_angel();
+                      }
+                      break;
+              
+                  }
+                  DcMotor_MRight_PWM_Set(TRUE,Pwm_Speed_Get_right());
+                  DcMotor_MLeft_PWM_Set(TRUE,Pwm_Speed_Get_left());
+              }
+              #endif
+ 227          
+ 228          void DcMotor_PWM_CruiseControl_Reset_Handle(void){
+ 229   1          DcMotor_Direction_Set(DIRECTION_FORWARD);
+ 230   1          switch (dcMotor_PWM_CruiseControl_Mode)
+ 231   1          {
+ 232   2              case CRUISE_LOW:{
+ 233   3                  nowPwmAccelerator_Set(60);
+ 234   3              }
+C51 COMPILER V9.52.0.0   PWM                                                               04/17/2026 09:18:00 PAGE 5   
+
+ 235   2              break;
+ 236   2      
+ 237   2              case CRUISE_MIDDLE:{
+ 238   3                  nowPwmAccelerator_Set(80);
+ 239   3              }
+ 240   2              break;
+ 241   2      
+ 242   2              case CRUISE_HIGH:{
+ 243   3                  nowPwmAccelerator_Set(100);
+ 244   3              }
+ 245   2              break;
+ 246   2          }
+ 247   1          DcMotor_MRight_PWM_Set(TRUE,Pwm_Speed_Get_right());
+ 248   1          DcMotor_MLeft_PWM_Set(TRUE,Pwm_Speed_Get_left());
+ 249   1      }
+ 250          
+ 251          uint8_t Get_DcMotor_PWM_CruiseControl_Mode(void){
+ 252   1          return dcMotor_PWM_CruiseControl_Mode;
+ 253   1      }
+ 254           
+ 255          void Set_DcMotor_PWM_CruiseControl_Mode(uint8_t mode){
+ 256   1           dcMotor_PWM_CruiseControl_Mode = mode;
+ 257   1      }
+ 258          
+ 259          
+ 260          #if 0
+              uint8_t DcMotor_PWM_Get_Direction(void){
+                  return lastDirection;
+              }
+              
+              #endif
+ 266          
+ 267          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    513    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     16       9
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =      2    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

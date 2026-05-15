@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  APP_CAN                                                            07/05/26  09:39:25  PAGE 1   
+C251 COMPILER V5.60.0,  APP_CAN                                                            13/05/26  12:22:12  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_CAN
@@ -66,7 +66,7 @@ stmt  level    source
    54          // 参数: None.
    55          // 返回: None.
    56          // 版本: V1.0, 2022-03-27
-C251 COMPILER V5.60.0,  APP_CAN                                                            07/05/26  09:39:25  PAGE 2   
+C251 COMPILER V5.60.0,  APP_CAN                                                            13/05/26  12:22:12  PAGE 2   
 
    57          //========================================================================
    58          void CAN_init(void)
@@ -134,7 +134,7 @@ stmt  level    source
   116   1        CAN2_Tx.DataBuffer[3] = 0x24;
   117   1        CAN2_Tx.DataBuffer[4] = 0x25;
   118   1        CAN2_Tx.DataBuffer[5] = 0x26;
-C251 COMPILER V5.60.0,  APP_CAN                                                            07/05/26  09:39:25  PAGE 3   
+C251 COMPILER V5.60.0,  APP_CAN                                                            13/05/26  12:22:12  PAGE 3   
 
   119   1        CAN2_Tx.DataBuffer[6] = 0x27;
   120   1        CAN2_Tx.DataBuffer[7] = 0x28;
@@ -202,7 +202,7 @@ stmt  level    source
   179   1        if(B_Can1Read)
   180   1        {
   181   2          B_Can1Read = 0;
-C251 COMPILER V5.60.0,  APP_CAN                                                            07/05/26  09:39:25  PAGE 4   
+C251 COMPILER V5.60.0,  APP_CAN                                                            13/05/26  12:22:12  PAGE 4   
 
   182   2          
   183   2          CANSEL = CAN1;    //选择CAN1模块

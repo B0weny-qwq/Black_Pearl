@@ -4,18 +4,16 @@
 #include "..\GPS\GPS.h"
 #include "..\Motor\Motor.h"
 #include "..\..\Function\AHRS\AHRS.h"
+#include "..\WIRELESS\ship_protocol.h"
 #include "..\..\..\User\Task.h"
 
 #define AUTODRIVE_WORK_OVERTIME            (10U * 60U * 100U)
 #define AUTODRIVE_MIN_ACTIVE_DISTANCE_M    10U
 #define AUTODRIVE_MAX_ACTIVE_DISTANCE_M    800U
 #define AUTODRIVE_ARRIVE_DISTANCE_M        3U
-#define AUTODRIVE_STRAIGHT_DISTANCE_X10_M  2U
 #define AUTODRIVE_MANUAL_TIMEOUT_TICKS     (30U * 100U)
 #define AUTODRIVE_MANUAL_CLOSE_TICKS       300U
-#define AUTODRIVE_DRIVE_PWM                900
-#define AUTODRIVE_DRIVE_FAST_PWM           1000
-#define AUTODRIVE_TURN_PWM                 850
+#define AUTODRIVE_CRUISE_BASE_SPEED        850
 #define AUTODRIVE_MINUTE_SCALE             10000UL
 #define AUTODRIVE_MINUTES_PER_DEG          60UL
 #define AUTODRIVE_METERS_PER_MINUTE        1850UL
@@ -25,7 +23,6 @@
 static u8 g_autoDrive_switch = 0U;
 static u8 g_autoDrive_state = AUTO_DRIVE_IDLE;
 static u8 g_autoDrive_mode = AUTO_DRIVE_CLOSE;
-static u16 g_autoDrive_turn_times = 0U;
 static u16 g_autodrive_work_overtime = 0U;
 static u8 g_autoDrive_fail_flag = 0U;
 static u8 g_motor_ready = 0U;
@@ -41,6 +38,8 @@ static u8 g_destination_direction = POSITION_EAST;
 static u8 g_nowrun_direction = POSITION_EAST;
 static u16 g_nowrun_angle = 0U;
 static u16 g_destination_angle = 0U;
+static u16 g_autodrive_target_heading_cd = 0U;
+static u8 g_autodrive_target_heading_valid = 0U;
 
 static u16 g_link_alive_ticks = 0U;
 static u16 g_link_close_ticks = 0U;
@@ -223,24 +222,73 @@ static void AutoDrive_SetDiagReason(u8 reason)
     g_last_diag_reason = reason;
 }
 
-static void AutoDrive_SetMotorForward(u16 pwm)
+static u8 AutoDrive_GetTargetPoint(const AutoDrive_PointRaw_t **target)
 {
-    Motor_SetBothSpeed((int16)pwm, (int16)pwm);
+    if (target == 0) {
+        return 0U;
+    }
+
+    if (g_autoDrive_mode == AUTO_DRIVE_GO_FISISH_POSITION) {
+        *target = &g_fish_position;
+        return 1U;
+    }
+    if (g_autoDrive_mode == AUTO_DRIVE_GO_HOME_POSITION) {
+        *target = &g_return_position;
+        return 1U;
+    }
+
+    *target = 0;
+    return 0U;
 }
 
-static void AutoDrive_SetMotorLeft(u16 pwm)
+static u8 AutoDrive_UpdateTargetHeading(const AutoDrive_PointRaw_t *current_point,
+                                        const AutoDrive_PointRaw_t *target_point)
 {
-    Motor_SetBothSpeed(-(int16)pwm, (int16)pwm);
+    u16 target_angle;
+    u8 target_direction;
+
+    if ((current_point == 0) || (target_point == 0)) {
+        return 0U;
+    }
+
+    target_angle = AutoDrive_GetAngelNowToDestination((const u8 *)current_point,
+                                                      (const u8 *)target_point);
+    if (target_angle == 65535U) {
+        return 0U;
+    }
+
+    target_direction =
+        AutoDrive_GetDirectionNowToDestination((const u8 *)current_point,
+                                               (const u8 *)target_point);
+    g_destination_direction = target_direction;
+    g_destination_angle = AutoDrive_GetNorthAngel(target_direction, (u8)target_angle);
+    if (g_destination_angle >= 360U) {
+        g_destination_angle = (u16)(g_destination_angle % 360U);
+    }
+    g_autodrive_target_heading_cd = (u16)(g_destination_angle * 100U);
+    g_autodrive_target_heading_valid = 1U;
+    return 1U;
 }
 
-static void AutoDrive_SetMotorRight(u16 pwm)
+static void AutoDrive_ApplyHeadingHold(u32 now_ms, u16 base_speed)
 {
-    Motor_SetBothSpeed((int16)pwm, -(int16)pwm);
+    (void)now_ms;
+    if (g_autodrive_target_heading_valid == 0U) {
+        AutoDrive_StopMotion();
+        return;
+    }
+
+    if (ShipProtocol_ApplyYawHoldTarget(g_autodrive_target_heading_cd,
+                                        (int16)base_speed) == 0U) {
+        AutoDrive_StopMotion();
+    }
 }
 
 void AutoDrive_StopMotion(void)
 {
     Motor_StopAll();
+    g_autodrive_target_heading_valid = 0U;
+    ShipProtocol_ResetYawHoldController();
 }
 
 void AutoDrive_Stop(void)
@@ -395,28 +443,6 @@ void AutoDrive_GetStoredConfig(AutoDrive_ReturnConfig_t *cfg)
 {
     if (cfg != 0) {
         *cfg = g_autodrv_cfg;
-    }
-}
-
-static void AutoDrive_SetTurnTimes(u16 times)
-{
-    if (times > 200U) {
-        times = 200U;
-    }
-    g_autoDrive_turn_times = times;
-}
-
-static void AutoDrive_StartRunLine(u16 speed)
-{
-    AutoDrive_SetMotorForward(speed);
-}
-
-static void AutoDrive_TurnHandle(void)
-{
-    if (g_autoDrive_turn_times > 0U) {
-        g_autoDrive_turn_times--;
-    } else {
-        AutoDrive_StartRunLine(AUTODRIVE_DRIVE_FAST_PWM);
     }
 }
 
@@ -734,9 +760,11 @@ static void AutoDrive_GetSnapshotTargetPoint(AutoDrive_PointRaw_t *point)
     point->lat_whole = 0U;
     point->lat_frac = 0U;
 
-    if (g_autoDrive_mode == AUTO_DRIVE_GO_HOME_POSITION) {
+    if ((g_autoDrive_mode == AUTO_DRIVE_GO_HOME_POSITION) ||
+        (g_last_diag_reason == AUTODRIVE_DIAG_REASON_CMD_RETURN_HOME)) {
         AutoDrive_CopyPoint(point, &g_return_position);
-    } else if (g_autoDrive_mode == AUTO_DRIVE_GO_FISISH_POSITION) {
+    } else if ((g_autoDrive_mode == AUTO_DRIVE_GO_FISISH_POSITION) ||
+               (g_last_diag_reason == AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT)) {
         AutoDrive_CopyPoint(point, &g_fish_position);
     } else {
         AutoDrive_CopyPoint(point, &g_autodrv_cfg.ret_point);
@@ -778,7 +806,6 @@ void AutoDrive_Init(void)
     g_autoDrive_switch = g_autodrv_cfg.auto_ret_onoff;
     g_autoDrive_state = AUTO_DRIVE_IDLE;
     g_autoDrive_mode = AUTO_DRIVE_CLOSE;
-    g_autoDrive_turn_times = 0U;
     g_autodrive_work_overtime = 0U;
     g_autoDrive_fail_flag = 0U;
     g_link_alive_ticks = 0U;
@@ -787,6 +814,8 @@ void AutoDrive_Init(void)
     g_last_poll_tick_ms = Task_GetTickMs();
     g_last_link_tick_ms = g_last_poll_tick_ms;
     g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
+    g_autodrive_target_heading_cd = 0U;
+    g_autodrive_target_heading_valid = 0U;
 
     if (g_motor_ready == 0U) {
         Motor_Init();
@@ -830,14 +859,9 @@ void AutoDrive_LinkAliveTick(void)
 
 void AutoDrive_Poll(void)
 {
-    static u8 running_wait_times = 0U;
     const GPS_State_t *gps;
+    const AutoDrive_PointRaw_t *target_point;
     u16 destination_distance;
-    u16 moved_distance;
-    u16 turn_angle;
-    u16 current_heading;
-    u8 turn_dir;
-    int16 direction_diff;
     u32 now_ms;
 
     now_ms = Task_GetTickMs();
@@ -856,91 +880,30 @@ void AutoDrive_Poll(void)
         break;
 
     case AUTO_DRIVE_START:
-        if (g_autoDrive_mode == AUTO_DRIVE_GO_FISISH_POSITION) {
-            g_destination_direction =
-                AutoDrive_GetDirectionNowToDestination((const u8 *)&g_idle_position,
-                                                       (const u8 *)&g_fish_position);
-            AutoDrive_StartRunLine(AUTODRIVE_DRIVE_PWM);
-            AutoDrive_SetTurnTimes(0U);
-            g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
-        } else if (g_autoDrive_mode == AUTO_DRIVE_GO_HOME_POSITION) {
-            g_destination_direction =
-                AutoDrive_GetDirectionNowToDestination((const u8 *)&g_idle_position,
-                                                       (const u8 *)&g_return_position);
-
-            current_heading = AutoDrive_GetStartHeadingDeg();
-
-            switch (g_destination_direction) {
-            case POSITION_NORTH:
-                direction_diff = (int16)(0 - (int16)current_heading);
-                break;
-            case POSITION_EAST_NORTH:
-                direction_diff = (int16)(315 - (int16)current_heading);
-                break;
-            case POSITION_EAST:
-                direction_diff = (int16)(270 - (int16)current_heading);
-                break;
-            case POSITION_EAST_SOUTH:
-                direction_diff = (int16)(225 - (int16)current_heading);
-                break;
-            case POSITION_SOUTH:
-                direction_diff = (int16)(180 - (int16)current_heading);
-                break;
-            case POSITION_WEST_SOUTH:
-                direction_diff = (int16)(135 - (int16)current_heading);
-                break;
-            case POSITION_WEST:
-                direction_diff = (int16)(90 - (int16)current_heading);
-                break;
-            case POSITION_WEST_NORTH:
-                direction_diff = (int16)(45 - (int16)current_heading);
-                break;
-            default:
-                direction_diff = 0;
-                break;
-            }
-
-            if (direction_diff < -180) {
-                direction_diff = (int16)(direction_diff + 360);
-            } else if (direction_diff > 180) {
-                direction_diff = (int16)(direction_diff - 360);
-            }
-
-            if (direction_diff > 5) {
-                AutoDrive_SetMotorLeft(AUTODRIVE_TURN_PWM);
-            } else if (direction_diff < -5) {
-                AutoDrive_SetMotorRight(AUTODRIVE_TURN_PWM);
-            } else {
-                AutoDrive_SetMotorForward(AUTODRIVE_DRIVE_PWM);
-            }
-
-            AutoDrive_SetTurnTimes((u16)(AutoDrive_Abs16(direction_diff) >> 3));
-            g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
-        } else {
+        if ((gps == 0) || (AutoDrive_GpsReady() == 0U) ||
+            (AutoDrive_GetTargetPoint(&target_point) == 0U)) {
             AutoDrive_Stop();
             break;
         }
-        AutoDrive_TurnHandle();
+
+        AutoDrive_PointFromGps(&g_last_position, gps);
+        AutoDrive_CopyPoint(&g_idle_position, &g_last_position);
+        if (AutoDrive_UpdateTargetHeading(&g_last_position, target_point) == 0U) {
+            AutoDrive_Stop();
+            break;
+        }
+
+        ShipProtocol_ResetYawHoldController();
+        g_last_run_update_seq = gps->update_sequence;
+        g_autoDrive_state = AUTO_DRIVE_RUNING;
+        AutoDrive_ApplyHeadingHold(now_ms, AUTODRIVE_CRUISE_BASE_SPEED);
         break;
 
     case AUTO_DRIVE_GET_DIRECTION:
-        AutoDrive_TurnHandle();
-        if (g_autoDrive_turn_times == 0U) {
-            if (AutoDrive_GpsReady() == 0U) {
-                AutoDrive_Stop();
-                break;
-            }
-            AutoDrive_PointFromGps(&g_last_position, gps);
-            g_last_run_update_seq = gps->update_sequence;
-            g_autoDrive_state = AUTO_DRIVE_RUNING;
-            AutoDrive_StartRunLine(AUTODRIVE_DRIVE_PWM);
-            AutoDrive_SetTurnTimes(100U);
-        }
+        g_autoDrive_state = AUTO_DRIVE_START;
         break;
 
     case AUTO_DRIVE_RUNING:
-        AutoDrive_TurnHandle();
-
         if (g_autodrive_work_overtime > 0U) {
             g_autodrive_work_overtime--;
         } else {
@@ -949,114 +912,37 @@ void AutoDrive_Poll(void)
             break;
         }
 
-        if (AutoDrive_GpsReady() == 0U) {
-            break;
-        }
-        if (g_autoDrive_turn_times != 0U) {
-            break;
-        }
-        if ((gps == 0) || (gps->update_sequence == g_last_run_update_seq)) {
-            break;
-        }
-
-        if (running_wait_times >= 2U) {
-            running_wait_times = 0U;
-        } else {
-            running_wait_times++;
-            break;
-        }
-
-        AutoDrive_UpdateGpsStepPoints();
-        g_nowrun_direction =
-            AutoDrive_GetDirectionNowToDestination((const u8 *)&g_last_position,
-                                                   (const u8 *)&g_now_position);
-
-        if (g_autoDrive_mode == AUTO_DRIVE_GO_FISISH_POSITION) {
-            g_destination_angle =
-                AutoDrive_GetAngelNowToDestination((const u8 *)&g_now_position,
-                                                   (const u8 *)&g_fish_position);
-            g_destination_direction =
-                AutoDrive_GetDirectionNowToDestination((const u8 *)&g_now_position,
-                                                       (const u8 *)&g_fish_position);
-            if (g_destination_angle == 65535U) {
+        if ((gps != 0) && (AutoDrive_GpsReady() != 0U) &&
+            (gps->update_sequence != g_last_run_update_seq)) {
+            if (AutoDrive_GetTargetPoint(&target_point) == 0U) {
+                AutoDrive_Stop();
                 break;
             }
+
+            AutoDrive_UpdateGpsStepPoints();
             destination_distance =
                 AutoDrive_GetDistanceNowToDestination((const u8 *)&g_now_position,
-                                                      (const u8 *)&g_fish_position);
-        } else if (g_autoDrive_mode == AUTO_DRIVE_GO_HOME_POSITION) {
-            g_destination_angle =
-                AutoDrive_GetAngelNowToDestination((const u8 *)&g_now_position,
-                                                   (const u8 *)&g_return_position);
-            g_destination_direction =
-                AutoDrive_GetDirectionNowToDestination((const u8 *)&g_now_position,
-                                                       (const u8 *)&g_return_position);
-            if (g_destination_angle == 65535U) {
+                                                      (const u8 *)target_point);
+            if (destination_distance < AUTODRIVE_ARRIVE_DISTANCE_M) {
+                AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_ARRIVE);
+                g_autoDrive_state = AUTO_DRIVE_IDLE;
+                AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
+                AutoDrive_StopMotion();
                 break;
             }
-            destination_distance =
-                AutoDrive_GetDistanceNowToDestination((const u8 *)&g_now_position,
-                                                      (const u8 *)&g_return_position);
-        } else {
-            AutoDrive_Stop();
-            break;
-        }
 
-        if (destination_distance < AUTODRIVE_ARRIVE_DISTANCE_M) {
-            AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_ARRIVE);
-            g_autoDrive_state = AUTO_DRIVE_IDLE;
-            AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
-            AutoDrive_StopMotion();
-            break;
-        }
-
-        g_destination_angle =
-            AutoDrive_GetNorthAngel(g_destination_direction, (u8)g_destination_angle);
-
-        moved_distance =
-            AutoDrive_GetDistanceNowToDestination((const u8 *)&g_now_position,
-                                                  (const u8 *)&g_last_position);
-        if (moved_distance < AUTODRIVE_STRAIGHT_DISTANCE_X10_M) {
-            AutoDrive_SetTurnTimes(60U);
-            AutoDrive_StartRunLine(AUTODRIVE_DRIVE_FAST_PWM);
-            break;
-        }
-
-        g_nowrun_angle = AutoDrive_GetRunHeadingDeg();
-        if ((g_nowrun_angle == 65535U) || (g_nowrun_angle > 360U)) {
-            g_nowrun_angle =
-                AutoDrive_GetAngelNowToDestination((const u8 *)&g_last_position,
-                                                   (const u8 *)&g_now_position);
-            if ((g_nowrun_angle == 65535U) || (g_nowrun_angle > 360U)) {
-                AutoDrive_StartRunLine(AUTODRIVE_DRIVE_FAST_PWM);
+            g_nowrun_direction =
+                AutoDrive_GetDirectionNowToDestination((const u8 *)&g_last_position,
+                                                       (const u8 *)&g_now_position);
+            if (AutoDrive_UpdateTargetHeading(&g_now_position, target_point) == 0U) {
                 break;
             }
-            g_nowrun_angle =
-                AutoDrive_GetNorthAngel(g_nowrun_direction, (u8)g_nowrun_angle);
+
+            AutoDrive_CopyPoint(&g_last_position, &g_now_position);
+            g_last_run_update_seq = gps->update_sequence;
         }
 
-        direction_diff = (int16)((g_destination_angle - g_nowrun_angle + 360U) % 360U);
-        if (direction_diff > 180) {
-            turn_angle = (u16)(360 - direction_diff);
-            turn_dir = 1U;
-        } else {
-            turn_angle = (u16)direction_diff;
-            turn_dir = 2U;
-        }
-
-        if (turn_angle < 10U) {
-            AutoDrive_SetMotorForward(AUTODRIVE_DRIVE_FAST_PWM);
-        } else {
-            if (turn_dir == 1U) {
-                AutoDrive_SetMotorLeft(AUTODRIVE_TURN_PWM);
-            } else {
-                AutoDrive_SetMotorRight(AUTODRIVE_TURN_PWM);
-            }
-            AutoDrive_SetTurnTimes(turn_angle);
-        }
-
-        AutoDrive_CopyPoint(&g_last_position, &g_now_position);
-        g_last_run_update_seq = gps->update_sequence;
+        AutoDrive_ApplyHeadingHold(now_ms, AUTODRIVE_CRUISE_BASE_SPEED);
         break;
 
     default:

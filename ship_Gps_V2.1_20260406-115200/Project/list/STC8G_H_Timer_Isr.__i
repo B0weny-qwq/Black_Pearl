@@ -1,0 +1,1 @@
+"..\Driver\Src\STC8G_H_Timer_Isr.c" LARGE OPTIMIZE (8,SPEED) BROWSE INCDIR(..\Driver\Inc;..\App\Config;..\App\DcMotor;..\App\Gyro;..\App\Wireless\LT8920) DEBUG OBJECTEXTEND PRINT(.\list\STC8G_H_Timer_Isr.lst) TABS (2) OBJECT(.\list\STC8G_H_Timer_Isr.obj)

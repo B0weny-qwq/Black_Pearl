@@ -105,4 +105,21 @@ void ShipProtocol_RunScheduler(void);
  */
 u8 ShipProtocol_IsPaired(void);
 
+/**
+ * @brief      使用已验证的 yaw-hold 自稳链路按目标航向巡航。
+ * @param[in]  target_heading_cd  目标航向，单位 0.01 度，范围按 0..35999 归一化。
+ * @param[in]  base_speed         基础前进速度。
+ * @return     1=已输出自稳电机控制，0=航向不可用或 yaw-hold 未启用。
+ *
+ * @note
+ * 本接口复用遥控自稳模式的 PID、左右极性、差速限幅、陀螺阻尼和输出斜坡。
+ * AutoDrive 不应另起一套左右电机极性判断。
+ */
+u8 ShipProtocol_ApplyYawHoldTarget(u16 target_heading_cd, int16 base_speed);
+
+/**
+ * @brief   复位 yaw-hold 自稳状态。
+ */
+void ShipProtocol_ResetYawHoldController(void);
+
 #endif

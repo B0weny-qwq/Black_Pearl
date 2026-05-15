@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        07/05/26  09:39:24  PAGE 1   
+C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        13/05/26  12:22:12  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_DMA_I2C
@@ -66,7 +66,7 @@ stmt  level    source
    54          //                            外部函数和变量声明
    55          //========================================================================
    56          
-C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        07/05/26  09:39:24  PAGE 2   
+C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        13/05/26  12:22:12  PAGE 2   
 
    57          
    58          //========================================================================
@@ -134,7 +134,7 @@ stmt  level    source
   114          {
   115   1        if((dat >= '0') && (dat <= '9'))    return (dat-'0');
   116   1        if((dat >= 'A') && (dat <= 'F'))    return (dat-'A'+10);
-C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        07/05/26  09:39:24  PAGE 3   
+C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        13/05/26  12:22:12  PAGE 3   
 
   117   1        if((dat >= 'a') && (dat <= 'f'))    return (dat-'a'+10);
   118   1        return 0xff;
@@ -202,7 +202,7 @@ stmt  level    source
   180   1      
   181   1        if(COM2.RX_TimeOut > 0)   //超时计数
   182   1        {
-C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        07/05/26  09:39:24  PAGE 4   
+C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        13/05/26  12:22:12  PAGE 4   
 
   183   2          if(--COM2.RX_TimeOut == 0)
   184   2          {
@@ -270,7 +270,7 @@ stmt  level    source
   244   1        I2cTxBuffer[1] = addr;
   245   1      
   246   1        I2C_MSCMD(0x89);      //起始命令+发送数据+接收ACK
-C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        07/05/26  09:39:24  PAGE 5   
+C251 COMPILER V5.60.0,  APP_DMA_I2C                                                        13/05/26  12:22:12  PAGE 5   
 
   247   1        I2C_DMA_Enable();
   248   1        SET_I2CT_DMA_LEN(number+1); //设置传输总字节数：n+1

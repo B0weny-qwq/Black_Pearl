@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    07/05/26  09:39:24  PAGE 1   
+C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    13/05/26  12:22:12  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_PWMB_Output
@@ -66,7 +66,7 @@ stmt  level    source
    53          // 版本: V1.0, 2020-09-28
    54          //========================================================================
    55          void PWMB_Output_init(void)
-C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    07/05/26  09:39:24  PAGE 2   
+C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    13/05/26  12:22:12  PAGE 2   
 
    56          {
    57   1        PWMx_InitDefine   PWMx_InitStructure;
@@ -134,7 +134,7 @@ stmt  level    source
   111   2        }
   112   1        else
   113   1        {
-C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    07/05/26  09:39:24  PAGE 3   
+C251 COMPILER V5.60.0,  APP_PWMB_Output                                                    13/05/26  12:22:12  PAGE 3   
 
   114   2          PWMB_Duty.PWM5_Duty--;
   115   2          if(PWMB_Duty.PWM5_Duty <= 0) PWM5_Flag = 0;

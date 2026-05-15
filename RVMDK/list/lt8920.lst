@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 1   
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE lt8920
@@ -66,7 +66,7 @@ stmt  level    source
    54              {35U, 0x00U, 0x00U, 0xFFFFU},
    55              {36U, 0x03U, 0x80U, 0xFFFFU},
    56              {37U, 0x03U, 0x80U, 0xFFFFU},
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 2   
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 2   
 
    57              {38U, 0x5AU, 0x5AU, 0xFFFFU},
    58              {39U, 0x03U, 0x80U, 0xFFFFU},
@@ -134,7 +134,7 @@ stmt  level    source
   120   1      #if LT8920_FIFO_DELAY_TEST
                    WirelessPort_DelayUs(1U);
                #endif
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 3   
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 3   
 
   123   1          for (i = 0U; i < len; i++) {
   124   2              (void)WirelessPort_SpiTransfer(buf[i]);
@@ -202,7 +202,7 @@ stmt  level    source
   186          
   187          static s8 LT8920_VerifyDefaultProfile(void)
   188          {
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 4   
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 4   
 
   189   1          u8 i;
   190   1          u16 value;
@@ -270,7 +270,7 @@ stmt  level    source
   252   1          rc = LT8920_VerifyDefaultProfile();
   253   1          if (rc != SUCCESS) {
   254   2              return rc;
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 5   
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 5   
 
   255   2          }
   256   1      
@@ -338,7 +338,7 @@ stmt  level    source
   318   1          rc = LT8920_WriteReg(38U, 0x5A5AU);
   319   1          if (rc != SUCCESS) {
   320   2              return rc;
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 6   
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 6   
 
   321   2          }
   322   1          rc = LT8920_WriteReg(39U, (u16)(sync_word >> 16));
@@ -406,7 +406,7 @@ stmt  level    source
   384   1          s8 rc;
   385   1      
   386   1          rc = LT8920_EnterIdle();
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 7   
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 7   
 
   387   1          if (rc != SUCCESS) {
   388   2              return rc;
@@ -474,7 +474,7 @@ stmt  level    source
   450   1      
   451   1          if (rssi == 0) {
   452   2              return WIRELESS_ERR_PARAM;
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 8   
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 8   
 
   453   2          }
   454   1      
@@ -542,7 +542,7 @@ stmt  level    source
   516   1      
   517   1          return SUCCESS;
   518   1      }
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 9   
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 9   
 
   519          
   520          s8 LT8920_StartTxPacket(const u8 *buf, u8 len)
@@ -610,7 +610,7 @@ stmt  level    source
   582          
   583          s8 LT8920_ReadPacket(u8 *buf, u8 buf_len, u8 *out_len)
   584          {
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 10  
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 10  
 
   585   1          u16 status;
   586   1          u8 packet_len;
@@ -678,7 +678,7 @@ stmt  level    source
   648   2              *reg = g_lt8920_verify_fail_reg;
   649   2          }
   650   1          if (expected != 0) {
-C251 COMPILER V5.60.0,  lt8920                                                             07/05/26  09:39:32  PAGE 11  
+C251 COMPILER V5.60.0,  lt8920                                                             16/05/26  05:32:06  PAGE 11  
 
   651   2              *expected = g_lt8920_verify_fail_expected;
   652   2          }

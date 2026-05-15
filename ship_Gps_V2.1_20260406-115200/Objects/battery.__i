@@ -1,0 +1,1 @@
+"App\Battery\battery.c" LARGE OPTIMIZE (8,SPEED) BROWSE INCDIR(.\Driver\Inc;.\App\Config;.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Wireless;.\App\Gyro;.\App\Gps;.\App\AutoDrive) DEBUG OBJECTEXTEND PRINT(.\Listings\battery.lst) TABS (2) OBJECT(.\Objects\battery.obj)

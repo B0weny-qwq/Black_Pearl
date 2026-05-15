@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_RTC_Isr                                                     07/05/26  09:39:30  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_RTC_Isr                                                     13/05/26  12:22:16  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_RTC_Isr
@@ -68,7 +68,7 @@ Module Information          Static   Overlayable
   hconst size          =    ------     ------
 End of Module Information.
 
-C251 COMPILER V5.60.0,  STC32G_RTC_Isr                                                     07/05/26  09:39:30  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_RTC_Isr                                                     13/05/26  12:22:16  PAGE 2   
 
 
 C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

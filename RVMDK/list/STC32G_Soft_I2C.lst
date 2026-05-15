@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    07/05/26  09:39:27  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    13/05/26  12:22:14  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_Soft_I2C
@@ -66,7 +66,7 @@ stmt  level    source
    53   1        I2C_Delay();
    54   1        SCL = 1;
    55   1        I2C_Delay();
-C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    07/05/26  09:39:27  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    13/05/26  12:22:14  PAGE 2   
 
    56   1        SCL = 0;
    57   1        I2C_Delay();
@@ -134,7 +134,7 @@ stmt  level    source
   119   1        {
   120   2          SCL = 1;
   121   2          I2C_Delay();
-C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    07/05/26  09:39:27  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    13/05/26  12:22:14  PAGE 3   
 
   122   2          dat <<= 1;
   123   2          if(SDA)     dat++;
@@ -202,7 +202,7 @@ stmt  level    source
   181   3            I2C_Check_ACK();
   182   3            if(!F0)
   183   3            {
-C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    07/05/26  09:39:27  PAGE 4   
+C251 COMPILER V5.60.0,  STC32G_Soft_I2C                                                    13/05/26  12:22:14  PAGE 4   
 
   184   4              do
   185   4              {

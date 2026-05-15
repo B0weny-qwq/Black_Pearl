@@ -1,0 +1,77 @@
+C51 COMPILER V9.52.0.0   DCMOTOR_GPIO                                                      04/17/2026 09:17:58 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE DCMOTOR_GPIO
+OBJECT MODULE PLACED IN .\Objects\DcMotor_Gpio.obj
+COMPILER INVOKED BY: E:\Keil_v5\C51\BIN\C51.EXE App\DcMotor\DcMotor_Gpio.c LARGE BROWSE INCDIR(.\Driver\Inc;.\App\Config
+                    -;.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Wireless;.\App\Gy
+                    -ro;.\App\Gps;.\App\AutoDrive;.\App\ADC;.\App\eeprom;.\App\compass) DEFINE(HW_V16,MID_SHIP,MAG_QMC_6309,GPS_DK2_RMC) DEBU
+                    -G OBJECTEXTEND PRINT(.\Listings\DcMotor_Gpio.lst) OBJECT(.\Objects\DcMotor_Gpio.obj)
+
+line level    source
+
+   1          #include "DcMotor_Gpio.h"
+   2          uint8_t dcMotor_Front_Run_MillSeconds = 0,dcMotor_Back_Run_MillSeconds = 0;
+   3          void DcMotor_Gpio_Config(void){
+   4   1              GPIO_InitTypeDef        GPIO_InitStructure;        
+   5   1              GPIO_InitStructure.Pin  = GPIO_Pin_2|GPIO_Pin_3;
+   6   1              GPIO_InitStructure.Mode = GPIO_OUT_PP;         
+   7   1              GPIO_Inilize(GPIO_P0,&GPIO_InitStructure);
+   8   1      
+   9   1              DcMotor_FRONT_Set(FALSE);
+  10   1              DcMotor_BACK_Set(FALSE);
+  11   1      
+  12   1      }
+  13          
+  14          
+  15          void DcMotor_FRONT_Set(uint8_t onoff){
+  16   1              P02 = onoff;
+  17   1      }
+  18          
+  19          void DcMotor_BACK_Set(uint8_t onoff){
+  20   1              P03 = onoff;
+  21   1      } 
+  22          
+  23          void DcMotor_Front_Set_Run_MillSeconds(uint16_t millSeconds){
+  24   1              dcMotor_Front_Run_MillSeconds = millSeconds;
+  25   1      }
+  26          
+  27          void DcMotor_Back_Set_Run_MillSeconds(uint16_t millSeconds){
+  28   1              dcMotor_Back_Run_MillSeconds = millSeconds;
+  29   1      }
+  30          
+  31          void DcMotor_Handle(void){
+  32   1              if(dcMotor_Front_Run_MillSeconds>10){
+  33   2                      dcMotor_Front_Run_MillSeconds -= 10;
+  34   2                      DcMotor_FRONT_Set(TRUE);
+  35   2              }else{
+  36   2                      dcMotor_Front_Run_MillSeconds = 0;
+  37   2                      DcMotor_FRONT_Set(FALSE);
+  38   2              }
+  39   1      
+  40   1              if(dcMotor_Back_Run_MillSeconds>10){
+  41   2                      dcMotor_Back_Run_MillSeconds -= 10;
+  42   2                      DcMotor_BACK_Set(TRUE);
+  43   2              }else{
+  44   2                      dcMotor_Back_Run_MillSeconds = 0;
+  45   2                      DcMotor_BACK_Set(FALSE);
+  46   2              }
+  47   1      
+  48   1      }
+  49          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+C51 COMPILER V9.52.0.0   DCMOTOR_GPIO                                                      04/17/2026 09:17:58 PAGE 2   
+
+   CODE SIZE        =    110    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =      2       2
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

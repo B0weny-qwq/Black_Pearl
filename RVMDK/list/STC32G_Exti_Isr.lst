@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_Exti_Isr                                                    07/05/26  09:39:28  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_Exti_Isr                                                    13/05/26  12:22:15  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_Exti_Isr
@@ -66,7 +66,7 @@ stmt  level    source
    53   1      }
    54          
    55          //========================================================================
-C251 COMPILER V5.60.0,  STC32G_Exti_Isr                                                    07/05/26  09:39:28  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_Exti_Isr                                                    13/05/26  12:22:15  PAGE 2   
 
    56          // 函数: INT3_ISR_Handler
    57          // 描述: INT3中断函数.

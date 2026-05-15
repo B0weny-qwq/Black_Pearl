@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  system_init                                                        07/05/26  09:39:21  PAGE 1   
+C251 COMPILER V5.60.0,  system_init                                                        16/05/26  05:32:03  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE system_init
@@ -17,226 +17,173 @@ stmt  level    source
     5          #include "config.h"
     6          #include "STC32G_GPIO.h"
     7          #include "STC32G_ADC.h"
-    8          #include "STC32G_Exti.h"
-    9          #include "STC32G_I2C.h"
-   10          #include "STC32G_SPI.h"
-   11          #include "STC32G_Timer.h"
-   12          #include "STC32G_UART.h"
-   13          #include "STC32G_Compare.h"
-   14          #include "STC32G_Delay.h"
-   15          #include "STC32G_Switch.h"
-   16          #include "STC32G_WDT.h"
-   17          #include "STC32G_NVIC.h"
-   18          #include "app.h"
-   19          #include "..\Code_boweny\Function\Log\Log.h"
-   20          #include "..\Code_boweny\Device\QMC6309\QMC6309.h"
-   21          #include "..\Code_boweny\Device\QMI8658\QMI8658.h"
-   22          #include "..\Code_boweny\Device\GPS\GPS.h"
-   23          #include "..\Code_boweny\Device\WIRELESS\wireless.h"
-   24          #include "STC32G_Soft_UART.h"
-   25          
-   26          u8 g_qmi8658_ready = 0;
-   27          
-   28          void GPIO_config(void)
-   29          {
-   30   1          P0_MODE_IO_PU(GPIO_Pin_All);
-   31   1          P0_MODE_IN_HIZ(GPIO_Pin_0);
-   32   1          P0_DIGIT_IN_DISABLE(GPIO_Pin_0);
-   33   1          P1_MODE_IN_HIZ(GPIO_Pin_LOW);
-   34   1          P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
-   35   1          P2_MODE_IO_PU(GPIO_Pin_All);
-   36   1          P3_MODE_IO_PU(GPIO_Pin_LOW);
-   37   1          P3_MODE_IO_PU(GPIO_Pin_HIGH);
-   38   1          P4_MODE_IO_PU(GPIO_Pin_0 | GPIO_Pin_6 | GPIO_Pin_7);
-   39   1          P6_MODE_IO_PU(GPIO_Pin_All);
-   40   1          P7_MODE_IO_PU(GPIO_Pin_All);
-   41   1      
-   42   1          P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
-   43   1      }
-   44          
-   45          void Timer_config(void)
-   46          {
-   47   1          TIM_InitTypeDef TIM_InitStructure;
-   48   1      
-   49   1          TIM_InitStructure.TIM_Mode = TIM_16BitAutoReload;
-   50   1          TIM_InitStructure.TIM_ClkSource = TIM_CLOCK_1T;
-   51   1          TIM_InitStructure.TIM_ClkOut = DISABLE;
-   52   1          TIM_InitStructure.TIM_Value = (u16)(65536UL - (MAIN_Fosc / 1000UL));
-   53   1          TIM_InitStructure.TIM_PS = 0;
-   54   1          TIM_InitStructure.TIM_Run = ENABLE;
-   55   1          Timer_Inilize(Timer0, &TIM_InitStructure);
-   56   1          NVIC_Timer0_Init(ENABLE, Priority_0);
-C251 COMPILER V5.60.0,  system_init                                                        07/05/26  09:39:21  PAGE 2   
+    8          #include "STC32G_I2C.h"
+    9          #include "STC32G_Timer.h"
+   10          #include "STC32G_UART.h"
+   11          #include "STC32G_Switch.h"
+   12          #include "STC32G_NVIC.h"
+   13          #include "..\Code_boweny\Function\Log\Log.h"
+   14          #include "..\Code_boweny\Function\AHRS\AHRS.h"
+   15          #include "..\Code_boweny\Device\QMC6309\QMC6309.h"
+   16          #include "..\Code_boweny\Device\QMI8658\QMI8658.h"
+   17          #include "..\Code_boweny\Device\GPS\GPS.h"
+   18          #include "..\Code_boweny\Device\WIRELESS\wireless.h"
+   19          
+   20          u8 g_qmi8658_ready = 0;
+   21          
+   22          void GPIO_config(void)
+   23          {
+   24   1          P0_MODE_IO_PU(GPIO_Pin_All);
+   25   1          P0_MODE_IN_HIZ(GPIO_Pin_0);
+   26   1          P0_DIGIT_IN_DISABLE(GPIO_Pin_0);
+   27   1          P1_MODE_IN_HIZ(GPIO_Pin_LOW);
+   28   1          P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
+   29   1          P2_MODE_IO_PU(GPIO_Pin_All);
+   30   1          P3_MODE_IO_PU(GPIO_Pin_LOW);
+   31   1          P3_MODE_IO_PU(GPIO_Pin_HIGH);
+   32   1          P4_MODE_IO_PU(GPIO_Pin_0 | GPIO_Pin_6 | GPIO_Pin_7);
+   33   1          P6_MODE_IO_PU(GPIO_Pin_All);
+   34   1          P7_MODE_IO_PU(GPIO_Pin_All);
+   35   1      
+   36   1          P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
+   37   1      }
+   38          
+   39          void Timer_config(void)
+   40          {
+   41   1          TIM_InitTypeDef TIM_InitStructure;
+   42   1      
+   43   1          TIM_InitStructure.TIM_Mode = TIM_16BitAutoReload;
+   44   1          TIM_InitStructure.TIM_ClkSource = TIM_CLOCK_1T;
+   45   1          TIM_InitStructure.TIM_ClkOut = DISABLE;
+   46   1          TIM_InitStructure.TIM_Value = (u16)(65536UL - (MAIN_Fosc / 1000UL));
+   47   1          TIM_InitStructure.TIM_PS = 0;
+   48   1          TIM_InitStructure.TIM_Run = ENABLE;
+   49   1          Timer_Inilize(Timer0, &TIM_InitStructure);
+   50   1          NVIC_Timer0_Init(ENABLE, Priority_0);
+   51   1      }
+   52          
+   53          void ADC_config(void)
+   54          {
+   55   1          ADC_InitTypeDef ADC_InitStructure;
+   56   1      
+C251 COMPILER V5.60.0,  system_init                                                        16/05/26  05:32:03  PAGE 2   
 
-   57   1      }
-   58          
-   59          void ADC_config(void)
-   60          {
-   61   1          ADC_InitTypeDef ADC_InitStructure;
-   62   1      
-   63   1          ADC_InitStructure.ADC_SMPduty = 31;
-   64   1          ADC_InitStructure.ADC_CsSetup = 0;
-   65   1          ADC_InitStructure.ADC_CsHold = 1;
-   66   1          ADC_InitStructure.ADC_Speed = ADC_SPEED_2X1T;
-   67   1          ADC_InitStructure.ADC_AdjResult = ADC_RIGHT_JUSTIFIED;
-   68   1          ADC_Inilize(&ADC_InitStructure);
-   69   1          ADC_PowerControl(ENABLE);
-   70   1          NVIC_ADC_Init(DISABLE, Priority_0);
-   71   1      }
-   72          
-   73          void UART_config(void)
-   74          {
-   75   1          COMx_InitDefine COMx_InitStructure;
-   76   1      
-   77   1          COMx_InitStructure.UART_Mode = UART_8bit_BRTx;
-   78   1          COMx_InitStructure.UART_BRT_Use = BRT_Timer1;
-   79   1          COMx_InitStructure.UART_BaudRate = LOG_UART_BAUDRATE;
-   80   1          COMx_InitStructure.UART_RxEnable = ENABLE;
-   81   1          COMx_InitStructure.BaudRateDouble = DISABLE;
-   82   1          UART_Configuration(UART1, &COMx_InitStructure);
-   83   1          NVIC_UART1_Init(ENABLE, Priority_1);
-   84   1      }
-   85          
-   86          void I2C_config(void)
-   87          {
-   88   1          I2C_InitTypeDef I2C_InitStructure;
-   89   1      
-   90   1          I2C_InitStructure.I2C_Mode = I2C_Mode_Master;
-   91   1          I2C_InitStructure.I2C_Enable = ENABLE;
-   92   1          I2C_InitStructure.I2C_MS_WDTA = DISABLE;
-   93   1          I2C_InitStructure.I2C_Speed = SENSOR_I2C_SPEED_CFG;
-   94   1          I2C_Init(&I2C_InitStructure);
-   95   1          NVIC_I2C_Init(I2C_Mode_Master, DISABLE, Priority_0);
-   96   1      }
-   97          
-   98          static void Sensor_I2C_prepare(void)
-   99          {
-  100   1          P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
-  101   1          P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
-  102   1          I2C_SW(I2C_P14_P15);
-  103   1          I2C_config();
-  104   1      }
-  105          
-  106          void SPI_config(void)
-  107          {
-  108   1          SPI_InitTypeDef SPI_InitStructure;
-  109   1      
-  110   1          SPI_InitStructure.SPI_Enable = ENABLE;
-  111   1          SPI_InitStructure.SPI_SSIG = ENABLE;
-  112   1          SPI_InitStructure.SPI_FirstBit = SPI_MSB;
-  113   1          SPI_InitStructure.SPI_Mode = SPI_Mode_Slave;
-  114   1          SPI_InitStructure.SPI_CPOL = SPI_CPOL_Low;
-  115   1          SPI_InitStructure.SPI_CPHA = SPI_CPHA_2Edge;
-  116   1          SPI_InitStructure.SPI_Speed = SYSTEM_SPI_SPEED_CFG;
-  117   1          SPI_Init(&SPI_InitStructure);
-  118   1          NVIC_SPI_Init(ENABLE, Priority_3);
-  119   1      }
-  120          
-  121          void CMP_config(void)
-  122          {
-C251 COMPILER V5.60.0,  system_init                                                        07/05/26  09:39:21  PAGE 3   
+   57   1          ADC_InitStructure.ADC_SMPduty = 31;
+   58   1          ADC_InitStructure.ADC_CsSetup = 0;
+   59   1          ADC_InitStructure.ADC_CsHold = 1;
+   60   1          ADC_InitStructure.ADC_Speed = ADC_SPEED_2X1T;
+   61   1          ADC_InitStructure.ADC_AdjResult = ADC_RIGHT_JUSTIFIED;
+   62   1          ADC_Inilize(&ADC_InitStructure);
+   63   1          ADC_PowerControl(ENABLE);
+   64   1          NVIC_ADC_Init(DISABLE, Priority_0);
+   65   1      }
+   66          
+   67          void UART_config(void)
+   68          {
+   69   1          COMx_InitDefine COMx_InitStructure;
+   70   1      
+   71   1          COMx_InitStructure.UART_Mode = UART_8bit_BRTx;
+   72   1          COMx_InitStructure.UART_BRT_Use = BRT_Timer1;
+   73   1          COMx_InitStructure.UART_BaudRate = LOG_UART_BAUDRATE;
+   74   1          COMx_InitStructure.UART_RxEnable = ENABLE;
+   75   1          COMx_InitStructure.BaudRateDouble = DISABLE;
+   76   1          UART_Configuration(UART1, &COMx_InitStructure);
+   77   1          NVIC_UART1_Init(ENABLE, Priority_1);
+   78   1      }
+   79          
+   80          void I2C_config(void)
+   81          {
+   82   1          I2C_InitTypeDef I2C_InitStructure;
+   83   1      
+   84   1          I2C_InitStructure.I2C_Mode = I2C_Mode_Master;
+   85   1          I2C_InitStructure.I2C_Enable = ENABLE;
+   86   1          I2C_InitStructure.I2C_MS_WDTA = DISABLE;
+   87   1          I2C_InitStructure.I2C_Speed = SENSOR_I2C_SPEED_CFG;
+   88   1          I2C_Init(&I2C_InitStructure);
+   89   1          NVIC_I2C_Init(I2C_Mode_Master, DISABLE, Priority_0);
+   90   1      }
+   91          
+   92          static void Sensor_I2C_prepare(void)
+   93          {
+   94   1          P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
+   95   1          P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
+   96   1          P14 = 1;
+   97   1          P15 = 1;
+   98   1          I2C_SW(I2C_P14_P15);
+   99   1          I2C_config();
+  100   1      }
+  101          
+  102          void Switch_config(void)
+  103          {
+  104   1          UART1_SW(UART1_SW_P30_P31);
+  105   1          UART2_SW(UART2_SW_P10_P11);
+  106   1          I2C_SW(I2C_P14_P15);
+  107   1      }
+  108          
+  109          void SYS_Init(void)
+  110          {
+  111   1          EAXSFR();
+  112   1          GPIO_config();
+  113   1          Switch_config();
+  114   1          Timer_config();
+  115   1          ADC_config();
+  116   1          UART_config();
+  117   1          I2C_config();
+  118   1          EA = 1;
+  119   1      
+  120   1      #if ENABLE_LOG_INIT
+  121   1          log_init();
+  122   1      #endif
+C251 COMPILER V5.60.0,  system_init                                                        16/05/26  05:32:03  PAGE 3   
 
-  123   1          CMP_InitDefine CMP_InitStructure;
-  124   1      
-  125   1          CMP_InitStructure.CMP_EN = ENABLE;
-  126   1          CMP_InitStructure.CMP_P_Select = CMP_P_P37;
-  127   1          CMP_InitStructure.CMP_N_Select = CMP_N_GAP;
-  128   1          CMP_InitStructure.CMP_InvCMPO = DISABLE;
-  129   1          CMP_InitStructure.CMP_100nsFilter = ENABLE;
-  130   1          CMP_InitStructure.CMP_Outpt_En = ENABLE;
-  131   1          CMP_InitStructure.CMP_OutDelayDuty = 16;
-  132   1          CMP_Inilize(&CMP_InitStructure);
-  133   1          NVIC_CMP_Init(RISING_EDGE | FALLING_EDGE, Priority_0);
-  134   1      }
-  135          
-  136          void Exti_config(void)
-  137          {
-  138   1          EXTI_InitTypeDef Exti_InitStructure;
-  139   1      
-  140   1          Exti_InitStructure.EXTI_Mode = EXT_MODE_Fall;
-  141   1          Ext_Inilize(EXT_INT0, &Exti_InitStructure);
-  142   1          NVIC_INT0_Init(ENABLE, Priority_0);
-  143   1      
-  144   1          Exti_InitStructure.EXTI_Mode = EXT_MODE_Fall;
-  145   1          Ext_Inilize(EXT_INT1, &Exti_InitStructure);
-  146   1          NVIC_INT1_Init(ENABLE, Priority_0);
-  147   1      
-  148   1          NVIC_INT2_Init(ENABLE, NULL);
-  149   1          NVIC_INT3_Init(ENABLE, NULL);
-  150   1          NVIC_INT4_Init(ENABLE, NULL);
-  151   1      }
-  152          
-  153          void Switch_config(void)
-  154          {
-  155   1          UART1_SW(UART1_SW_P30_P31);
-  156   1          UART2_SW(UART2_SW_P10_P11);
-  157   1          UART3_SW(UART3_SW_P00_P01);
-  158   1          UART4_SW(UART4_SW_P02_P03);
-  159   1          I2C_SW(I2C_P14_P15);
-  160   1          SPI_SW(SPI_P22_P23_P24_P25);
-  161   1      
-  162   1          LCM_CTRL_SW(LCM_CTRL_P45_P44_P42);
-  163   1          LCM_DATA_SW(LCM_D8_NA_P6);
-  164   1      }
-  165          
-  166          void SYS_Init(void)
-  167          {
-  168   1          EAXSFR();
-  169   1          GPIO_config();
-  170   1          Switch_config();
-  171   1          Timer_config();
-  172   1          ADC_config();
-  173   1          UART_config();
-  174   1          I2C_config();
-  175   1          EA = 1;
-  176   1      
-  177   1          APP_config();
-  178   1      #if ENABLE_LOG_INIT
-  179   1          log_init();
-  180   1      #endif
-  181   1      
-  182   1      #if ENABLE_WIRELESS_MODULE
-  183   1          LOGI("SYS", "wireless stack init start");
-  184   1          Wireless_Init();
-  185   1      #endif
-  186   1      
-  187   1      #if ENABLE_GPS_MODULE
-  188   1          LOGI("SYS", "gps init start");
-C251 COMPILER V5.60.0,  system_init                                                        07/05/26  09:39:21  PAGE 4   
-
-  189   1          GPS_Init();
-  190   1      #endif
-  191   1      
-  192   1      #if ENABLE_MAG_MODULE || ENABLE_IMU_MODULE
-  193   1          LOGI("SYS", "sensor path init start");
-  194   1          Sensor_I2C_prepare();
-  195   1          g_qmi8658_ready = 0;
-  196   1      #if ENABLE_MAG_MODULE
-  197   1          QMC6309_Init();
-  198   1      #endif
-  199   1      #if ENABLE_IMU_MODULE
-               #if QMI8658_INIT_NONBLOCKING
+  123   1      
+  124   1      #if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP
+  125   1          LOGI("SYS", "wireless stack init start");
+  126   1          Wireless_Init();
+  127   1      #endif
+  128   1      
+  129   1      #if ENABLE_GPS_MODULE
+  130   1          LOGI("SYS", "gps init start");
+  131   1          GPS_Init();
+  132   1      #endif
+  133   1      
+  134   1      #if ENABLE_MAG_MODULE || ENABLE_IMU_MODULE
+  135   1          LOGI("SYS", "sensor path init start");
+  136   1          Sensor_I2C_prepare();
+  137   1          g_qmi8658_ready = 0;
+  138   1          AHRS_Reset();
+  139   1      #if ENABLE_MAG_MODULE
+  140   1          QMC6309_Init();
+  141   1      #endif
+  142   1      #if ENABLE_IMU_MODULE
+  143   1      #if QMI8658_INIT_NONBLOCKING
                    QMI8658_RequestReinit();
+                   g_qmi8658_ready = 0;
                #else
-                   QMI8658_Init();
-               #endif
-               #endif
-  206   1      #else
+  147   1          g_qmi8658_ready = (QMI8658_Init() == 0) ? 1U : 0U;
+  148   1          if (g_qmi8658_ready != 0U) {
+  149   2              LOGI("SYS", "imu init ready");
+  150   2          } else {
+  151   2              LOGE("SYS", "imu init failed");
+  152   2          }
+  153   1      #endif
+  154   1      #endif
+  155   1      #else
                    g_qmi8658_ready = 0;
                #endif
-  209   1      }
+  158   1      }
 
 
 Module Information          Static   Overlayable
 ------------------------------------------------
-  code size            =       619     ------
+  code size            =       470     ------
   ecode size           =    ------     ------
   data size            =    ------     ------
   idata size           =    ------     ------
   pdata size           =    ------     ------
   xdata size           =    ------     ------
   xdata-const size     =    ------     ------
-  edata size           =         1         42
+  edata size           =         1         27
   bit size             =    ------     ------
   ebit size            =    ------     ------
   bitaddressable size  =    ------     ------
@@ -244,7 +191,7 @@ Module Information          Static   Overlayable
   far data size        =    ------     ------
   huge data size       =    ------     ------
   const size           =    ------     ------
-  hconst size          =        73     ------
+  hconst size          =       104     ------
 End of Module Information.
 
 

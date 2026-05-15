@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  QMC6309                                                            07/05/26  09:39:31  PAGE 1   
+C251 COMPILER V5.60.0,  QMC6309                                                            16/05/26  05:32:05  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE QMC6309
@@ -66,7 +66,7 @@ stmt  level    source
    54   1          err_code = QMC6309_I2C_OK;
    55   1          if (QMC6309Port_WriteReg(qmc6309_addr, reg, dat, &err_code) != 0U) {
    56   2              LOGW("MAG", "WriteReg fail addr=0x%02X reg=0x%02X val=0x%02X err=%u",
-C251 COMPILER V5.60.0,  QMC6309                                                            07/05/26  09:39:31  PAGE 2   
+C251 COMPILER V5.60.0,  QMC6309                                                            16/05/26  05:32:05  PAGE 2   
 
    57   2                   qmc6309_addr, reg, dat, err_code);
    58   2              return -1;
@@ -134,7 +134,7 @@ stmt  level    source
   120   1          QMC6309_Delay_ms(5U);
   121   1      
   122   1          if (QMC6309_WriteReg(QMC6309_REG_CONTROL_2, 0x00U) != 0) {
-C251 COMPILER V5.60.0,  QMC6309                                                            07/05/26  09:39:31  PAGE 3   
+C251 COMPILER V5.60.0,  QMC6309                                                            16/05/26  05:32:05  PAGE 3   
 
   123   2              LOGE("MAG", "soft reset exit failed");
   124   2              return -1;
@@ -202,7 +202,7 @@ stmt  level    source
   186   1          u8 err_code;
   187   1          u8 raw[6];
   188   1      
-C251 COMPILER V5.60.0,  QMC6309                                                            07/05/26  09:39:31  PAGE 4   
+C251 COMPILER V5.60.0,  QMC6309                                                            16/05/26  05:32:05  PAGE 4   
 
   189   1          if ((x == NULL) || (y == NULL) || (z == NULL)) {
   190   2              return -1;
@@ -270,7 +270,7 @@ stmt  level    source
   252          {
   253   1          u8 id;
   254   1          u8 retry;
-C251 COMPILER V5.60.0,  QMC6309                                                            07/05/26  09:39:31  PAGE 5   
+C251 COMPILER V5.60.0,  QMC6309                                                            16/05/26  05:32:05  PAGE 5   
 
   255   1          u8 ctrl1_readback;
   256   1          u8 ctrl2_readback;
@@ -338,7 +338,7 @@ stmt  level    source
   318   1          if (QMC6309_WriteReg(QMC6309_REG_CONTROL_1, QMC6309_CTRL1_STANDBY) != 0) {
   319   2              return -1;
   320   2          }
-C251 COMPILER V5.60.0,  QMC6309                                                            07/05/26  09:39:31  PAGE 6   
+C251 COMPILER V5.60.0,  QMC6309                                                            16/05/26  05:32:05  PAGE 6   
 
   321   1          if (QMC6309_WriteReg(QMC6309_REG_CONTROL_2, QMC6309_CTRL2_INIT) != 0) {
   322   2              return -1;

@@ -1,0 +1,308 @@
+C251 COMPILER V5.60.0,  ship_protocol                                                      12/05/26  18:27:34  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE ship_protocol
+OBJECT MODULE PLACED IN .\list\ship_protocol.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\WIRELESS\ship_protocol.c XSMALL INTR2 BROWSE INC
+                    -DIR(..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\
+                    -AHRS;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;.
+                    -.\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR;..\Code_boweny\Device\AutoDrive) DEBUG PRINT(.\list\ship_proto
+                    -col.lst) TABS(2) OBJECT(.\list\ship_protocol.obj) 
+
+stmt  level    source
+
+    1          #include "ship_protocol.h"
+    2          
+    3          #include <string.h>
+    4          
+    5          #include "wireless.h"
+    6          #include "..\AutoDrive\autodrive.h"
+    7          #include "..\Motor\Motor.h"
+    8          #include "..\Power\power_Adc.h"
+    9          #include "..\..\..\User\Task.h"
+   10          #include "..\..\Function\Log\Log.h"
+   11          #include "..\GPS\GPS.h"
+   12          
+   13          #define SHIP_TAG "SHIP"
+   14          #define SHIP_LOWPOWER_CHECK_TICKS 600U
+   15          
+   16          static u8 g_now_pwm_accelerator = 0U;
+   17          static u16 g_lowpower_check_times = 0U;
+   18          static u32 g_last_lowpower_tick_ms = 0UL;
+   19          
+   20          static u8 ShipProtocol_Xor(const u8 *buf, u8 len)
+   21          {
+   22   1          u8 i;
+   23   1          u8 val;
+   24   1      
+   25   1          val = 0U;
+   26   1          for (i = 0U; i < len; i++) {
+   27   2              val ^= buf[i];
+   28   2          }
+   29   1          return val;
+   30   1      }
+   31          
+   32          static void ShipProtocol_WriteU16LE(u8 *buf, u16 value)
+   33          {
+   34   1          buf[0] = (u8)(value & 0xFFU);
+   35   1          buf[1] = (u8)(value >> 8);
+   36   1      }
+   37          
+   38          static void ShipProtocol_MotorControl(u8 leftRight, u8 frontBack)
+   39          {
+   40   1          u8 abs_leftRight;
+   41   1          u8 abs_frontBack;
+   42   1          int16 pwm;
+   43   1      
+   44   1          abs_leftRight = (u8)abs((int16)leftRight - 100);
+   45   1          abs_frontBack = (u8)(abs((int16)frontBack - 100) + 5);
+   46   1      
+   47   1          if ((abs_frontBack > abs_leftRight) &&
+   48   1              ((abs_leftRight > 10U) || (abs_frontBack > 20U))) {
+   49   2              if (frontBack > 110U) {
+   50   3                  g_now_pwm_accelerator = (u8)(frontBack - 100U);
+   51   3                  pwm = (int16)(frontBack - 100U) * 10;
+   52   3                  Motor_SetBothSpeed(pwm, pwm);
+   53   3              } else if (frontBack < 90U) {
+   54   3                  g_now_pwm_accelerator = 0U;
+   55   3                  pwm = (int16)(100U - frontBack) * 10;
+C251 COMPILER V5.60.0,  ship_protocol                                                      12/05/26  18:27:34  PAGE 2   
+
+   56   3                  Motor_SetBothSpeed((int16)-pwm, (int16)-pwm);
+   57   3              } else {
+   58   3                  g_now_pwm_accelerator = 0U;
+   59   3              }
+   60   2          } else if ((abs_frontBack < abs_leftRight) &&
+   61   1                     ((abs_leftRight > 10U) || (abs_frontBack > 20U))) {
+   62   2              g_now_pwm_accelerator = 0U;
+   63   2              if (leftRight <= 90U) {
+   64   3                  pwm = (int16)(100U - leftRight) * 10;
+   65   3                  Motor_SetBothSpeed((int16)-pwm, pwm);
+   66   3              } else if (leftRight > 110U) {
+   67   3                  pwm = (int16)(leftRight - 100U) * 10;
+   68   3                  Motor_SetBothSpeed(pwm, (int16)-pwm);
+   69   3              }
+   70   2          } else {
+   71   2              g_now_pwm_accelerator = 0U;
+   72   2              AutoDrive_StopMotion();
+   73   2          }
+   74   1      }
+   75          
+   76          static void ShipProtocol_KeyControl(u8 accelerator_frontBack, u8 keyCode)
+   77          {
+   78   1          static u8 lastKeyCode = 0U;
+   79   1      
+   80   1          if (lastKeyCode == keyCode) {
+   81   2              return;
+   82   2          }
+   83   1          lastKeyCode = keyCode;
+   84   1      
+   85   1          switch (lastKeyCode) {
+   86   2          case KEY_E_FLAG:
+   87   2              if (accelerator_frontBack < 110U) {
+   88   3                  g_now_pwm_accelerator = 0U;
+   89   3                  AutoDrive_StopMotion();
+   90   3              }
+   91   2              AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
+   92   2              break;
+   93   2          default:
+   94   2              break;
+   95   2          }
+   96   1      }
+   97          
+   98          static void ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
+   99          {
+  100   1          if (payload_len < 3U) {
+  101   2              return;
+  102   2          }
+  103   1      
+  104   1          if (!AutoDrive_IsBusy()) {
+  105   2              ShipProtocol_MotorControl(payload[0], payload[1]);
+  106   2          }
+  107   1          ShipProtocol_KeyControl(payload[1], payload[2]);
+  108   1          AutoDrive_LinkAliveKick();
+  109   1      }
+  110          
+  111          static void ShipProtocol_LowPowerCheck(void)
+  112          {
+  113   1          u32 now_ms;
+  114   1      
+  115   1          now_ms = Task_GetTickMs();
+  116   1          if ((now_ms - g_last_lowpower_tick_ms) < 10U) {
+  117   2              return;
+  118   2          }
+  119   1          g_last_lowpower_tick_ms = now_ms;
+  120   1      
+  121   1          Power_Check_Handle();
+C251 COMPILER V5.60.0,  ship_protocol                                                      12/05/26  18:27:34  PAGE 3   
+
+  122   1      
+  123   1          g_lowpower_check_times++;
+  124   1          if (g_lowpower_check_times > SHIP_LOWPOWER_CHECK_TICKS) {
+  125   2              g_lowpower_check_times = 0U;
+  126   2              if (Power_ADC_Get_Level() == POWER_LEVEL_0) {
+  127   3                  if ((AutoDrive_GetMode() == AUTO_DRIVE_CLOSE) &&
+  128   3                      (g_now_pwm_accelerator < 10U)) {
+  129   4                      AutoDrive_TriggerReturn();
+  130   4                  }
+  131   3              }
+  132   2          } else {
+  133   2              if (Power_ADC_Get_Level() > POWER_LEVEL_0) {
+  134   3                  g_lowpower_check_times = 0U;
+  135   3              }
+  136   2          }
+  137   1      }
+  138          
+  139          static void ShipProtocol_SendGpsReport(void)
+  140          {
+  141   1          const GPS_State_t *gps;
+  142   1          AutoDrive_PointRaw_t point;
+  143   1          u8 payload[22];
+  144   1          u8 index;
+  145   1          u8 frame[32];
+  146   1          u8 frame_len;
+  147   1      
+  148   1          gps = GPS_GetState();
+  149   1          if (gps == 0) {
+  150   2              return;
+  151   2          }
+  152   1      
+  153   1          index = 0U;
+  154   1          payload[index++] = gps->satellites_used;
+  155   1      
+  156   1          ShipProtocol_WriteU16LE(&payload[index], (u16)gps->course_deg_x100);
+  157   1          index += 2U;
+  158   1      
+  159   1          AutoDrive_GetCurrentPointRaw(&point);
+  160   1          payload[index++] = point.lon_ew;
+  161   1          ShipProtocol_WriteU16LE(&payload[index], point.lon_whole);
+  162   1          index += 2U;
+  163   1          ShipProtocol_WriteU16LE(&payload[index], point.lon_frac);
+  164   1          index += 2U;
+  165   1          payload[index++] = point.lat_ns;
+  166   1          ShipProtocol_WriteU16LE(&payload[index], point.lat_whole);
+  167   1          index += 2U;
+  168   1          ShipProtocol_WriteU16LE(&payload[index], point.lat_frac);
+  169   1          index += 2U;
+  170   1      
+  171   1          payload[index++] = Power_ADC_Get_Level();
+  172   1          payload[index++] = AutoDrive_InActive();
+  173   1      
+  174   1          frame_len = 0U;
+  175   1          frame[frame_len++] = SHIP_PROTO_HEAD;
+  176   1          frame[frame_len++] = (u8)(2U + index);
+  177   1          frame[frame_len++] = SHIP_CMD_GPS_REPORT;
+  178   1          memcpy(&frame[frame_len], payload, index);
+  179   1          frame_len = (u8)(frame_len + index);
+  180   1          frame[frame_len++] = ShipProtocol_Xor(&frame[1], (u8)(2U + index));
+  181   1          frame[frame_len++] = SHIP_PROTO_TAIL;
+  182   1          (void)Wireless_Send(frame, frame_len);
+  183   1      }
+  184          
+  185          static void ShipProtocol_Dispatch(u8 cmd, const u8 *payload, u8 payload_len)
+  186          {
+  187   1          switch (cmd) {
+C251 COMPILER V5.60.0,  ship_protocol                                                      12/05/26  18:27:34  PAGE 4   
+
+  188   2          case SHIP_CMD_PAIR:
+  189   2              break;
+  190   2          case SHIP_CMD_THROTTLE:
+  191   2              ShipProtocol_HandleThrottle(payload, payload_len);
+  192   2              break;
+  193   2          case SHIP_CMD_RETURN_HOME:
+  194   2              if (payload_len >= sizeof(AutoDrive_PointRaw_t)) {
+  195   3                  AutoDrive_SetReturnPositionRaw(payload);
+  196   3              }
+  197   2              break;
+  198   2          case SHIP_CMD_GOTO_POINT:
+  199   2              if (payload_len >= sizeof(AutoDrive_PointRaw_t)) {
+  200   3                  AutoDrive_SetFishPositionRaw(payload);
+  201   3              }
+  202   2              break;
+  203   2          case SHIP_CMD_RETURN_SWITCH:
+  204   2              if (payload_len >= 1U) {
+  205   3                  AutoDrive_SetSwitchRaw(payload, payload_len);
+  206   3              }
+  207   2              break;
+  208   2          default:
+  209   2              LOGW(SHIP_TAG, "unknown cmd=0x%02X len=%u", (u16)cmd, (u16)payload_len);
+  210   2              break;
+  211   2          }
+  212   1      }
+  213          
+  214          s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len)
+  215          {
+  216   1          u8 body_len;
+  217   1          u8 cmd;
+  218   1          u8 data_len;
+  219   1          u8 xor_calc;
+  220   1          u8 xor_recv;
+  221   1      
+  222   1          if ((frame == 0) || (frame_len < 5U)) {
+  223   2              return WIRELESS_ERR_PARAM;
+  224   2          }
+  225   1          if ((frame[0] != SHIP_PROTO_HEAD) || (frame[frame_len - 1U] != SHIP_PROTO_TAIL)) {
+  226   2              return WIRELESS_ERR_VERIFY;
+  227   2          }
+  228   1      
+  229   1          body_len = frame[1];
+  230   1          if ((body_len < 2U) || ((u8)(body_len + 3U) != frame_len)) {
+  231   2              return WIRELESS_ERR_VERIFY;
+  232   2          }
+  233   1      
+  234   1          xor_recv = frame[frame_len - 2U];
+  235   1          xor_calc = ShipProtocol_Xor(&frame[1], body_len);
+  236   1          if (xor_recv != xor_calc) {
+  237   2              return WIRELESS_ERR_VERIFY;
+  238   2          }
+  239   1      
+  240   1          cmd = frame[2];
+  241   1          data_len = (u8)(body_len - 2U);
+  242   1          ShipProtocol_Dispatch(cmd, &frame[3], data_len);
+  243   1          ShipProtocol_SendGpsReport();
+  244   1          return SUCCESS;
+  245   1      }
+  246          
+  247          void ShipProtocol_Poll(void)
+  248          {
+  249   1          u8 frame[SHIP_PROTO_MAX_FRAME_LEN];
+  250   1          u8 frame_len;
+  251   1          s8 rc;
+  252   1      
+  253   1          AutoDrive_LinkAliveTick();
+C251 COMPILER V5.60.0,  ship_protocol                                                      12/05/26  18:27:34  PAGE 5   
+
+  254   1          ShipProtocol_LowPowerCheck();
+  255   1      
+  256   1          do {
+  257   2              frame_len = 0U;
+  258   2              rc = Wireless_Receive(frame, SHIP_PROTO_MAX_FRAME_LEN, &frame_len);
+  259   2              if (rc == SUCCESS) {
+  260   3                  (void)ShipProtocol_ParseFrame(frame, frame_len);
+  261   3              }
+  262   2          } while (rc == SUCCESS);
+  263   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       888     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =         8        132
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        55     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

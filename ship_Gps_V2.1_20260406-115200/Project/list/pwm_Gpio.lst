@@ -1,0 +1,56 @@
+C51 COMPILER V9.60.7.0   PWM_GPIO                                                          04/27/2024 18:13:06 PAGE 1   
+
+
+C51 COMPILER V9.60.7.0, COMPILATION OF MODULE PWM_GPIO
+OBJECT MODULE PLACED IN .\list\pwm_Gpio.obj
+COMPILER INVOKED BY: D:\Keil_v5_c51\C51\BIN\C51.EXE ..\App\PWM\pwm_Gpio.c LARGE OPTIMIZE(8,SPEED) BROWSE INCDIR(..\Drive
+                    -r\Inc;..\App\Config;..\App\DcMotor;..\App\Gyro;..\App\Wireless\LT8920;..\App\Timer;..\App\Utils;..\App\PWM) DEBUG OBJECT
+                    -EXTEND PRINT(.\list\pwm_Gpio.lst) TABS(2) OBJECT(.\list\pwm_Gpio.obj)
+
+line level    source
+
+   1          #include "pwm_Gpio.h"
+   2          
+   3          void PWM_Gpio_Config(void)
+   4          {
+   5   1        GPIO_InitTypeDef  GPIO_InitStructure;        
+   6   1        GPIO_InitStructure.Pin  = GPIO_Pin_0|GPIO_Pin_1|GPIO_Pin_2|GPIO_Pin_3;
+   7   1        GPIO_InitStructure.Mode = GPIO_OUT_PP;         
+   8   1        GPIO_Inilize(GPIO_P1,&GPIO_InitStructure);
+   9   1      
+  10   1        DcMotor_MRight_PWM_Set(FALSE);
+  11   1        DcMotor_MLeft_PWM_Set(FALSE);
+  12   1        DcMotor_M3_PWM_Set(FALSE);
+  13   1        DcMotor_M4_PWM_Set(FALSE);
+  14   1      }
+  15          
+  16          void DcMotor_MRight_PWM_Set(uint8_t onoff){
+  17   1        P12 = onoff;
+  18   1      }
+  19          
+  20          void DcMotor_MLeft_PWM_Set(uint8_t onoff){
+  21   1        P13 = onoff;
+  22   1      } 
+  23          
+  24          void DcMotor_M3_PWM_Set(uint8_t onoff){
+  25   1        P11 = onoff;
+  26   1      }
+  27          
+  28          void DcMotor_M4_PWM_Set(uint8_t onoff){
+  29   1        P10 = onoff;
+  30   1      }
+  31          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     67    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----       2
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

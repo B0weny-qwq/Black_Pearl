@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  APP_HSSPI                                                          07/05/26  09:39:25  PAGE 1   
+C251 COMPILER V5.60.0,  APP_HSSPI                                                          13/05/26  12:22:13  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_HSSPI
@@ -66,7 +66,7 @@ stmt  level    source
    54          
    55          #define SPI_CE_High()   P_PM25LV040_CE  = 1     // set CE high
    56          #define SPI_CE_Low()    P_PM25LV040_CE  = 0     // clear CE low
-C251 COMPILER V5.60.0,  APP_HSSPI                                                          07/05/26  09:39:25  PAGE 2   
+C251 COMPILER V5.60.0,  APP_HSSPI                                                          13/05/26  12:22:13  PAGE 2   
 
    57          #define SPI_Hold()      P_SPI_Hold      = 0     // clear Hold pin
    58          #define SPI_UnHold()    P_SPI_Hold      = 1     // set Hold pin
@@ -134,7 +134,7 @@ stmt  level    source
   119   1      
   120   1        P_PM25LV040_SCK = 0;    // set clock to low initial state
   121   1        P_PM25LV040_SI = 1;
-C251 COMPILER V5.60.0,  APP_HSSPI                                                          07/05/26  09:39:25  PAGE 3   
+C251 COMPILER V5.60.0,  APP_HSSPI                                                          13/05/26  12:22:13  PAGE 3   
 
   122   1        P_PM25LV040_CE = 1;
   123   1      
@@ -202,7 +202,7 @@ stmt  level    source
   178   2            TX2_write2buff(Hex2Ascii(PM25LV040_ID >> 4));
   179   2            TX2_write2buff(Hex2Ascii(PM25LV040_ID));
   180   2            PrintString2("\r\n");
-C251 COMPILER V5.60.0,  APP_HSSPI                                                          07/05/26  09:39:25  PAGE 4   
+C251 COMPILER V5.60.0,  APP_HSSPI                                                          13/05/26  12:22:13  PAGE 4   
 
   181   2        }
   182   1      }
@@ -270,7 +270,7 @@ stmt  level    source
   244   2              length = length * 10 + CheckData(RX2_Buffer[i]);
   245   2          }
   246   1          return (length);
-C251 COMPILER V5.60.0,  APP_HSSPI                                                          07/05/26  09:39:25  PAGE 5   
+C251 COMPILER V5.60.0,  APP_HSSPI                                                          13/05/26  12:22:13  PAGE 5   
 
   247   1      }
   248          
@@ -338,7 +338,7 @@ stmt  level    source
   307   6                              if(j >= 10)     {TX2_write2buff((u8)(j/10+'0'));    j = j % 10;}
   308   6                              TX2_write2buff((u8)(j%10+'0'));
   309   6                              PrintString2("字节内容!\r\n");
-C251 COMPILER V5.60.0,  APP_HSSPI                                                          07/05/26  09:39:25  PAGE 6   
+C251 COMPILER V5.60.0,  APP_HSSPI                                                          13/05/26  12:22:13  PAGE 6   
 
   310   6                          }
   311   5                          else        PrintString2("写入错误!\r\n");
@@ -406,7 +406,7 @@ stmt  level    source
   369          出口参数:
   370              0 : Flash处于空闲状态
   371              1 : Flash处于忙状态
-C251 COMPILER V5.60.0,  APP_HSSPI                                                          07/05/26  09:39:25  PAGE 7   
+C251 COMPILER V5.60.0,  APP_HSSPI                                                          13/05/26  12:22:13  PAGE 7   
 
   372          ************************************************/
   373          u8 CheckFlashBusy(void)
@@ -474,7 +474,7 @@ stmt  level    source
   435   2              SPI_WriteByte(((u8 *)&addr)[1]);           //设置起始地址
   436   2              SPI_WriteByte(((u8 *)&addr)[2]);
   437   2              SPI_WriteByte(((u8 *)&addr)[3]);
-C251 COMPILER V5.60.0,  APP_HSSPI                                                          07/05/26  09:39:25  PAGE 8   
+C251 COMPILER V5.60.0,  APP_HSSPI                                                          13/05/26  12:22:13  PAGE 8   
 
   438   2              SPI_CE_High();
   439   2          }
@@ -542,7 +542,7 @@ stmt  level    source
   501          /************************************************
   502          写数据到Flash中
   503          入口参数:
-C251 COMPILER V5.60.0,  APP_HSSPI                                                          07/05/26  09:39:25  PAGE 9   
+C251 COMPILER V5.60.0,  APP_HSSPI                                                          13/05/26  12:22:13  PAGE 9   
 
   504              addr   : 地址参数
   505              buffer : 缓冲需要写入Flash的数据

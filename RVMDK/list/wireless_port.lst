@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  wireless_port                                                      07/05/26  09:39:32  PAGE 1   
+C251 COMPILER V5.60.0,  wireless_port                                                      16/05/26  05:32:06  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE wireless_port
@@ -66,7 +66,7 @@ stmt  level    source
    53   1          P3_MODE_IN_HIZ(GPIO_Pin_3);
    54   1          P3_PULL_UP_ENABLE(GPIO_Pin_3 | GPIO_Pin_5);
    55   1          P3_SPEED_HIGH(GPIO_Pin_2 | GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5);
-C251 COMPILER V5.60.0,  wireless_port                                                      07/05/26  09:39:32  PAGE 2   
+C251 COMPILER V5.60.0,  wireless_port                                                      16/05/26  05:32:06  PAGE 2   
 
    56   1      
    57   1          P5_MODE_OUT_PP(GPIO_Pin_0);
@@ -134,7 +134,7 @@ stmt  level    source
   119          void WirelessPort_SetAntSel(u8 ant_sel)
   120          {
   121   1          P51 = (ant_sel == WIRELESS_PORT_ANT2) ? 1 : 0;
-C251 COMPILER V5.60.0,  wireless_port                                                      07/05/26  09:39:32  PAGE 3   
+C251 COMPILER V5.60.0,  wireless_port                                                      16/05/26  05:32:06  PAGE 3   
 
   122   1      }
   123          
@@ -202,7 +202,7 @@ stmt  level    source
                    recv = 0U;
                    for (bit_mask = 0x80U; bit_mask != 0U; bit_mask >>= 1) {
                        WirelessPort_SoftSpiClock(1U);
-C251 COMPILER V5.60.0,  wireless_port                                                      07/05/26  09:39:32  PAGE 4   
+C251 COMPILER V5.60.0,  wireless_port                                                      16/05/26  05:32:06  PAGE 4   
 
                        WirelessPort_SoftSpiMosi((value & bit_mask) ? 1U : 0U);
                #if (WIRELESS_SOFT_SPI_DELAY_US > 0)

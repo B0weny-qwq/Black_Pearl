@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     07/05/26  09:39:24  PAGE 1   
+C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     13/05/26  12:22:12  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_DMA_SPI_PS
@@ -66,7 +66,7 @@ stmt  level    source
    51          
    52          //========================================================================
    53          //                               本地函数声明
-C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     07/05/26  09:39:24  PAGE 2   
+C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     13/05/26  12:22:12  PAGE 2   
 
    54          //========================================================================
    55          
@@ -134,7 +134,7 @@ stmt  level    source
   111   1      
   112   1        NVIC_DMA_UART2_Tx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低到�
              -��) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
-C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     07/05/26  09:39:24  PAGE 3   
+C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     13/05/26  12:22:12  PAGE 3   
 
   113   1        NVIC_DMA_UART2_Rx_Init(ENABLE,Priority_0,Priority_0);   //中断使能, ENABLE/DISABLE; 优先级(低到�
              -��) Priority_0~Priority_3; 总线优先级(低到高) Priority_0~Priority_3
@@ -202,7 +202,7 @@ stmt  level    source
   169   1        SET_DMA_SPI_CR(0);
   170   1        _nop_();
   171   1        _nop_();
-C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     07/05/26  09:39:24  PAGE 4   
+C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     13/05/26  12:22:12  PAGE 4   
 
   172   1        _nop_();
   173   1        _nop_();
@@ -270,7 +270,7 @@ stmt  level    source
   235   2          UartSendFlag = 0;
   236   2          SPI_DMA_Slave();    //SPI Slave Mode
   237   2          UART_DMA_Tx();      //UART Send Memory
-C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     07/05/26  09:39:24  PAGE 5   
+C251 COMPILER V5.60.0,  APP_DMA_SPI_PS                                                     13/05/26  12:22:12  PAGE 5   
 
   238   2        }
   239   1      }

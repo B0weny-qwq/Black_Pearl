@@ -1,0 +1,232 @@
+C51 COMPILER V9.60.7.0   GYRO                                                              06/27/2024 18:46:20 PAGE 1   
+
+
+C51 COMPILER V9.60.7.0, COMPILATION OF MODULE GYRO
+OBJECT MODULE PLACED IN .\Objects\gyro.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE App\Gyro\gyro.c LARGE OPTIMIZE(8,SPEED) BROWSE INCDIR(.\Driver\Inc;.\App
+                    -\Config;.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Wireless;.
+                    -\App\Gyro;.\App\Gps;.\App\AutoDrive;.\App\ADC;.\App\eeprom) DEFINE(HW_V16,SHIP_MID,BOARD_12V) DEBUG OBJECTEXTEND PRINT(.
+                    -\Listings\gyro.lst) TABS(2) OBJECT(.\Objects\gyro.obj)
+
+line level    source
+
+   1          #include "gyro.h"
+   2          #include "KalmanFiltering.h"
+   3          #include "utils_printf.h"
+   4          uint8_t i2c_addr = 0x27;
+   5          int16_t offset_x=0, offset_y=0, offset_z=0;
+   6          
+   7          uint8_t gyro_Y_Datas[20] = {0};
+   8          //Fill in the platform read/write function
+   9          #define SLAW    0x4e
+  10          #define SLAR    0x4f
+  11          
+  12          
+  13          int8_t mir3da_register_read(uint8_t addr, uint8_t *data_m, uint8_t len)
+  14          {
+  15   1          SI2C_ReadNbyte(SLAW,addr,data_m,len);
+  16   1          // MyI2C_RecvBuffer(SLAW,addr,data_m,len);
+  17   1          return 0;
+  18   1      }
+  19          
+  20          int8_t mir3da_register_write(uint8_t addr, uint8_t data_m)
+  21          {   
+  22   1          SI2C_WriteNbyte(SLAW,addr,(uint8_t *)&data_m,1);
+  23   1          // MyI2C_SendBuffer(SLAW,addr,(uint8_t *)&data_m,1);
+  24   1          // MyI2C_Send_Byte(SLAW,addr,data_m);
+  25   1          return 0;
+  26   1      }
+  27          #if 0
+              int8_t mir3da_register_mask_write(uint8_t addr, uint8_t mask, uint8_t data_m)
+              {
+                  int res=0;
+                  unsigned char tmp_data=0;
+                
+                  res = mir3da_register_read(addr, &tmp_data, 1);
+                  tmp_data &= ~mask; 
+                  tmp_data |= data_m & mask;
+                  res = mir3da_register_write(addr, tmp_data);
+                
+                  return 0;
+              }
+              #endif
+  41          
+  42          #if 1
+  43          //mir3da_init -> mir3da_set_enable -> mir3da_read_raw_data
+  44          //Initialization
+  45          int8_t mir3da_init(void){
+  46   1        uint8_t data_m = 0;
+  47   1        int i;
+  48   1      
+  49   1        for(i=0; i<10; i++){
+  50   2              delay_ms(100);
+  51   2          mir3da_register_read(REG_CHIP_ID, &data_m, 1);
+  52   2              if(data_m != 0x13){
+C51 COMPILER V9.60.7.0   GYRO                                                              06/27/2024 18:46:20 PAGE 2   
+
+  53   3                  printf("REG_CHIP_ID read False=%bd\r\n",data_m);      
+  54   3              }else{
+  55   3                  break;
+  56   3              }
+  57   2        }
+  58   1          printf("REG_CHIP_ID=%b02x\r\n",data_m);
+  59   1          mir3da_register_write(REG_SPI_CONFIG, (0x81 | 0x24));
+  60   1          delay_ms(20);
+  61   1      
+  62   1      
+  63   1          mir3da_register_write(REG_RESOLUTION_RANGE, 0x04);  //0x04; +/-2G,12bit
+  64   1          mir3da_register_write(REG_ODR_AXIS, 0x99);          //PERF LEVEL1 100hz
+  65   1          mir3da_register_write(REG_MODE_AXIS, 0x00);         //normal mode, enableXYZ, autosleep disable
+  66   1         
+  67   1      
+  68   1          printf("REG_ACTIVE_STATUS read1 =%b02x\r\n",data_m);
+  69   1          return 0;
+  70   1      }
+  71          //Read three axis data, 2g range, counting 12bit, 1G=1000mg=1024lsb
+  72          void mir3da_read_raw_data(short *x, short *y, short *z)
+  73          {
+  74   1      
+  75   1          uint8_t tmp_data[6] = {0};
+  76   1          mir3da_register_read(REG_ACC_X_LSB, (uint8_t *)&tmp_data, 6);
+  77   1      
+  78   1          uprintf_array(&tmp_data,6);
+  79   1          
+  80   1          *x = ((short)(tmp_data[1] << 8 | tmp_data[0]))>> 4;
+  81   1          *y = ((short)(tmp_data[3] << 8 | tmp_data[2]))>> 4;
+  82   1          *z = ((short)(tmp_data[5] << 8 | tmp_data[4]))>> 4;
+  83   1          printf("x==%b04x,y=%b04x,z=%b04x\r\n",*x,*y,*z );
+  84   1      }
+  85          #endif
+  86          void mir3da_read_data(short *x, short *y, short *z)
+  87          {
+  88   1          uint8_t tmp_data[6] = {0};
+  89   1         
+  90   1        mir3da_register_read(REG_ACC_X_LSB, tmp_data, 6);
+  91   1          //uprintf_array(&tmp_data,6);
+  92   1          *x = (((short)(tmp_data[1] << 8 | tmp_data[0])) >> 4) - offset_x;
+  93   1          *y = (((short)(tmp_data[3] << 8 | tmp_data[2])) >> 4) - offset_y;
+  94   1          *z = (((short)(tmp_data[5] << 8 | tmp_data[4])) >> 4) - offset_z;
+  95   1          //printf("x==%bd,y=%bd,z=%bdx\r\n",*x,*y,*z );
+  96   1      
+  97   1      }
+  98          /*
+  99            The chip needs to keep horizontal.
+ 100          */
+ 101          void do_difff_calibrate(void)
+ 102          {
+ 103   1        int i;
+ 104   1          short x=0, y=0, z=0;
+ 105   1          int16_t off_x=0, off_y=0, off_z=0;
+ 106   1          int32_t totalx = 0,totaly = 0,totalz =0;
+ 107   1        
+ 108   1        //must power on
+ 109   1          for(i=0; i<20; i++)
+ 110   1          {
+ 111   2              mir3da_read_raw_data(&x, &y, &z);
+ 112   2              totalx += (int32_t)x;
+ 113   2              totaly += (int32_t)y;
+ 114   2              totalz += (int32_t)z;
+C51 COMPILER V9.60.7.0   GYRO                                                              06/27/2024 18:46:20 PAGE 3   
+
+ 115   2          delay_ms(20);
+ 116   2          }
+ 117   1          
+ 118   1          off_x = (int16_t)(totalx/20 - 0);
+ 119   1          off_y = (int16_t)(totaly/20 - 0);
+ 120   1          if(totalz>0)
+ 121   1              off_z = (int16_t)(totalz/20 - SENSITIVITY);
+ 122   1          else
+ 123   1              off_z = (int16_t)(totalz/20 + SENSITIVITY);
+ 124   1      
+ 125   1          offset_x = off_x;
+ 126   1          offset_y = off_y;
+ 127   1          offset_z = off_z;
+ 128   1          printf("offset x==%b02x,y=%b02x,z=%b02x\r\n",offset_x,offset_y,offset_z);
+ 129   1      }
+ 130          
+ 131          void gs_get_tilt(short *XYZangle,short *xyzdata)
+ 132          { 
+ 133   1          short gx,gy,gz;
+ 134   1          short *xAngle,*yAngle,*zAngle;
+ 135   1          short  yz_plane, xz_plane , xy_plane; 
+ 136   1          short tanX,tanY,tanZ;
+ 137   1      
+ 138   1          xAngle = XYZangle;
+ 139   1          yAngle = XYZangle+1;
+ 140   1          zAngle = XYZangle+2;
+ 141   1          
+ 142   1          gx = (short)(*xyzdata);
+ 143   1          gy = (short)(*(xyzdata+1));
+ 144   1          gz = (short)(*(xyzdata+2));
+ 145   1        
+ 146   1          yz_plane = (short)(sqrt((gy)*(gy)+(gz)*(gz)));
+ 147   1          xz_plane = (short)(sqrt((gx)*(gx)+(gz)*(gz)));
+ 148   1          xy_plane = (short)(sqrt((gx)*(gx)+(gy)*(gy)));
+ 149   1      
+ 150   1          if(yz_plane==0.0)
+ 151   1          {
+ 152   2              *xAngle = 90.0;
+ 153   2          }
+ 154   1          else
+ 155   1          {
+ 156   2              tanX = ((short)(gx))/yz_plane;
+ 157   2              *xAngle = atan(tanX)*180.0/3.14;
+ 158   2          }
+ 159   1          
+ 160   1             
+ 161   1          if(xz_plane==0.0)
+ 162   1          {
+ 163   2              *yAngle = 90.0; 
+ 164   2          }
+ 165   1          else
+ 166   1          {
+ 167   2              tanY = ((short)(gy))/xz_plane; 
+ 168   2              *yAngle = atan(tanY)*180.0/3.14;
+ 169   2          }
+ 170   1          
+ 171   1          if((gz) == 0.0)
+ 172   1          {
+ 173   2              *zAngle = 90.0;  
+ 174   2          }
+ 175   1          else
+ 176   1          {
+C51 COMPILER V9.60.7.0   GYRO                                                              06/27/2024 18:46:20 PAGE 4   
+
+ 177   2              tanZ = xy_plane/((short)(gz));  
+ 178   2              *zAngle = atan(tanZ)*180.0/3.14; 
+ 179   2          }  
+ 180   1      }
+ 181          
+ 182          void Gyro_Read_Handle(void){
+ 183   1          static uint8_t gryo_delay_Times = 0;
+ 184   1          static short gryo_x=0,gryo_y=0,gryo_z=0;
+ 185   1          static short last_gryo_y=0;
+ 186   1          gryo_delay_Times++;
+ 187   1          if(gryo_delay_Times<20){
+ 188   2              gryo_delay_Times++;
+ 189   2              return;
+ 190   2          }else{
+ 191   2              gryo_delay_Times = 0;
+ 192   2          }
+ 193   1      
+ 194   1          // mir3da_read_raw_data((short *)&gryo_x,(short *)&gryo_y,(short *)&gryo_z);
+ 195   1          mir3da_read_data((short *)&gryo_x,(short *)&gryo_y,(short *)&gryo_z);
+ 196   1          
+ 197   1          last_gryo_y = gryo_y;
+ 198   1      }
+ 199          
+ 200          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1864    ----
+   CONSTANT SIZE    =    155    ----
+   XDATA SIZE       =     36      92
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

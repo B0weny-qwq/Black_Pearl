@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        16/05/26  05:32:05  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_UART
@@ -66,7 +66,7 @@ stmt  level    source
    54   2          COM1.B_TX_busy  = 0;
    55   2          COM1.RX_Cnt     = 0;
    56   2          COM1.RX_TimeOut = 0;
-C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        16/05/26  05:32:05  PAGE 2   
 
    57   2          
    58   2          for(i=0; i<COM_TX1_Lenth; i++)  TX1_Buffer[i] = 0;
@@ -134,7 +134,7 @@ stmt  level    source
   120   3            if(j >= 65536UL)  return FAIL;  //错误
   121   3            j = 65536UL - j;
   122   3            T2R = 0;    //Timer stop
-C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        16/05/26  05:32:05  PAGE 3   
 
   123   3            T2_CT = 0;  //Timer2 set As Timer
   124   3            T2x12 = 1;  //Timer2 set as 1T mode
@@ -202,7 +202,7 @@ stmt  level    source
   186   2          COM4.RX_Cnt     = 0;
   187   2          COM4.RX_TimeOut = 0;
   188   2          for(i=0; i<COM_TX4_Lenth; i++)  TX4_Buffer[i] = 0;
-C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 4   
+C251 COMPILER V5.60.0,  STC32G_UART                                                        16/05/26  05:32:05  PAGE 4   
 
   189   2          for(i=0; i<COM_RX4_Lenth; i++)  RX4_Buffer[i] = 0;
   190   2      
@@ -250,147 +250,155 @@ stmt  level    source
   232          void TX1_write2buff(u8 dat) //串口1发送函数
   233          {
   234   1          #if(UART_QUEUE_MODE == 1)
-                 TX1_Buffer[COM1.TX_write] = dat;  //装发送缓冲，使用队列式数据发送，一次性发送数据
+  235   1        if((((u8)(COM1.TX_write + 1U) >= (u8)COM_TX1_Lenth) ? 0U : (u8)(COM1.TX_write + 1U)) == COM1.TX_send) re
+             -turn;
+  236   1        TX1_Buffer[COM1.TX_write] = dat;  //装发送缓冲，使用队列式数据发送，一次性发送数据
              -长度不要超过缓冲区大小（COM_TXn_Lenth）
-                 if(++COM1.TX_write >= COM_TX1_Lenth)  COM1.TX_write = 0;
-               
-                 if(COM1.B_TX_busy == 0)   //空闲
-                 {  
-                   COM1.B_TX_busy = 1;   //标志忙
-                   TI = 1;         //触发发送中断
-                 }
-                   #else
-  244   1          //以下是阻塞方式发送方法
-  245   1        SBUF = dat;
-  246   1        COM1.B_TX_busy = 1;   //标志忙
-  247   1        while(COM1.B_TX_busy);
-  248   1          #endif
-  249   1      }
-  250          
-  251          void PrintString1(u8 *puts)
-  252          {
-  253   1          for (; *puts != 0;  puts++)  TX1_write2buff(*puts);   //遇到停止符0结束
-C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 5   
+  237   1        if(++COM1.TX_write >= COM_TX1_Lenth)  COM1.TX_write = 0;
+  238   1      
+  239   1        if(COM1.B_TX_busy == 0)   //空闲
+  240   1        {  
+  241   2          COM1.B_TX_busy = 1;   //标志忙
+  242   2          TI = 1;         //触发发送中断
+  243   2        }
+  244   1          #else
+                   //以下是阻塞方式发送方法
+                 SBUF = dat;
+                 COM1.B_TX_busy = 1;   //标志忙
+                 while(COM1.B_TX_busy);
+                   #endif
+  250   1      }
+  251          
+  252          void PrintString1(u8 *puts)
+C251 COMPILER V5.60.0,  STC32G_UART                                                        16/05/26  05:32:05  PAGE 5   
 
-  254   1      }
-  255          
-  256          #endif
-  257          
-  258          /********************* UART2 函数 ************************/
-  259          #ifdef UART2
-  260          void TX2_write2buff(u8 dat) //串口2发送函数
-  261          {
-  262   1          #if(UART_QUEUE_MODE == 1)
-                 TX2_Buffer[COM2.TX_write] = dat;  //装发送缓冲，使用队列式数据发送，一次性发送数据
+  253          {
+  254   1          for (; *puts != 0;  puts++)  TX1_write2buff(*puts);   //遇到停止符0结束
+  255   1      }
+  256          
+  257          #endif
+  258          
+  259          /********************* UART2 函数 ************************/
+  260          #ifdef UART2
+  261          void TX2_write2buff(u8 dat) //串口2发送函数
+  262          {
+  263   1          #if(UART_QUEUE_MODE == 1)
+  264   1        if((((u8)(COM2.TX_write + 1U) >= (u8)COM_TX2_Lenth) ? 0U : (u8)(COM2.TX_write + 1U)) == COM2.TX_send) re
+             -turn;
+  265   1        TX2_Buffer[COM2.TX_write] = dat;  //装发送缓冲，使用队列式数据发送，一次性发送数据
              -长度不要超过缓冲区大小（COM_TXn_Lenth）
-                 if(++COM2.TX_write >= COM_TX2_Lenth)  COM2.TX_write = 0;
-               
-                 if(COM2.B_TX_busy == 0)   //空闲
-                 {  
-                   COM2.B_TX_busy = 1;   //标志忙
-                   S2TI = 1;       //触发发送中断
-                 }
-                   #else
-  272   1          //以下是阻塞方式发送方法
-  273   1        S2BUF = dat;
-  274   1        COM2.B_TX_busy = 1;   //标志忙
-  275   1        while(COM2.B_TX_busy);
-  276   1          #endif
-  277   1      }
-  278          
-  279          void PrintString2(u8 *puts)
-  280          {
-  281   1          for (; *puts != 0;  puts++)  TX2_write2buff(*puts);   //遇到停止符0结束
-  282   1      }
-  283          
-  284          #endif
+  266   1        if(++COM2.TX_write >= COM_TX2_Lenth)  COM2.TX_write = 0;
+  267   1      
+  268   1        if(COM2.B_TX_busy == 0)   //空闲
+  269   1        {  
+  270   2          COM2.B_TX_busy = 1;   //标志忙
+  271   2          S2TI = 1;       //触发发送中断
+  272   2        }
+  273   1          #else
+                   //以下是阻塞方式发送方法
+                 S2BUF = dat;
+                 COM2.B_TX_busy = 1;   //标志忙
+                 while(COM2.B_TX_busy);
+                   #endif
+  279   1      }
+  280          
+  281          void PrintString2(u8 *puts)
+  282          {
+  283   1          for (; *puts != 0;  puts++)  TX2_write2buff(*puts);   //遇到停止符0结束
+  284   1      }
   285          
-  286          /********************* UART3 函数 ************************/
-  287          #ifdef UART3
-  288          void TX3_write2buff(u8 dat) //串口3发送函数
-  289          {
-  290   1          #if(UART_QUEUE_MODE == 1)
-                 TX3_Buffer[COM3.TX_write] = dat;  //装发送缓冲，使用队列式数据发送，一次性发送数据
+  286          #endif
+  287          
+  288          /********************* UART3 函数 ************************/
+  289          #ifdef UART3
+  290          void TX3_write2buff(u8 dat) //串口3发送函数
+  291          {
+  292   1          #if(UART_QUEUE_MODE == 1)
+  293   1        if((((u8)(COM3.TX_write + 1U) >= (u8)COM_TX3_Lenth) ? 0U : (u8)(COM3.TX_write + 1U)) == COM3.TX_send) re
+             -turn;
+  294   1        TX3_Buffer[COM3.TX_write] = dat;  //装发送缓冲，使用队列式数据发送，一次性发送数据
              -长度不要超过缓冲区大小（COM_TXn_Lenth）
-                 if(++COM3.TX_write >= COM_TX3_Lenth)  COM3.TX_write = 0;
-               
-                 if(COM3.B_TX_busy == 0)   //空闲
-                 {  
-                   COM3.B_TX_busy = 1;   //标志忙
-                   S3TI = 1;       //触发发送中断
-                 }
-                   #else
-  300   1          //以下是阻塞方式发送方法
-  301   1        S3BUF = dat;
-  302   1        COM3.B_TX_busy = 1;   //标志忙
-  303   1        while(COM3.B_TX_busy);
-  304   1          #endif
-  305   1      }
-  306          
-  307          void PrintString3(u8 *puts)
-  308          {
-  309   1          for (; *puts != 0;  puts++)  TX3_write2buff(*puts);   //遇到停止符0结束
-  310   1      }
-  311          
-  312          #endif
-  313          
-  314          /********************* UART4 函数 ************************/
-  315          #ifdef UART4
-  316          void TX4_write2buff(u8 dat) //串口4发送函数
-  317          {
-C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 6   
+  295   1        if(++COM3.TX_write >= COM_TX3_Lenth)  COM3.TX_write = 0;
+  296   1      
+  297   1        if(COM3.B_TX_busy == 0)   //空闲
+  298   1        {  
+  299   2          COM3.B_TX_busy = 1;   //标志忙
+  300   2          S3TI = 1;       //触发发送中断
+  301   2        }
+  302   1          #else
+                   //以下是阻塞方式发送方法
+                 S3BUF = dat;
+                 COM3.B_TX_busy = 1;   //标志忙
+                 while(COM3.B_TX_busy);
+                   #endif
+  308   1      }
+  309          
+  310          void PrintString3(u8 *puts)
+  311          {
+  312   1          for (; *puts != 0;  puts++)  TX3_write2buff(*puts);   //遇到停止符0结束
+  313   1      }
+  314          
+C251 COMPILER V5.60.0,  STC32G_UART                                                        16/05/26  05:32:05  PAGE 6   
 
-  318   1          #if(UART_QUEUE_MODE == 1)
-                 TX4_Buffer[COM4.TX_write] = dat;  //装发送缓冲，使用队列式数据发送，一次性发送数据
+  315          #endif
+  316          
+  317          /********************* UART4 函数 ************************/
+  318          #ifdef UART4
+  319          void TX4_write2buff(u8 dat) //串口4发送函数
+  320          {
+  321   1          #if(UART_QUEUE_MODE == 1)
+  322   1        if((((u8)(COM4.TX_write + 1U) >= (u8)COM_TX4_Lenth) ? 0U : (u8)(COM4.TX_write + 1U)) == COM4.TX_send) re
+             -turn;
+  323   1        TX4_Buffer[COM4.TX_write] = dat;  //装发送缓冲，使用队列式数据发送，一次性发送数据
              -长度不要超过缓冲区大小（COM_TXn_Lenth）
-                 if(++COM4.TX_write >= COM_TX4_Lenth)  COM4.TX_write = 0;
-               
-                 if(COM4.B_TX_busy == 0)   //空闲
-                 {  
-                   COM4.B_TX_busy = 1;   //标志忙
-                   S4TI = 1;       //触发发送中断
-                 }
-                   #else
-  328   1          //以下是阻塞方式发送方法
-  329   1        S4BUF = dat;
-  330   1        COM4.B_TX_busy = 1;   //标志忙
-  331   1        while(COM4.B_TX_busy);
-  332   1          #endif
-  333   1      }
-  334          
-  335          void PrintString4(u8 *puts)
-  336          {
-  337   1          for (; *puts != 0;  puts++)  TX4_write2buff(*puts);   //遇到停止符0结束
-  338   1      }
-  339          
-  340          #endif
-  341          
-  342          /*********************************************************/
-  343          /*
-  344          void COMx_write2buff(u8 UARTx, u8 dat)  //UART1/UART2/UART3/UART4
-  345          {
-  346            if(UARTx == UART1)  TX1_write2buff(dat);
-  347            if(UARTx == UART2)  TX2_write2buff(dat);
-  348            if(UARTx == UART3)  TX3_write2buff(dat);
-  349            if(UARTx == UART4)  TX4_write2buff(dat);
-  350          }
-  351          
-  352          void PrintString(u8 UARTx, u8 *puts)
-  353          {
-  354              for (; *puts != 0;  puts++)  COMx_write2buff(UARTx,*puts);  //遇到停止符0结束
-  355          }
-  356          */
-  357          
-  358          /********************* Printf 函数 ************************/
-  359          #if(PRINTF_SELECT == 1)
-  360          
-  361          char putchar(char c)
-  362          {
-  363   1        TX1_write2buff(c);
-  364   1        return c;
-  365   1      }
-  366          
-  367          #elif(PRINTF_SELECT == 2)
+  324   1        if(++COM4.TX_write >= COM_TX4_Lenth)  COM4.TX_write = 0;
+  325   1      
+  326   1        if(COM4.B_TX_busy == 0)   //空闲
+  327   1        {  
+  328   2          COM4.B_TX_busy = 1;   //标志忙
+  329   2          S4TI = 1;       //触发发送中断
+  330   2        }
+  331   1          #else
+                   //以下是阻塞方式发送方法
+                 S4BUF = dat;
+                 COM4.B_TX_busy = 1;   //标志忙
+                 while(COM4.B_TX_busy);
+                   #endif
+  337   1      }
+  338          
+  339          void PrintString4(u8 *puts)
+  340          {
+  341   1          for (; *puts != 0;  puts++)  TX4_write2buff(*puts);   //遇到停止符0结束
+  342   1      }
+  343          
+  344          #endif
+  345          
+  346          /*********************************************************/
+  347          /*
+  348          void COMx_write2buff(u8 UARTx, u8 dat)  //UART1/UART2/UART3/UART4
+  349          {
+  350            if(UARTx == UART1)  TX1_write2buff(dat);
+  351            if(UARTx == UART2)  TX2_write2buff(dat);
+  352            if(UARTx == UART3)  TX3_write2buff(dat);
+  353            if(UARTx == UART4)  TX4_write2buff(dat);
+  354          }
+  355          
+  356          void PrintString(u8 UARTx, u8 *puts)
+  357          {
+  358              for (; *puts != 0;  puts++)  COMx_write2buff(UARTx,*puts);  //遇到停止符0结束
+  359          }
+  360          */
+  361          
+  362          /********************* Printf 函数 ************************/
+  363          #if(PRINTF_SELECT == 1)
+  364          
+  365          char putchar(char c)
+  366          {
+  367   1        TX1_write2buff(c);
+  368   1        return c;
+  369   1      }
+  370          
+  371          #elif(PRINTF_SELECT == 2)
                
                char putchar(char c)
                {
@@ -398,6 +406,8 @@ stmt  level    source
                  return c;
                }
                
+C251 COMPILER V5.60.0,  STC32G_UART                                                        16/05/26  05:32:05  PAGE 7   
+
                #elif(PRINTF_SELECT == 3)
                
                char putchar(char c)
@@ -406,8 +416,6 @@ stmt  level    source
                  return c;
                }
                
-C251 COMPILER V5.60.0,  STC32G_UART                                                        07/05/26  09:39:27  PAGE 7   
-
                #elif(PRINTF_SELECT == 4)
                
                char putchar(char c)
@@ -421,7 +429,7 @@ stmt  level    source
 
 Module Information          Static   Overlayable
 ------------------------------------------------
-  code size            =       996     ------
+  code size            =      1211     ------
   ecode size           =    ------     ------
   data size            =    ------     ------
   idata size           =    ------     ------

@@ -1,0 +1,1034 @@
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE AUTODRIVE
+OBJECT MODULE PLACED IN .\Objects\autoDrive.obj
+COMPILER INVOKED BY: E:\Keil_v5\C51\BIN\C51.EXE App\AutoDrive\autoDrive.c LARGE BROWSE INCDIR(.\Driver\Inc;.\App\Config;
+                    -.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Wireless;.\App\Gyr
+                    -o;.\App\Gps;.\App\AutoDrive;.\App\ADC;.\App\eeprom;.\App\compass) DEFINE(HW_V16,MID_SHIP,MAG_QMC_6309,GPS_DK2_RMC) DEBUG
+                    - OBJECTEXTEND PRINT(.\Listings\autoDrive.lst) OBJECT(.\Objects\autoDrive.obj)
+
+line level    source
+
+   1          #include "autoDrive.h"
+   2          #include <math.h>
+   3          #include "eeprom.h"
+   4          #include "compass.h"
+   5          #include "pwm_Speed.h"
+   6          
+   7          
+   8          #define         AUTODRIVE_WORK_OVERTIME                 10*60*100               // 10·ÖÖÓ
+   9          
+  10          
+  11          uint8_t idata autoDrive_Switch = FALSE;
+  12          
+  13          uint8_t idata autoDrive_State = AUTO_DRIVE_IDLE;
+  14          uint8_t idata autoDrive_Mode = AUTO_DRIVE_CLOSE;
+  15          
+  16          uint8_t idata autoDrive_GetDirection_Times = 0;
+  17          uint16_t idata autoDrive_Get_Start_Direction_Turn_Times = 0;
+  18          uint16_t idata autodrive_work_overtime;
+  19          uint8_t idata autoDrive_fail_flag = 0;
+  20          
+  21          GPS_POSITION idle_Gps_Position;
+  22          GPS_POSITION now_Gps_Position,last_Gps_Position;
+  23          
+  24          GPS_POSITION  idata returnPosition;
+  25          GPS_POSITION  idata fishPosition;
+  26          
+  27          
+  28          uint8_t  destination_Direction = POSITION_EAST;
+  29          uint8_t  nowRun_Direction = POSITION_EAST;
+  30          uint16_t nowRun_Angel,destination_Angel;
+  31          
+  32          
+  33          typedef struct
+  34          {       
+  35                  uint8_t auto_ret_onoff;
+  36                  GPS_POSITION ret_point;
+  37          
+  38          }RETURN_CONFIG_T;
+  39          
+  40          
+  41          RETURN_CONFIG_T idata autodrv_cfg;
+  42          
+  43          
+  44          void autodrv_init(void)
+  45          {       
+  46   1              ep_readShipConfig((uint8_t *)&autodrv_cfg,sizeof(RETURN_CONFIG_T));
+  47   1              if (autodrv_cfg.auto_ret_onoff == 0xff)
+  48   1              {       
+  49   2                      memset(&autodrv_cfg,0x00,sizeof(RETURN_CONFIG_T));
+  50   2                      autodrv_cfg.auto_ret_onoff = 0x30;                      // Ä¬ÈÏ¿ªÆô
+  51   2              }
+  52   1              autoDrive_Switch = autodrv_cfg.auto_ret_onoff;
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 2   
+
+  53   1      //      printf("init jingDu=%u.%u,",autodrv_cfg.ret_point.jingdu_Left,autodrv_cfg.ret_point.jingdu_Right);
+  54   1      //    printf("init weidu=%u.%u,",autodrv_cfg.ret_point.weidu_Left,autodrv_cfg.ret_point.weidu_Right);
+  55   1          autodrive_work_overtime = 0;
+  56   1              autoDrive_fail_flag = 0;
+  57   1      }
+  58          
+  59          void autoDrive_Set_Mode(uint8_t mode){
+  60   1              
+  61   1              if ((autoDrive_Mode != AUTO_DRIVE_CLOSE) && (mode == AUTO_DRIVE_CLOSE))
+  62   1              {       
+  63   2                      DcMotor_Direction_Set(DIRECTION_FORWARD);
+  64   2              DcMotor_MRight_PWM_Set(FALSE,0);
+  65   2              DcMotor_MLeft_PWM_Set(FALSE,0);
+  66   2              nowPwmAccelerator_Set(0);
+  67   2              }
+  68   1          autoDrive_Mode = mode;
+  69   1          if(autoDrive_Mode == AUTO_DRIVE_CLOSE){
+  70   2              autoDrive_State = AUTO_DRIVE_IDLE;
+  71   2          }
+  72   1      }
+  73          
+  74          uint8_t autoDrive_Get_Mode(void){
+  75   1          return autoDrive_Mode;
+  76   1      }
+  77          
+  78          uint8_t autoDrive_in_active(void){
+  79   1      
+  80   1              //printf("get auto state=%bd,%bd \r\n",autoDrive_State,autoDrive_Mode);
+  81   1              
+  82   1          if (autoDrive_State != AUTO_DRIVE_IDLE)
+  83   1              {       
+  84   2                      if (autoDrive_Mode == AUTO_DRIVE_GO_HOME_POSITION)
+  85   2                              return 1;
+  86   2                      else if(autoDrive_Mode == AUTO_DRIVE_GO_FISISH_POSITION)
+  87   2                              return 2;
+  88   2          }
+  89   1              return 0;
+  90   1      }
+  91          
+  92          uint8_t autoDrive_is_can_active(GPS_POSITION *point)
+  93          {       
+  94   1              uint16_t distance = 0;
+  95   1              
+  96   1              if (autoDrive_State != AUTO_DRIVE_IDLE)         //µ±Ç°ÒÑ¾­ÔÚ×Ô¶¯·µº½Ä£Ê½
+  97   1                      return FALSE;
+  98   1              if ((point->jingdu_EW != 'E') && (point->jingdu_EW != 'W'))             // ·µº½µãÎÞÐ§
+  99   1                      return FALSE;
+ 100   1              if (point->jingdu_Left == 0)
+ 101   1                      return FALSE;
+ 102   1              if ((idle_Gps_Position.jingdu_Left == 0) || (nmea41_Get_GPS_Num() < 7)) // µ±Ç°¶¨Î»Ê§°Ü»òÎ
+             -ÀÐÇÊýÁ¿ Ð¡ÓÚ7 ²»ÆôÓÃ·µº½
+ 103   1                      return FALSE;
+ 104   1              distance = autoDrive_Get_Distance_NowPosition_Destination((uint8_t *)point,(uint8_t *)&idle_Gps_Position)
+             -;
+ 105   1              if ((distance > 10) && (distance < 800))                // ¾àÀë´óÓÚ50Ã×  Ð¡ÓÚ600Ã×
+ 106   1              {       
+ 107   2      //              printf("autodrive active!!\r\n");
+ 108   2                      return TRUE;
+ 109   2              }
+ 110   1      //      printf("autodrive active err! distance = %d \r\n",distance);
+ 111   1              return FALSE;
+ 112   1      }
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 3   
+
+ 113          
+ 114          void autoDrive_Set_ReturnPosition(uint8_t *data_m){
+ 115   1      //    printf("Set return position \r\n");
+ 116   1      
+ 117   1              if (autoDrive_State != AUTO_DRIVE_IDLE)
+ 118   1                      return ;
+ 119   1          memcpy((uint8_t *)&returnPosition,data_m,sizeof(GPS_POSITION));
+ 120   1      //    printf("back jingDu=%u.%u \r\n",returnPosition.jingdu_Left,returnPosition.jingdu_Right);
+ 121   1      //    printf("back weidu=%u.%u  \r\n",returnPosition.weidu_Left,returnPosition.weidu_Right);
+ 122   1      
+ 123   1              if (!autoDrive_is_can_active(&returnPosition))
+ 124   1                      return ;
+ 125   1          autoDrive_Set_Mode(AUTO_DRIVE_GO_HOME_POSITION);
+ 126   1          autoDrive_State = AUTO_DRIVE_START;
+ 127   1          //uprintf_array((uint8_t *)&returnPosition,sizeof(GPS_POSITION));
+ 128   1              autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;              // ·µº½³¬Ê±ÅÐ¶Ï
+ 129   1              autoDrive_fail_flag = 0;
+ 130   1      
+ 131   1      //      printf("enter autodrive  go home position!!!\r\n");
+ 132   1      }
+ 133          
+ 134          void autoDrive_Set_FishPosition(uint8_t *data_m){
+ 135   1      //    printf("Set fISH position\r\n");
+ 136   1      
+ 137   1              if (autoDrive_State != AUTO_DRIVE_IDLE)
+ 138   1                      return ;
+ 139   1              
+ 140   1          memcpy((uint8_t *)&fishPosition,data_m,sizeof(GPS_POSITION));
+ 141   1      //    printf("fish jingDu=%u.%u,",fishPosition.jingdu_Left,fishPosition.jingdu_Right);
+ 142   1      //    printf("fish weidu=%u.%u,",fishPosition.weidu_Left,fishPosition.weidu_Right);
+ 143   1              
+ 144   1              if (!autoDrive_is_can_active(&fishPosition))
+ 145   1                      return ;
+ 146   1              
+ 147   1          autoDrive_Set_Mode(AUTO_DRIVE_GO_FISISH_POSITION);
+ 148   1          autoDrive_State = AUTO_DRIVE_START;
+ 149   1          //uprintf_array((uint8_t *)&fishPosition,sizeof(GPS_POSITION));
+ 150   1              autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
+ 151   1              autoDrive_fail_flag = 0;
+ 152   1      
+ 153   1      //      printf("enter autodrive  go fISH position!!!\r\n");
+ 154   1      }
+ 155          
+ 156          // Æô¶¯×Ô¶¯·µº½
+ 157          void autoDrive_active(void){
+ 158   1      
+ 159   1              if (autodrv_cfg.auto_ret_onoff != 0x30)         
+ 160   1              {       
+ 161   2                      if (autoDrive_fail_flag)
+ 162   2                              return ;
+ 163   2                      if (autoDrive_State != AUTO_DRIVE_IDLE)
+ 164   2                              return ;
+ 165   2                      if (autoDrive_is_can_active(&autodrv_cfg.ret_point))
+ 166   2                      {       memcpy((uint8_t *)&returnPosition,&autodrv_cfg.ret_point,sizeof(GPS_POSITION));
+ 167   3                          autoDrive_Set_Mode(AUTO_DRIVE_GO_HOME_POSITION);
+ 168   3                          autoDrive_State = AUTO_DRIVE_START;
+ 169   3                              autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
+ 170   3      
+ 171   3      //                      printf("wireless less  go home start!!!\r\n");
+ 172   3                      }
+ 173   2              }
+ 174   1      }
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 4   
+
+ 175          
+ 176          void autodrive_overtime_fail(void)
+ 177          {       
+ 178   1              autoDrive_fail_flag = 1;
+ 179   1      }
+ 180          
+ 181          // ±£´æ×Ô¶¯·µº½ÉèÖÃ
+ 182          void autoDrive_Set_Switch(uint8_t *data_m){
+ 183   1          autoDrive_Switch = data_m[0];
+ 184   1              autodrv_cfg.auto_ret_onoff = data_m[0];
+ 185   1              memcpy((uint8_t *)&autodrv_cfg.ret_point,&data_m[1],sizeof(GPS_POSITION));
+ 186   1              ep_saveShipConfig((uint8_t *)&autodrv_cfg,sizeof(RETURN_CONFIG_T));
+ 187   1      
+ 188   1              //printf("set jingDu=%hu.%hu,",autodrv_cfg.ret_point.jingdu_Left,autodrv_cfg.ret_point.jingdu_Right);
+ 189   1          //printf("set weidu=%hu.%hu,",autodrv_cfg.ret_point.weidu_Left,autodrv_cfg.ret_point.weidu_Right);
+ 190   1      }
+ 191          
+ 192          #if 0
+              uint8_t autoDrive_Get_Switch(void){
+                  return autoDrive_Switch;
+              }
+              
+              uint16_t autoDrive_Get_Turn_Times(void){
+                  return autoDrive_Get_Start_Direction_Turn_Times;
+              }
+              
+              #endif
+ 202          
+ 203          void autoDrive_Set_Turn_Times(uint16_t times){
+ 204   1          if(times > 200){
+ 205   2              times = 200;
+ 206   2          }
+ 207   1          autoDrive_Get_Start_Direction_Turn_Times = times;
+ 208   1      }
+ 209          
+ 210          
+ 211          // get desposition angel
+ 212          uint8_t autoDrive_Get_Direction_NowPosition_Destination(uint8_t *nowpositionData,uint8_t *despositionData)
+             -{
+ 213   1          GPS_POSITION *nowposition, *desposition;
+ 214   1          uint8_t direction = 0;
+ 215   1          nowposition = (GPS_POSITION *)nowpositionData;
+ 216   1          desposition = (GPS_POSITION *)despositionData;
+ 217   1          // printf("now jing=%hu.%hu  ",nowposition->jingdu_Left,nowposition->jingdu_Right);
+ 218   1          // printf("now wei=%hu.%hu  ",nowposition->weidu_Left,nowposition->weidu_Right);
+ 219   1          // printf("last jing=%hu.%hu ",desposition->jingdu_Left,desposition->jingdu_Right);
+ 220   1          // printf("last wei=%hu.%hu \r\n",desposition->weidu_Left,desposition->weidu_Right);
+ 221   1          if(
+ 222   1              (nowposition->jingdu_Left > desposition->jingdu_Left)
+ 223   1              ||(nowposition->jingdu_Left == desposition->jingdu_Left && nowposition->jingdu_Right > desposition
+             -->jingdu_Right)
+ 224   1          ){
+ 225   2              // 向西
+ 226   2              direction = POSITION_WEST;
+ 227   2              // direction = POSITION_EAST;
+ 228   2              if(
+ 229   2                  (nowposition->weidu_Left > desposition->weidu_Left)
+ 230   2                  ||(nowposition->weidu_Left == desposition->weidu_Left && nowposition->weidu_Right > despositio
+             -n->weidu_Right)
+ 231   2              ){
+ 232   3                  // 向南 
+ 233   3                  direction = POSITION_WEST_SOUTH;
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 5   
+
+ 234   3                  // direction = POSITION_EAST_NORTH;
+ 235   3              }else if(
+ 236   2      
+ 237   2                  (nowposition->weidu_Left < desposition->weidu_Left)
+ 238   2                  ||(nowposition->weidu_Left == desposition->weidu_Left && nowposition->weidu_Right < despositio
+             -n->weidu_Right)
+ 239   2              ){
+ 240   3                  // 向北 
+ 241   3                  direction = POSITION_WEST_NORTH;
+ 242   3                  // direction = POSITION_EAST_SOUTH;
+ 243   3              }
+ 244   2          }
+ 245   1          
+ 246   1          if(
+ 247   1              (nowposition->jingdu_Left < desposition->jingdu_Left)
+ 248   1              ||(nowposition->jingdu_Left == desposition->jingdu_Left && nowposition->jingdu_Right < desposition
+             -->jingdu_Right)
+ 249   1          ){
+ 250   2             // 向东 
+ 251   2             direction = POSITION_EAST;
+ 252   2              // direction = POSITION_WEST;
+ 253   2              if(
+ 254   2                  (nowposition->weidu_Left > desposition->weidu_Left)
+ 255   2                  ||(nowposition->weidu_Left == desposition->weidu_Left && nowposition->weidu_Right > despositio
+             -n->weidu_Right)
+ 256   2              ){
+ 257   3                  // 向南 
+ 258   3                  direction = POSITION_EAST_SOUTH;
+ 259   3                  // direction = POSITION_WEST_NORTH;
+ 260   3              }else if(
+ 261   2      
+ 262   2                  (nowposition->weidu_Left < desposition->weidu_Left)
+ 263   2                  ||(nowposition->weidu_Left == desposition->weidu_Left && nowposition->weidu_Right < despositio
+             -n->weidu_Right)
+ 264   2              ){
+ 265   3                  // 向北 
+ 266   3                  direction = POSITION_EAST_NORTH;
+ 267   3                  // direction = POSITION_WEST_SOUTH;
+ 268   3              }
+ 269   2          }
+ 270   1          return direction;
+ 271   1      }
+ 272          
+ 273          #if 0
+              uint16_t autoDrive_Get_Angel_NowPosition_Destination(uint8_t *nowpositionData,uint8_t *despositionData){
+                  GPS_POSITION *nowposition, *desposition;
+              
+                  double distance_width = 0,distance_height = 0,distance = 0,angel = 0;
+              
+                  uint32_t seconds_now = 0,seconds_des = 0;
+                  uint32_t millseconds_now = 0,millseconds_des = 0;
+              
+                  nowposition = (GPS_POSITION *)nowpositionData;
+                  desposition = (GPS_POSITION *)despositionData;
+              
+              // jingdu
+                  seconds_now = (nowposition->jingdu_Left/100*3600 + (nowposition->jingdu_Left - nowposition->jingdu_Lef
+             -t/100*100)*60 + nowposition->jingdu_Right/1000);
+                  millseconds_now = seconds_now * 1000 + (nowposition->jingdu_Right - nowposition->jingdu_Right/1000*100
+             -0);
+                  // printf("jingduNow.millseconds_now = %u\r\n",millseconds_now);
+              
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 6   
+
+                  seconds_des = (desposition->jingdu_Left/100*3600 + (desposition->jingdu_Left - desposition->jingdu_Lef
+             -t/100*100)*60 + desposition->jingdu_Right/1000);
+                  millseconds_des = seconds_des * 1000 + (desposition->jingdu_Right - desposition->jingdu_Right/1000*100
+             -0);
+                  // printf("jingduNow.millseconds_des = %u\r\n",millseconds_des);
+              
+              
+                  distance_width = millseconds_des > millseconds_now ? millseconds_des-millseconds_now:millseconds_now-m
+             -illseconds_des;
+                  distance_width = distance_width*30.86/1000;
+                  // printf("jingdu.distance_width2 = %f\r\n",distance_width);
+              
+              // weidu
+                  seconds_now = (nowposition->weidu_Left/100*3600 + (nowposition->weidu_Left - nowposition->weidu_Left/1
+             -00*100)*60 + nowposition->weidu_Right/1000);
+                  millseconds_now = seconds_now * 1000 + (nowposition->weidu_Right - nowposition->weidu_Right/1000*1000)
+             -;
+                  // printf("jingduNow.millseconds_now = %u\r\n",millseconds_now);
+              
+                  seconds_des = (desposition->weidu_Left/100*3600 + (desposition->weidu_Left - desposition->weidu_Left/1
+             -00*100)*60 + desposition->weidu_Right/1000);
+                  millseconds_des = seconds_des * 1000 + (desposition->weidu_Right - desposition->weidu_Right/1000*1000)
+             -;
+                  // printf("jingduNow.millseconds_des = %u\r\n",millseconds_des);
+              
+              
+                  distance_height = millseconds_des > millseconds_now ? millseconds_des-millseconds_now:millseconds_now-
+             -millseconds_des;
+                  distance_height = distance_height*30.86/1000;
+                  // printf("jingdu.distance_height2 = %f\r\n",distance_height);
+                  distance = sqrt(distance_height*distance_height + distance_width*distance_width);
+                  // printf("distance==%f\r",distance);
+              
+                  // distance_height = 2;distance_width = 1;
+                  angel = atan(distance_height/distance_width)*180/PI;
+              
+              //    printf("tan==%hu,%hu,%hu\r",(uint16_t)distance_height,(uint16_t)distance_width,(uint16_t)angel);
+                  // printf("angel==%hu\r",angel);
+                  if(angel > 360){
+                      angel = 65535;
+                  }
+                  return (uint16_t)angel;
+              }
+              
+              uint16_t autoDrive_Get_Distance_NowPosition_Destination(uint8_t *nowpositionData,uint8_t *despositionData)
+             -{
+                  GPS_POSITION *nowposition, *desposition;
+              
+                  double distance_width = 0,distance_height = 0,distance = 0;
+              
+                  uint32_t seconds_now = 0,seconds_des = 0;
+                  uint32_t millseconds_now = 0,millseconds_des = 0;
+              
+                  nowposition = (GPS_POSITION *)nowpositionData;
+                  desposition = (GPS_POSITION *)despositionData;
+              
+              // jingdu
+                  seconds_now = (nowposition->jingdu_Left/100*3600 + (nowposition->jingdu_Left - nowposition->jingdu_Lef
+             -t/100*100)*60 + nowposition->jingdu_Right/1000);
+                  millseconds_now = seconds_now * 1000 + (nowposition->jingdu_Right - nowposition->jingdu_Right/1000*100
+             -0);
+                  // printf("jingduNow.millseconds_now = %u\r\n",millseconds_now);
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 7   
+
+              
+                  seconds_des = (desposition->jingdu_Left/100*3600 + (desposition->jingdu_Left - desposition->jingdu_Lef
+             -t/100*100)*60 + desposition->jingdu_Right/1000);
+                  millseconds_des = seconds_des * 1000 + (desposition->jingdu_Right - desposition->jingdu_Right/1000*100
+             -0);
+                  // printf("jingduNow.millseconds_des = %u\r\n",millseconds_des);
+              
+              
+                  distance_width = millseconds_des > millseconds_now ? millseconds_des-millseconds_now:millseconds_now-m
+             -illseconds_des;
+                  distance_width = distance_width*30.86/1000;
+                  // printf("jingdu.distance_width2 = %f\r\n",distance_width);
+              
+              // weidu
+                  seconds_now = (nowposition->weidu_Left/100*3600 + (nowposition->weidu_Left - nowposition->weidu_Left/1
+             -00*100)*60 + nowposition->weidu_Right/1000);
+                  // printf("weiduNow.seconds_now = %u\r\n",seconds_now);
+                  millseconds_now = seconds_now * 1000 + (nowposition->weidu_Right - nowposition->weidu_Right/1000*1000)
+             -;
+                  // printf("weiduNow.millseconds_now = %u\r\n",millseconds_now);
+              
+                  seconds_des = (desposition->weidu_Left/100*3600 + (desposition->weidu_Left - desposition->weidu_Left/1
+             -00*100)*60 + desposition->weidu_Right/1000);
+                  // printf("weiduNow.seconds_des = %u\r\n",seconds_des);
+                  millseconds_des = seconds_des * 1000 + (desposition->weidu_Right - desposition->weidu_Right/1000*1000)
+             -;
+                  // printf("weiduNow.millseconds_des = %u\r\n",millseconds_des);
+              
+              
+                  distance_height = millseconds_des > millseconds_now ? millseconds_des-millseconds_now:millseconds_now-
+             -millseconds_des;
+                  distance_height = distance_height*30.86/1000;
+                  // printf("jingdu.distance_height2 = %f\r\n",distance_height);
+              
+                  distance = sqrt(distance_height*distance_height + distance_width*distance_width);
+                  // printf("jingdu.distance = %f\r\n",distance);
+              
+                  return (uint16_t)distance;
+              }
+              
+              #else
+ 374          
+ 375          //1��   111.13km
+ 376          //1��   1.85km
+ 377          
+ 378          double cal_distance_jingdu(GPS_POSITION *now,GPS_POSITION *des)
+ 379          {       
+ 380   1              uint16_t dd1,dd2;
+ 381   1              double sec1,sec2;
+ 382   1      
+ 383   1              dd1 = now->jingdu_Left/100;
+ 384   1              dd2 = des->jingdu_Left/100;
+ 385   1      
+ 386   1              sec1 = (double)(now->jingdu_Left%100) + ((double)now->jingdu_Right)/10000;
+ 387   1              sec2 = (double)(des->jingdu_Left%100) + ((double)des->jingdu_Right)/10000;
+ 388   1      
+ 389   1              if (dd1 == dd2)
+ 390   1              {       
+ 391   2                      dd1 = 0;
+ 392   2                      if (sec1 >= sec2)
+ 393   2                              sec1 -= sec2;
+ 394   2                      else
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 8   
+
+ 395   2                              sec1 = sec2 - sec1;
+ 396   2              }
+ 397   1              else if (dd1 > dd2)
+ 398   1              {       
+ 399   2                      dd1 = dd1 - dd2;
+ 400   2                      if (sec1 > sec2)
+ 401   2                      {       
+ 402   3                              sec1 -= sec2;
+ 403   3                      }
+ 404   2                      else
+ 405   2                      {       
+ 406   3                              dd1 -= 1;
+ 407   3                              sec1 += 60.00;
+ 408   3                              sec1 = sec1 - sec2;
+ 409   3                      }
+ 410   2              }
+ 411   1              else
+ 412   1              {       
+ 413   2                      dd1 = dd2 - dd1;
+ 414   2                      if (sec2 > sec1)
+ 415   2                      {       
+ 416   3                              sec1 -= sec2;
+ 417   3                      }
+ 418   2                      else
+ 419   2                      {       
+ 420   3                              dd1 -= 1;
+ 421   3                              sec2 += 60.00;
+ 422   3                              sec1 = sec2 - sec1;
+ 423   3                      }
+ 424   2              }
+ 425   1              if (dd1 != 0)
+ 426   1                      return (double)(((double)dd1)*111130 + sec1*1850.00);
+ 427   1              else
+ 428   1                      return (double)(sec1*1850.00);
+ 429   1              
+ 430   1      }
+ 431          
+ 432          double cal_distance_weidu(GPS_POSITION *now,GPS_POSITION *des)
+ 433          {       
+ 434   1              uint16_t dd1,dd2;
+ 435   1              double sec1,sec2;
+ 436   1              //uint16_t distance;
+ 437   1      
+ 438   1              dd1 = now->weidu_Left/100;
+ 439   1              dd2 = des->weidu_Left/100;
+ 440   1      
+ 441   1              sec1 = (double)(now->weidu_Left%100) + ((double)now->weidu_Right)/10000;
+ 442   1              sec2 = (double)(des->weidu_Left%100) + ((double)des->weidu_Right)/10000;
+ 443   1      
+ 444   1              if (dd1 == dd2)
+ 445   1              {       
+ 446   2                      dd1 = 0;
+ 447   2                      if (sec1 >= sec2)
+ 448   2                              sec1 -= sec2;
+ 449   2                      else
+ 450   2                              sec1 = sec2 - sec1;
+ 451   2              }
+ 452   1              else if (dd1 > dd2)
+ 453   1              {       
+ 454   2                      dd1 = dd1 - dd2;
+ 455   2                      if (sec1 > sec2)
+ 456   2                      {       
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 9   
+
+ 457   3                              sec1 -= sec2;
+ 458   3                      }
+ 459   2                      else
+ 460   2                      {       
+ 461   3                              dd1 -= 1;
+ 462   3                              sec1 += 60.00;
+ 463   3                              sec1 = sec1 - sec2;
+ 464   3                      }
+ 465   2              }
+ 466   1              else
+ 467   1              {       
+ 468   2                      dd1 = dd2 - dd1;
+ 469   2                      if (sec2 > sec1)
+ 470   2                      {       
+ 471   3                              sec1 -= sec2;
+ 472   3                      }
+ 473   2                      else
+ 474   2                      {       
+ 475   3                              dd1 -= 1;
+ 476   3                              sec2 += 60.00;
+ 477   3                              sec1 = sec2 - sec1;
+ 478   3                      }
+ 479   2              }
+ 480   1              if (dd1 != 0)
+ 481   1                      return (double)(((double)dd1)*111130 + sec1*1850.00);
+ 482   1              else
+ 483   1                      return (double)(sec1*1850.00);
+ 484   1      }
+ 485          
+ 486          
+ 487          uint16_t autoDrive_Get_Angel_NowPosition_Destination(uint8_t *nowpositionData,uint8_t *despositionData){
+ 488   1      
+ 489   1          GPS_POSITION *nowposition, *desposition;
+ 490   1      
+ 491   1          double distance_width = 0,distance_height = 0,distance = 0;
+ 492   1          double angel = 0;
+ 493   1              
+ 494   1          // uprintf_array(nowpositionData,sizeof(GPS_POSITION));
+ 495   1          nowposition = (GPS_POSITION *)nowpositionData;
+ 496   1          desposition = (GPS_POSITION *)despositionData;
+ 497   1      
+ 498   1      
+ 499   1          //printf("weiduABS1=%u.%u\r\n",nowposition->jingdu_Right,desposition->jingdu_Right);
+ 500   1          //printf("weiduABS1=%u.%u\r\n",nowposition->weidu_Right,desposition->weidu_Right);
+ 501   1      
+ 502   1              distance_width = cal_distance_jingdu(nowposition,desposition);
+ 503   1      
+ 504   1              distance_height = cal_distance_weidu(nowposition,desposition);
+ 505   1      
+ 506   1          distance = sqrt(distance_height*distance_height + distance_width*distance_width);
+ 507   1          //printf("distance==%f\r\n",distance);
+ 508   1      
+ 509   1          // distance_height = 2;distance_width = 1;
+ 510   1          angel = atan(distance_height/distance_width)*180/PI;
+ 511   1      
+ 512   1          //printf("tan==%hu,%hu,%hu\r",(uint16_t)distance_height,(uint16_t)distance_width,(uint16_t)angel);
+ 513   1          // printf("angel==%hu\r",angel);
+ 514   1          if(angel > 360){
+ 515   2              angel = 65535;
+ 516   2          }
+ 517   1          return (uint16_t)angel;
+ 518   1      }
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 10  
+
+ 519          
+ 520          uint16_t autoDrive_Get_Distance_NowPosition_Destination(uint8_t *nowpositionData,uint8_t *despositionData)
+             -{
+ 521   1      
+ 522   1          GPS_POSITION *nowposition, *desposition;
+ 523   1              double distance_width = 0,distance_height = 0,distance = 0;
+ 524   1      
+ 525   1          double angel = 0;
+ 526   1              
+ 527   1          // uprintf_array(nowpositionData,sizeof(GPS_POSITION));
+ 528   1          nowposition = (GPS_POSITION *)nowpositionData;
+ 529   1          desposition = (GPS_POSITION *)despositionData;
+ 530   1      
+ 531   1      
+ 532   1              distance_width = cal_distance_jingdu(nowposition,desposition);
+ 533   1      
+ 534   1              distance_height = cal_distance_weidu(nowposition,desposition);
+ 535   1      
+ 536   1          distance = sqrt(distance_height*distance_height + distance_width*distance_width);
+ 537   1      
+ 538   1              //printf("distance = %f \r\n",distance);
+ 539   1              
+ 540   1          return (uint16_t)distance;
+ 541   1      }
+ 542          
+ 543          #endif
+ 544          
+ 545          uint16_t autoDrive_Get_North_Angel(uint8_t direction,uint8_t angel){
+ 546   1          uint16_t northAngel = 0;
+ 547   1          switch(direction){
+ 548   2              case POSITION_NORTH:
+ 549   2                  northAngel = 0;
+ 550   2              break;
+ 551   2              case POSITION_EAST_NORTH:
+ 552   2                  northAngel = 90 - angel;
+ 553   2              break;
+ 554   2              case POSITION_EAST:
+ 555   2                  northAngel = 90;
+ 556   2              break;
+ 557   2              case POSITION_EAST_SOUTH:
+ 558   2                  northAngel = 90 + angel;
+ 559   2              break;
+ 560   2              case POSITION_SOUTH:
+ 561   2                  northAngel = 180;
+ 562   2              break;
+ 563   2              case POSITION_WEST_SOUTH:
+ 564   2                  northAngel = 270 - angel;
+ 565   2              break;
+ 566   2              case POSITION_WEST:
+ 567   2                  northAngel = 270;
+ 568   2              break;
+ 569   2              case POSITION_WEST_NORTH:
+ 570   2                  northAngel = 270 + angel;
+ 571   2              break;
+ 572   2          }
+ 573   1          return northAngel;
+ 574   1      }
+ 575          
+ 576          
+ 577          void autoDrive_start_run_line(uint8_t speed)
+ 578          {       
+ 579   1              uint8_t motor_dir = lastDirection;
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 11  
+
+ 580   1              
+ 581   1              DcMotor_Direction_Set(DIRECTION_FORWARD);
+ 582   1              nowPwmAccelerator_Set(speed);
+ 583   1              
+ 584   1              //comPass_cache_init_angel();
+ 585   1              if (motor_dir != DIRECTION_FORWARD)
+ 586   1                      comPass_cache_init_angel_delay();
+ 587   1      }
+ 588          
+ 589          void autoDrive_Turn_Handle(void){
+ 590   1          if(autoDrive_Get_Start_Direction_Turn_Times > 0){
+ 591   2              autoDrive_Get_Start_Direction_Turn_Times--;
+ 592   2          }else{
+ 593   2              
+ 594   2                      autoDrive_start_run_line(100);
+ 595   2          }
+ 596   1          
+ 597   1      }
+ 598          
+ 599          void autoDrive_Handle(void){
+ 600   1          // printf("ads=%bd",autoDrive_State);
+ 601   1          static uint8_t runningWaitTimes = 0;
+ 602   1          uint8_t direction_Sub_Abs = 0;
+ 603   1                      uint16_t direction_Threshold = 0;
+ 604   1                      int16_t direction_Diff = 0;
+ 605   1          uint16_t destinationDistance = 0,angel_Sub_Abs = 0;
+ 606   1                      uint16_t turn_angle;
+ 607   1          uint8_t turn_dir;
+ 608   1          switch (autoDrive_State)
+ 609   1          {
+ 610   2              case AUTO_DRIVE_IDLE:{
+ 611   3                  idle_Gps_Position.jingdu_Left  = nmea41_Get_JingDu1();
+ 612   3                  idle_Gps_Position.jingdu_Right = nmea41_Get_JingDu2();
+ 613   3                  idle_Gps_Position.weidu_Left   = nmea41_Get_WeiDu1();
+ 614   3                  idle_Gps_Position.weidu_Right  = nmea41_Get_WeiDu2();
+ 615   3                              //printf("autodrive state = %bd\r\n",autoDrive_State);
+ 616   3              }
+ 617   2              break;
+ 618   2              case AUTO_DRIVE_START:{
+ 619   3                  
+ 620   3                  Set_DcMotor_PWM_CruiseControl_Mode(CRUISE_STOP);
+ 621   3                  if(autoDrive_Get_Mode()==AUTO_DRIVE_GO_FISISH_POSITION){
+ 622   4                      // destination_Direction = autoDrive_Get_Direction_NowPosition_Destination((uint8_t *)&fis
+             -hPosition,(uint8_t *)&idle_Gps_Position);
+ 623   4                      destination_Direction = autoDrive_Get_Direction_NowPosition_Destination((uint8_t *)&idle_G
+             -ps_Position,(uint8_t *)&fishPosition);
+ 624   4                      
+ 625   4                      
+ 626   4                                      autoDrive_start_run_line(90);
+ 627   4                                      
+ 628   4                      autoDrive_Set_Turn_Times(0);
+ 629   4                      autoDrive_State = AUTO_DRIVE_GET_DIRECTION;
+ 630   4                  }else if(autoDrive_Get_Mode()==AUTO_DRIVE_GO_HOME_POSITION){
+ 631   4                      // destination_Direction = autoDrive_Get_Direction_NowPosition_Destination((uint8_t *)&ret
+             -urnPosition,(uint8_t *)&idle_Gps_Position);
+ 632   4                      destination_Direction = autoDrive_Get_Direction_NowPosition_Destination((uint8_t *)&idle_G
+             -ps_Position,(uint8_t *)&returnPosition);
+ 633   4                                                                      /***   20260204 add start     ****/
+ 634   4                                                                      
+ 635   4                                                                      switch (destination_Direction)
+ 636   4                                                                      {
+ 637   5                                                                              case POSITION_NORTH:
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 12  
+
+ 638   5                                                                              {
+ 639   6                                                                                      direction_Diff = 0-nowAveAngel;
+ 640   6                                                                              }
+ 641   5                                                                              break;
+ 642   5         
+ 643   5                                                                              case POSITION_EAST_NORTH:
+ 644   5                                                                              {
+ 645   6                                                                                      direction_Diff = 3150-nowAveAngel;
+ 646   6                                                                              }
+ 647   5                                                                              break;
+ 648   5                                                                              case POSITION_EAST:
+ 649   5                                                                              {
+ 650   6                                                                                      direction_Diff = 2700-nowAveAngel;
+ 651   6                                                                              }
+ 652   5                                                                              break;
+ 653   5                                                                              case POSITION_EAST_SOUTH:
+ 654   5                                                                              {
+ 655   6                                                                                      direction_Diff = 2250-nowAveAngel;
+ 656   6                                                                              }
+ 657   5                                                                              break;
+ 658   5                                                                              case POSITION_SOUTH:
+ 659   5                                                                              {
+ 660   6                                                                                      direction_Diff = 1800-nowAveAngel;
+ 661   6                                                                              }
+ 662   5                                                                              break;
+ 663   5                                                                              case POSITION_WEST_SOUTH:
+ 664   5                                                                              {
+ 665   6                                                                                      direction_Diff = 1350-nowAveAngel;
+ 666   6                                                                              }
+ 667   5                                                                              break;
+ 668   5                                                                              case POSITION_WEST:
+ 669   5                                                                              {
+ 670   6                                                                                      direction_Diff = 900-nowAveAngel;
+ 671   6                                                                              }
+ 672   5                                                                              break;
+ 673   5                                                                              case POSITION_WEST_NORTH:
+ 674   5                                                                              {
+ 675   6                                                                                      direction_Diff = 450-nowAveAngel;
+ 676   6                                                                              }
+ 677   5                                                                              break;
+ 678   5                                                                      }
+ 679   4                                                                                                              
+ 680   4      //                                                              direction_Diff = (destination_Direction-1)*450-nowAveAngel;
+ 681   4                                                                      direction_Diff = direction_Diff>0?direction_Diff:(direction_Diff + 3600);
+ 682   4                                                                      direction_Diff = direction_Diff>1800?(direction_Diff-3600):direction_Diff;
+ 683   4                                                                      if(direction_Diff > 50)
+ 684   4                                                                              DcMotor_Direction_Set(DIRECTION_LEFT);
+ 685   4                                                                      else if(direction_Diff < -50)
+ 686   4                                                                              DcMotor_Direction_Set(DIRECTION_RIGHT);
+ 687   4                                                                      else
+ 688   4                                                                              DcMotor_Direction_Set(DIRECTION_FORWARD);
+ 689   4                                                                      
+ 690   4                                                                      DcMotor_MLeft_PWM_Set(TRUE,100);
+ 691   4                      DcMotor_MRight_PWM_Set(TRUE,100);
+ 692   4                      autoDrive_Set_Turn_Times(abs(direction_Diff)>>3);//225-good     
+ 693   4                                                                      
+ 694   4                                                                      /***   20260204 add end    ****/
+ 695   4      //                DcMotor_Direction_Set(DIRECTION_LEFT);
+ 696   4      //                DcMotor_MLeft_PWM_Set(TRUE,100);
+ 697   4      //                DcMotor_MRight_PWM_Set(TRUE,100);
+ 698   4      //                autoDrive_Set_Turn_Times(230);//225-good
+ 699   4                      autoDrive_State = AUTO_DRIVE_GET_DIRECTION;
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 13  
+
+ 700   4                  }else{
+ 701   4                      autoDrive_State = AUTO_DRIVE_IDLE;
+ 702   4                      DcMotor_Direction_Set(DIRECTION_FORWARD);
+ 703   4                      DcMotor_MRight_PWM_Set(FALSE,0);
+ 704   4                      DcMotor_MLeft_PWM_Set(FALSE,0);
+ 705   4                  }
+ 706   3                  autoDrive_Turn_Handle();  
+ 707   3              }
+ 708   2              break;
+ 709   2              // get around direction  dong  nan  xibei   
+ 710   2              case AUTO_DRIVE_GET_DIRECTION:{
+ 711   3                  autoDrive_Turn_Handle();
+ 712   3                  if(autoDrive_Get_Start_Direction_Turn_Times > 0){
+ 713   4      
+ 714   4                  }else{
+ 715   4                      last_Gps_Position.jingdu_Left = nmea41_Get_JingDu1();
+ 716   4                      last_Gps_Position.jingdu_Right = nmea41_Get_JingDu2();
+ 717   4                      last_Gps_Position.weidu_Left = nmea41_Get_WeiDu1();
+ 718   4                      last_Gps_Position.weidu_Right = nmea41_Get_WeiDu2();
+ 719   4                      autoDrive_State = AUTO_DRIVE_RUNING;
+ 720   4      
+ 721   4                      autoDrive_start_run_line(90);
+ 722   4                                      
+ 723   4                                                                      autoDrive_Set_Turn_Times(100);
+ 724   4                  }
+ 725   3              }
+ 726   2              break;
+ 727   2                      
+ 728   2              case AUTO_DRIVE_RUNING:{
+ 729   3                  autoDrive_Turn_Handle();
+ 730   3                  // printf("turn times==%hu\r\n",autoDrive_Get_Start_Direction_Turn_Times);
+ 731   3                  if (autodrive_work_overtime)                        // ·µº½³¬Ê± ÍÆ³ö×Ô¶¯·µº½
+ 732   3                                                              autodrive_work_overtime --;
+ 733   3                                                      else
+ 734   3                                                      {       
+ 735   4                                                              autoDrive_Set_Mode(AUTO_DRIVE_CLOSE);
+ 736   4                                                              autodrive_overtime_fail();
+ 737   4                                                              break;
+ 738   4                                                      }
+ 739   3                  if (GPS_Position_Get_Position_Refresh_Flag()==TRUE && autoDrive_Get_Start_Direction_Turn_Times
+             - == 0)
+ 740   3                  {
+ 741   4                      GPS_Position_Set_Position_Refresh_Flag(FALSE);
+ 742   4                      
+ 743   4                      if(runningWaitTimes >= 2){
+ 744   5                          runningWaitTimes = 0;
+ 745   5                      }else{
+ 746   5                          runningWaitTimes ++ ;
+ 747   5                          return;
+ 748   5                      }
+ 749   4                      now_Gps_Position.jingdu_Left = nmea41_Get_JingDu1();
+ 750   4                      now_Gps_Position.jingdu_Right = nmea41_Get_JingDu2();
+ 751   4                      now_Gps_Position.weidu_Left = nmea41_Get_WeiDu1();
+ 752   4                      now_Gps_Position.weidu_Right = nmea41_Get_WeiDu2();
+ 753   4                      printf("now_Gps_Position=%hu--%hu\r\n",now_Gps_Position.jingdu_Right,now_Gps_Position.weid
+             -u_Right);
+ 754   4                      // nowRun_Direction = autoDrive_Get_Direction_NowPosition_Destination((uint8_t *)&now_Gps_
+             -Position,(uint8_t *)&last_Gps_Position);
+ 755   4                      printf("back1 jingDu=%u.%u\r\n",returnPosition.jingdu_Left,returnPosition.jingdu_Right);
+ 756   4                                      
+ 757   4                      nowRun_Direction = autoDrive_Get_Direction_NowPosition_Destination((uint8_t *)&last_Gps_Po
+             -sition,(uint8_t *)&now_Gps_Position);
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 14  
+
+ 758   4      
+ 759   4                      //printf("nowRunDirect==%bd,des=%bd\r\n",nowRun_Direction,destination_Direction);
+ 760   4                      #if 1
+ 761   4      
+ 762   4                      if(autoDrive_Get_Mode()==AUTO_DRIVE_GO_FISISH_POSITION){
+ 763   5                                                                              destination_Angel = autoDrive_Get_Angel_NowPosition_Destination((uint8_t *)&now_Gps_Position,(uin
+             -t8_t *)&fishPosition);
+ 764   5                                                                              destination_Direction = autoDrive_Get_Direction_NowPosition_Destination((uint8_t *)&now_Gps_Posit
+             -ion,(uint8_t *)&fishPosition);
+ 765   5                        if(destination_Angel == 65535){
+ 766   6                                                                                      return;
+ 767   6                        }
+ 768   5                        destinationDistance = autoDrive_Get_Distance_NowPosition_Destination((uint8_t *)&now_Gps
+             -_Position,(uint8_t *)&fishPosition);
+ 769   5                        // printf("fish angel==%hu\r\n",destination_Angel);
+ 770   5                       }
+ 771   4                                                                       else if(autoDrive_Get_Mode()==AUTO_DRIVE_GO_HOME_POSITION){
+ 772   5                                                                              destination_Angel = autoDrive_Get_Angel_NowPosition_Destination((uint8_t *)&now_Gps_Position,(uin
+             -t8_t *)&returnPosition);
+ 773   5                                                                              destination_Direction = autoDrive_Get_Direction_NowPosition_Destination((uint8_t *)&now_Gps_Posit
+             -ion,(uint8_t *)&returnPosition);
+ 774   5                                                                              if(destination_Angel == 65535){
+ 775   6                           return;
+ 776   6                                                                              }
+ 777   5                                                                       //printf("back2 jingDu=%u.%u\r\n",returnPosition.jingdu_Left,returnPosition.jingdu_Right);
+ 778   5                       destinationDistance = autoDrive_Get_Distance_NowPosition_Destination((uint8_t *)&now_Gps_
+             -Position,(uint8_t *)&returnPosition);
+ 779   5                       //printf("back jingDu=%u.%u\r\n",returnPosition.jingdu_Left,returnPosition.jingdu_Right);
+ 780   5                       //printf("back weidu=%u.%u \r\n",returnPosition.weidu_Left,returnPosition.weidu_Right);
+ 781   5                       }
+ 782   4                                                                                           //printf("desAngel==%hu,nowAngel=%hu\r\n",destination_Angel,nowRun_Angel);
+ 783   4                       printf("distance = %u \r\n",(uint16_t)destinationDistance);
+ 784   4                                                                       if(destinationDistance < 3){
+ 785   5                                                                              autoDrive_State = AUTO_DRIVE_IDLE;
+ 786   5                        autoDrive_Set_Mode(AUTO_DRIVE_CLOSE);
+ 787   5                        DcMotor_Direction_Set(DIRECTION_FORWARD);
+ 788   5                        DcMotor_MLeft_PWM_Set(FALSE,0);
+ 789   5                        DcMotor_MRight_PWM_Set(FALSE,0);
+ 790   5                                                                              nowPwmAccelerator_Set(0);
+ 791   5                        printf("autodrive succ!!!\r\n");
+ 792   5                                                                              return;
+ 793   5                                                                       }
+ 794   4                       destination_Angel = autoDrive_Get_North_Angel(destination_Direction,destination_Angel);
+ 795   4                       printf("des  angel=%d\r\n",destination_Angel);
+ 796   4                                                                       
+ 797   4                                                                       destinationDistance = autoDrive_Get_Distance_NowPosition_Destination((uint8_t *)&now_Gps_Position
+             -,(uint8_t *)&last_Gps_Position);
+ 798   4                       if(destinationDistance < 1.5){
+ 799   5                                                                              autoDrive_Set_Turn_Times(60);
+ 800   5                                                                              autoDrive_start_run_line(100);
+ 801   5                                                                              printf("Distance <1.5,go straight \r\n");
+ 802   5                                                                              return;
+ 803   5                       }
+ 804   4                       nowRun_Angel = nmea41_Get_Angel();
+ 805   4                                                                       #ifdef         GPS_DK2_RMC
+ 806   4                                                                       nmea41_print_Angel_Time();
+ 807   4                                                                       #endif 
+ 808   4                          // if(1){
+ 809   4                       if(nowRun_Angel==65535 || nowRun_Angel > 360){
+ 810   5                                                                              // nowRun_Angel = autoDrive_Get_Angel_NowPosition_Destination((uint8_t *)&now_Gps_Position,(uint8
+             -_t *)&last_Gps_Position);
+ 811   5                                                                              nowRun_Angel = autoDrive_Get_Angel_NowPosition_Destination((uint8_t *)&last_Gps_Position,(uint8_t
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 15  
+
+             - *)&now_Gps_Position);
+ 812   5                        if(nowRun_Angel == 65535||nowRun_Angel > 360){
+ 813   6                                  
+ 814   6                                                                                      autoDrive_start_run_line(100);
+ 815   6                          return;
+ 816   6                        }
+ 817   5                        nowRun_Angel = autoDrive_Get_North_Angel(nowRun_Direction,nowRun_Angel);
+ 818   5                        printf("cal now angel=%hu\r",nowRun_Angel);
+ 819   5                       }else{
+ 820   5                                                                              // nowRun_AngelautoDrive_Get_Angel_NowPosition_Destination((uint8_t *)&now_Gps_Position,(uint8_t 
+             -*)&last_Gps_Position);
+ 821   5                                                                              printf("get now angel=%hu\r\n",nowRun_Angel);
+ 822   5                       }
+ 823   4                          /**wdh start 20260313**/
+ 824   4                                                                                      /*
+ 825   4                          if((nowRun_Angel>270 && destination_Angel < 90)){
+ 826   4                              angel_Sub_Abs = 360 - nowRun_Angel + destination_Angel;
+ 827   4                              if(angel_Sub_Abs < 10){
+ 828   4                                  return;
+ 829   4                              }
+ 830   4                              DcMotor_Direction_Set(DIRECTION_RIGHT);
+ 831   4                              DcMotor_MLeft_PWM_Set(TRUE,100);
+ 832   4                              DcMotor_MRight_PWM_Set(TRUE,100);
+ 833   4                              autoDrive_Set_Turn_Times((angel_Sub_Abs));
+ 834   4                              printf("N turn right=%hu\r\n",angel_Sub_Abs);
+ 835   4                          }else if((nowRun_Angel < 90 && destination_Angel > 270)){
+ 836   4                              angel_Sub_Abs = 360 - destination_Angel + nowRun_Angel;
+ 837   4                              if(angel_Sub_Abs < 10){
+ 838   4                                  return;
+ 839   4                              }
+ 840   4                              DcMotor_Direction_Set(DIRECTION_LEFT);
+ 841   4                              DcMotor_MLeft_PWM_Set(TRUE,100);
+ 842   4                              DcMotor_MRight_PWM_Set(TRUE,100);
+ 843   4                              autoDrive_Set_Turn_Times((angel_Sub_Abs));
+ 844   4                              printf("N turn left=%hu\r\n",angel_Sub_Abs);
+ 845   4                          }else{
+ 846   4                              angel_Sub_Abs = nowRun_Angel>destination_Angel?nowRun_Angel - destination_Angel:de
+             -stination_Angel - nowRun_Angel;
+ 847   4                              if(angel_Sub_Abs < 10){
+ 848   4                                  return;
+ 849   4                              }
+ 850   4                              if(nowRun_Angel > destination_Angel){
+ 851   4                                  DcMotor_Direction_Set(DIRECTION_LEFT);
+ 852   4                                  DcMotor_MLeft_PWM_Set(TRUE,100);
+ 853   4                                  DcMotor_MRight_PWM_Set(TRUE,100);
+ 854   4                                                                                                              autoDrive_Set_Turn_Times(angel_Sub_Abs);
+ 855   4      //                            autoDrive_Set_Turn_Times(angel_Sub_Abs*2);
+ 856   4                                  printf("turn left=%hu\r\n",angel_Sub_Abs);
+ 857   4                              }else{
+ 858   4                                  DcMotor_Direction_Set(DIRECTION_RIGHT);
+ 859   4                                  DcMotor_MLeft_PWM_Set(TRUE,100);
+ 860   4                                  DcMotor_MRight_PWM_Set(TRUE,100);
+ 861   4                                                                                                                      autoDrive_Set_Turn_Times((angel_Sub_Abs));
+ 862   4      //                            autoDrive_Set_Turn_Times((angel_Sub_Abs*3)/2);
+ 863   4                                  printf("turn right=%hu\r\n",angel_Sub_Abs);
+ 864   4                              }
+ 865   4                          }
+ 866   4                                                                                      */
+ 867   4                                                                                      
+ 868   4                                                                       direction_Diff = (destination_Angel - nowRun_Angel + 360) % 360;
+ 869   4                                                                       if (direction_Diff > 180) {
+ 870   5                                                                              turn_angle = 360 - direction_Diff;
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 16  
+
+ 871   5                        turn_dir = DIRECTION_LEFT;
+ 872   5                                                                       } else {
+ 873   5                                                                              turn_angle = direction_Diff;
+ 874   5                        turn_dir = DIRECTION_RIGHT;
+ 875   5                                                                       }
+ 876   4      
+ 877   4                                                                       if (turn_angle < 10) {  // 
+ 878   5                                                                              DcMotor_Direction_Set(DIRECTION_FORWARD);
+ 879   5      //                                                                                      return;
+ 880   5                                                                       } else {
+ 881   5                          // 
+ 882   5                        DcMotor_Direction_Set(turn_dir);
+ 883   5                        DcMotor_MLeft_PWM_Set(TRUE, 100);
+ 884   5                        DcMotor_MRight_PWM_Set(TRUE, 100);
+ 885   5                        autoDrive_Set_Turn_Times(turn_angle);  // 
+ 886   5                        printf("turn %s = %hu\r\n", turn_dir==DIRECTION_LEFT?"LEFT":"RIGHT", turn_angle);
+ 887   5                                                                                              /*******      *******/
+ 888   5      //                                                                              autoDrive_State = AUTO_DRIVE_GET_DIRECTION;
+ 889   5                                                                                              /********************/
+ 890   5                                                                       }
+ 891   4                                                                                      /**wdh stop 20260313**/
+ 892   4                      
+ 893   4      
+ 894   4      
+ 895   4      
+ 896   4      
+ 897   4                          // memcpy(&last_Gps_Position,&now_Gps_Position,sizeof(GPS_POSITION));
+ 898   4                       last_Gps_Position.jingdu_Left = now_Gps_Position.jingdu_Left;
+ 899   4                       last_Gps_Position.jingdu_Right = now_Gps_Position.jingdu_Right;
+ 900   4                       last_Gps_Position.weidu_Left = now_Gps_Position.weidu_Left;
+ 901   4                       last_Gps_Position.weidu_Right = now_Gps_Position.weidu_Right;
+ 902   4                      #endif     
+ 903   4                  }
+ 904   3              }
+ 905   2              break;
+ 906   2      
+ 907   2                      default:                // ������״̬ �˻ص�����ģʽ
+ 908   2                              
+ 909   2                              printf("autodrive state err!!!  %bd\r\n",autoDrive_State);
+ 910   2                              autodrive_work_overtime = 0;
+ 911   2                              autoDrive_Set_Mode(AUTO_DRIVE_CLOSE);
+ 912   2                              break;
+ 913   2          }
+ 914   1      }
+ 915          
+ 916          
+ 917          #if 0
+              GPS_POSITION testReturnPosition;
+              void Gps_Return_Test_Handle(void){
+                  testReturnPosition.jingdu_Left = 12205;
+                  testReturnPosition.jingdu_Right = 47538;
+                  testReturnPosition.weidu_Left = 3731;
+                  testReturnPosition.weidu_Right = 52206;
+                  autoDrive_Set_FishPosition((GPS_POSITION *)&testReturnPosition);
+              }
+              #endif
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   5174    ----
+   CONSTANT SIZE    =    227    ----
+   XDATA SIZE       =     37     121
+C51 COMPILER V9.52.0.0   AUTODRIVE                                                         04/17/2026 09:17:59 PAGE 17  
+
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =     40    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

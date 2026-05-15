@@ -1,0 +1,171 @@
+C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      12/05/26  17:56:48  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_EEPROM
+OBJECT MODULE PLACED IN .\list\STC32G_EEPROM.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Driver\src\STC32G_EEPROM.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc
+                    -;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_bowe
+                    -ny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Dev
+                    -ice\WIRELESS;..\Code_boweny\Device\MOTOR;..\Code_boweny\Device\AutoDrive) DEBUG PRINT(.\list\STC32G_EEPROM.lst) TABS(2) 
+                    -OBJECT(.\list\STC32G_EEPROM.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include "STC32G_EEPROM.h"
+    6          
+    7          //========================================================================
+    8          // 函数: void ISP_Disable(void)
+    9          // 描述: 禁止访问ISP/IAP.
+   10          // 参数: non.
+   11          // 返回: non.
+   12          // 版本: V1.0, 2012-10-22
+   13          //========================================================================
+   14          void DisableEEPROM(void)
+   15          {
+   16   1        IAP_CONTR = 0;      //禁止IAP操作
+   17   1        IAP_CMD   = 0;      //去除IAP命令
+   18   1        IAP_TRIG  = 0;      //防止IAP命令误触发
+   19   1        IAP_ADDRE = 0xff;   //将地址设置到非 IAP 区域
+   20   1        IAP_ADDRH = 0xff;   //将地址设置到非 IAP 区域
+   21   1        IAP_ADDRL = 0xff;
+   22   1      }
+   23          
+   24          //========================================================================
+   25          // 函数: void EEPROM_Trig(void)
+   26          // 描述: 触发EEPROM操作.
+   27          // 参数: none.
+   28          // 返回: none.
+   29          // 版本: V1.0, 2014-6-30
+   30          //========================================================================
+   31          void EEPROM_Trig(void)
+   32          {
+   33   1        F0 = EA;    //保存全局中断
+   34   1        EA = 0;     //禁止中断, 避免触发命令无效
+   35   1        IAP_TRIG = 0x5A;
+   36   1        IAP_TRIG = 0xA5;                    //先送5AH，再送A5H到IAP触发寄存器，每次都需要如此
+   37   1                                            //送完A5H后，IAP命令立即被触发启动
+   38   1                                            //CPU等待IAP完成后，才会继续执行程序。
+   39   1        _nop_();   //由于STC32G是多级流水线的指令系统，触发命令后建议加4个NOP，保证IAP
+             -_DATA的数据完成准备
+   40   1        _nop_();
+   41   1        _nop_();
+   42   1        _nop_();
+   43   1        EA = F0;    //恢复全局中断
+   44   1      }
+   45          
+   46          //========================================================================
+   47          // 函数: void EEPROM_read_n(u32 EE_address,u8 *DataAddress,u16 number)
+   48          // 描述: 从指定EEPROM首地址读出n个字节放指定的缓冲.
+   49          // 参数: EE_address:  读出EEPROM的首地址.
+   50          //       DataAddress: 读出数据放缓冲的首地址.
+   51          //       number:      读出的字节长度.
+   52          // 返回: non.
+   53          // 版本: V1.0, 2012-10-22
+   54          //========================================================================
+C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      12/05/26  17:56:48  PAGE 2   
+
+   55          void EEPROM_read_n(u32 EE_address,u8 *DataAddress,u16 number)
+   56          {
+   57   1        IAP_ENABLE();                           //设置等待时间，允许IAP操作，送一次就够
+   58   1        IAP_READ();                             //送字节读命令，命令不需改变时，不需重新送�
+             -�令
+   59   1        do
+   60   1        {
+   61   2          IAP_ADDRE = (u8)(EE_address >> 16); //送地址高字节（地址需要改变时才需重新送地址�
+             -�
+   62   2          IAP_ADDRH = (u8)(EE_address >> 8);  //送地址中字节（地址需要改变时才需重新送地址�
+             -�
+   63   2          IAP_ADDRL = (u8)EE_address;         //送地址低字节（地址需要改变时才需重新送地址�
+             -�
+   64   2          EEPROM_Trig();                      //触发EEPROM操作
+   65   2          *DataAddress = IAP_DATA;            //读出的数据送往
+   66   2          EE_address++;
+   67   2          DataAddress++;
+   68   2        }while(--number);
+   69   1      
+   70   1        DisableEEPROM();
+   71   1      }
+   72          
+   73          //========================================================================
+   74          // 函数: void EEPROM_SectorErase(u32 EE_address)
+   75          // 描述: 把指定地址的EEPROM扇区擦除.
+   76          // 参数: EE_address:  要擦除的扇区EEPROM的地址.
+   77          // 返回: non.
+   78          // 版本: V1.0, 2013-5-10
+   79          //========================================================================
+   80          void EEPROM_SectorErase(u32 EE_address)
+   81          {
+   82   1        IAP_ENABLE();                       //设置等待时间，允许IAP操作，送一次就够
+   83   1        IAP_ERASE();                        //宏调用, 送扇区擦除命令，命令不需改变时，不需�
+             -��新送命令
+   84   1                                            //只有扇区擦除，没有字节擦除，512字节/扇区。
+   85   1                                            //扇区中任意一个字节地址都是扇区地址。
+   86   1        IAP_ADDRE = (u8)(EE_address >> 16); //送扇区地址高字节（地址需要改变时才需重新送地
+             -址）
+   87   1        IAP_ADDRH = (u8)(EE_address >> 8);  //送扇区地址中字节（地址需要改变时才需重新送地
+             -址）
+   88   1        IAP_ADDRL = (u8)EE_address;         //送扇区地址低字节（地址需要改变时才需重新送地
+             -址）
+   89   1        EEPROM_Trig();                      //触发EEPROM操作
+   90   1        DisableEEPROM();                    //禁止EEPROM操作
+   91   1      }
+   92          
+   93          //========================================================================
+   94          // 函数: void EEPROM_write_n(u32 EE_address,u8 *DataAddress,u16 number)
+   95          // 描述: 把缓冲的n个字节写入指定首地址的EEPROM.
+   96          // 参数: EE_address:  写入EEPROM的首地址.
+   97          //       DataAddress: 写入源数据的缓冲的首地址.
+   98          //       number:      写入的字节长度.
+   99          // 返回: non.
+  100          // 版本: V1.0, 2012-10-22
+  101          //========================================================================
+  102          void EEPROM_write_n(u32 EE_address,u8 *DataAddress,u16 number)
+  103          {
+  104   1        IAP_ENABLE();                       //设置等待时间，允许IAP操作，送一次就够
+  105   1        IAP_WRITE();                        //宏调用, 送字节写命令
+  106   1        do
+  107   1        {
+  108   2          IAP_ADDRE = (u8)(EE_address >> 16); //送地址高字节（地址需要改变时才需重新送地址�
+             -�
+  109   2          IAP_ADDRH = (u8)(EE_address >> 8);  //送地址中字节（地址需要改变时才需重新送地址�
+             -�
+  110   2          IAP_ADDRL = (u8)EE_address;         //送地址低字节（地址需要改变时才需重新送地址�
+C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      12/05/26  17:56:48  PAGE 3   
+
+             -�
+  111   2          IAP_DATA  = *DataAddress;         //送数据到IAP_DATA，只有数据改变时才需重新送
+  112   2          EEPROM_Trig();                    //触发EEPROM操作
+  113   2          EE_address++;                     //下一个地址
+  114   2          DataAddress++;                    //下一个数据
+  115   2        }while(--number);                   //直到结束
+  116   1        DisableEEPROM();
+  117   1      }
+  118          
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       209     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------         12
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =    ------     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

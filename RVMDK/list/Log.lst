@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  Log                                                                07/05/26  09:39:32  PAGE 1   
+C251 COMPILER V5.60.0,  Log                                                                16/05/26  05:32:07  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE Log
@@ -66,247 +66,249 @@ stmt  level    source
    54   1          if (level == 'E') {
    55   2              return 1;
    56   2          }
-C251 COMPILER V5.60.0,  Log                                                                07/05/26  09:39:32  PAGE 2   
+C251 COMPILER V5.60.0,  Log                                                                16/05/26  05:32:07  PAGE 2   
 
    57   1      
-   58   1          if (log_tag_is(tag, "AHRS")) {
-   59   2              return 1;
-   60   2          }
-   61   1      
-   62   1      #if QMI8658_DIAG_ENABLE
+   58   1          if (log_tag_is(tag, "AHRS") ||
+   59   1              log_tag_is(tag, "HDG")) {
+   60   2              return 1;
+   61   2          }
+   62   1      
+   63   1      #if QMI8658_DIAG_ENABLE
                    if (log_tag_is(tag, "SYS") ||
                        log_tag_is(tag, "IMU") ||
                        log_tag_is(tag, "MAG")) {
                        return 1;
                    }
                #endif
-   69   1      
-   70   1          return 0;
-   71   1      }
-   72          
-   73          /*---------------------------------- 内部函数 ----------------------------------*/
-   74          
-   75          /**
-   76           * @brief      原始日志输出 (内部函数)
-   77           * @param[in]  fmt   格式化字符串
-   78           * @param[in]  args  可变参数列表
-   79           * @return     none
-   80           */
-   81          static void log_vprint(u8 *fmt, va_list args)
-   82          {
-   83   1          u8  len;
-   84   1      
-   85   1          len = (u8)vsprintf((char *)log_buf, (const char *)fmt, args);
-   86   1      
-   87   1          /* 追加 \r\n */
-   88   1          if (len < (LOG_BUF_SIZE - 2))
-   89   1          {
-   90   2              log_buf[len]     = '\r';
-   91   2              log_buf[len + 1] = '\n';
-   92   2              log_buf[len + 2] = '\0';
-   93   2          }
-   94   1          else
-   95   1          {
-   96   2              log_buf[LOG_BUF_SIZE - 3] = '\r';
-   97   2              log_buf[LOG_BUF_SIZE - 2] = '\n';
-   98   2              log_buf[LOG_BUF_SIZE - 1] = '\0';
-   99   2          }
-  100   1      
-  101   1          PrintString1(log_buf);
-  102   1      }
-  103          
-  104          /**
-  105           * @brief      带标签日志输出 (内部函数)
-  106           * @param[in]  level 日志级别字符 (I/W/E/D)
-  107           * @param[in]  tag   日志标签
-  108           * @param[in]  fmt   格式化字符串
-  109           * @param[in]  args  可变参数列表
-  110           * @return     none
-  111           */
-  112          static void log_vtagged(u8 level, u8 *tag, u8 *fmt, va_list args)
-  113          {
-  114   1          u8  i;
-  115   1          u8  prefix_len;
-  116   1      
-  117   1      #if AHRS_TEST_ONLY
+   70   1      
+   71   1          return 0;
+   72   1      }
+   73          
+   74          /*---------------------------------- 内部函数 ----------------------------------*/
+   75          
+   76          /**
+   77           * @brief      原始日志输出 (内部函数)
+   78           * @param[in]  fmt   格式化字符串
+   79           * @param[in]  args  可变参数列表
+   80           * @return     none
+   81           */
+   82          static void log_vprint(u8 *fmt, va_list args)
+   83          {
+   84   1          u8  len;
+   85   1      
+   86   1          len = (u8)vsprintf((char *)log_buf, (const char *)fmt, args);
+   87   1      
+   88   1          /* 追加 \r\n */
+   89   1          if (len < (LOG_BUF_SIZE - 2))
+   90   1          {
+   91   2              log_buf[len]     = '\r';
+   92   2              log_buf[len + 1] = '\n';
+   93   2              log_buf[len + 2] = '\0';
+   94   2          }
+   95   1          else
+   96   1          {
+   97   2              log_buf[LOG_BUF_SIZE - 3] = '\r';
+   98   2              log_buf[LOG_BUF_SIZE - 2] = '\n';
+   99   2              log_buf[LOG_BUF_SIZE - 1] = '\0';
+  100   2          }
+  101   1      
+  102   1          PrintString1(log_buf);
+  103   1      }
+  104          
+  105          /**
+  106           * @brief      带标签日志输出 (内部函数)
+  107           * @param[in]  level 日志级别字符 (I/W/E/D)
+  108           * @param[in]  tag   日志标签
+  109           * @param[in]  fmt   格式化字符串
+  110           * @param[in]  args  可变参数列表
+  111           * @return     none
+  112           */
+  113          static void log_vtagged(u8 level, u8 *tag, u8 *fmt, va_list args)
+  114          {
+  115   1          u8  i;
+  116   1          u8  prefix_len;
+  117   1      
+  118   1      #if AHRS_TEST_ONLY
                    if (!log_allow_in_ahrs_test(level, tag)) {
                        return;
                    }
                #endif
-  122   1      
-C251 COMPILER V5.60.0,  Log                                                                07/05/26  09:39:32  PAGE 3   
+C251 COMPILER V5.60.0,  Log                                                                16/05/26  05:32:07  PAGE 3   
 
-  123   1          /* 构建 [tag] X: 前缀 */
-  124   1          log_buf[0] = '[';
-  125   1          for (i = 0; tag[i] != '\0'; i++)
-  126   1          {
-  127   2              log_buf[i + 1] = tag[i];
-  128   2          }
-  129   1          log_buf[i + 1] = ']';
-  130   1          log_buf[i + 2] = ' ';
-  131   1          log_buf[i + 3] = level;
-  132   1          log_buf[i + 4] = ':';
-  133   1          log_buf[i + 5] = ' ';
-  134   1          prefix_len = i + 6;
-  135   1      
-  136   1          /* 格式化消息到前缀之后 */
-  137   1          vsprintf((char *)(log_buf + prefix_len), (const char *)fmt, args);
-  138   1      
-  139   1          /* 追加 \r\n 并确保不越界 */
-  140   1          for (i = prefix_len; i < LOG_BUF_SIZE; i++)
-  141   1          {
-  142   2              if (log_buf[i] == '\0')
-  143   2              {
-  144   3                  if (i < (LOG_BUF_SIZE - 2))
-  145   3                  {
-  146   4                      log_buf[i]     = '\r';
-  147   4                      log_buf[i + 1] = '\n';
-  148   4                      log_buf[i + 2] = '\0';
-  149   4                  }
-  150   3                  else
-  151   3                  {
-  152   4                      log_buf[LOG_BUF_SIZE - 3] = '\r';
-  153   4                      log_buf[LOG_BUF_SIZE - 2] = '\n';
-  154   4                      log_buf[LOG_BUF_SIZE - 1] = '\0';
-  155   4                  }
-  156   3                  break;
-  157   3              }
-  158   2          }
-  159   1      
-  160   1          PrintString1(log_buf);
-  161   1      }
-  162          
-  163          /*---------------------------------- 初始化 ----------------------------------*/
-  164          
-  165          /**
-  166           * @brief   初始化日志系统
-  167           * @return  none
-  168           *
-  169           * @details 将 log_ready 标志置 1，并打印启动横幅 (MCU版本/作者/编译时间)
-  170           *          用于上电时验证日志系统是否正常工作
-  171           *
-  172           * @note    必须在 UART_config() 之后调用
-  173           */
-  174          void log_init(void)
-  175          {
-  176   1          log_ready = 1;
-  177   1      
-  178   1      #if !AHRS_TEST_ONLY || QMI8658_DIAG_ENABLE
-  179   1          PrintString1("\r\n");
-  180   1          log_printf("[SYS] I: ============== Black Pearl v1.1 ==============");
-  181   1          log_printf("[SYS] I:   MCU : STC32G  Fosc=%luHz", (u32)MAIN_Fosc);
-  182   1          log_printf("[SYS] I:   Author : boweny  Build : %s %s", __DATE__, __TIME__);
-  183   1          log_printf("[SYS] I: LOG Ready. Use LOGI/LOGW/LOGE/LOGD/log_printf");
-  184   1          PrintString1("\r\n");
-  185   1      #endif
-  186   1      }
-  187          
-  188          /*---------------------------------- 公共函数 ----------------------------------*/
-C251 COMPILER V5.60.0,  Log                                                                07/05/26  09:39:32  PAGE 4   
+  123   1      
+  124   1          /* 构建 [tag] X: 前缀 */
+  125   1          log_buf[0] = '[';
+  126   1          for (i = 0; tag[i] != '\0'; i++)
+  127   1          {
+  128   2              log_buf[i + 1] = tag[i];
+  129   2          }
+  130   1          log_buf[i + 1] = ']';
+  131   1          log_buf[i + 2] = ' ';
+  132   1          log_buf[i + 3] = level;
+  133   1          log_buf[i + 4] = ':';
+  134   1          log_buf[i + 5] = ' ';
+  135   1          prefix_len = i + 6;
+  136   1      
+  137   1          /* 格式化消息到前缀之后 */
+  138   1          vsprintf((char *)(log_buf + prefix_len), (const char *)fmt, args);
+  139   1      
+  140   1          /* 追加 \r\n 并确保不越界 */
+  141   1          for (i = prefix_len; i < LOG_BUF_SIZE; i++)
+  142   1          {
+  143   2              if (log_buf[i] == '\0')
+  144   2              {
+  145   3                  if (i < (LOG_BUF_SIZE - 2))
+  146   3                  {
+  147   4                      log_buf[i]     = '\r';
+  148   4                      log_buf[i + 1] = '\n';
+  149   4                      log_buf[i + 2] = '\0';
+  150   4                  }
+  151   3                  else
+  152   3                  {
+  153   4                      log_buf[LOG_BUF_SIZE - 3] = '\r';
+  154   4                      log_buf[LOG_BUF_SIZE - 2] = '\n';
+  155   4                      log_buf[LOG_BUF_SIZE - 1] = '\0';
+  156   4                  }
+  157   3                  break;
+  158   3              }
+  159   2          }
+  160   1      
+  161   1          PrintString1(log_buf);
+  162   1      }
+  163          
+  164          /*---------------------------------- 初始化 ----------------------------------*/
+  165          
+  166          /**
+  167           * @brief   初始化日志系统
+  168           * @return  none
+  169           *
+  170           * @details 将 log_ready 标志置 1，并打印启动横幅 (MCU版本/作者/编译时间)
+  171           *          用于上电时验证日志系统是否正常工作
+  172           *
+  173           * @note    必须在 UART_config() 之后调用
+  174           */
+  175          void log_init(void)
+  176          {
+  177   1          log_ready = 1;
+  178   1      
+  179   1      #if !AHRS_TEST_ONLY || QMI8658_DIAG_ENABLE
+  180   1          PrintString1("\r\n");
+  181   1          log_printf("[SYS] I: ============== Black Pearl v1.1 ==============");
+  182   1          log_printf("[SYS] I:   MCU : STC32G  Fosc=%luHz", (u32)MAIN_Fosc);
+  183   1          /* Keep the banner tied to the latest firmware build for field diagnosis. */
+  184   1          log_printf("[SYS] I:   Author : boweny  Build : %s %s", __DATE__, __TIME__);
+  185   1          log_printf("[SYS] I: LOG Ready. Use LOGI/LOGW/LOGE/LOGD/log_printf");
+  186   1          PrintString1("\r\n");
+  187   1      #endif
+  188   1      }
+C251 COMPILER V5.60.0,  Log                                                                16/05/26  05:32:07  PAGE 4   
 
   189          
-  190          /**
-  191           * @brief      带标签的 INFO 级别日志
-  192           * @param[in]  tag   日志标签
-  193           * @param[in]  fmt   格式化字符串
-  194           * @param[in]  ...   可变参数
-  195           * @return     none
-  196           */
-  197          void log_info(u8 *tag, u8 *fmt, ...)
-  198          {
-  199   1          va_list args;
-  200   1      
-  201   1          if (!log_ready) return;
+  190          /*---------------------------------- 公共函数 ----------------------------------*/
+  191          
+  192          /**
+  193           * @brief      带标签的 INFO 级别日志
+  194           * @param[in]  tag   日志标签
+  195           * @param[in]  fmt   格式化字符串
+  196           * @param[in]  ...   可变参数
+  197           * @return     none
+  198           */
+  199          void log_info(u8 *tag, u8 *fmt, ...)
+  200          {
+  201   1          va_list args;
   202   1      
-  203   1          va_start(args, fmt);
-  204   1          log_vtagged('I', tag, fmt, args);
-  205   1          va_end(args);
-  206   1      }
-  207          
-  208          /**
-  209           * @brief      带标签的 WARN 级别日志
-  210           * @param[in]  tag   日志标签
-  211           * @param[in]  fmt   格式化字符串
-  212           * @param[in]  ...   可变参数
-  213           * @return     none
-  214           */
-  215          void log_warn(u8 *tag, u8 *fmt, ...)
-  216          {
-  217   1          va_list args;
-  218   1      
-  219   1          if (!log_ready) return;
+  203   1          if (!log_ready) return;
+  204   1      
+  205   1          va_start(args, fmt);
+  206   1          log_vtagged('I', tag, fmt, args);
+  207   1          va_end(args);
+  208   1      }
+  209          
+  210          /**
+  211           * @brief      带标签的 WARN 级别日志
+  212           * @param[in]  tag   日志标签
+  213           * @param[in]  fmt   格式化字符串
+  214           * @param[in]  ...   可变参数
+  215           * @return     none
+  216           */
+  217          void log_warn(u8 *tag, u8 *fmt, ...)
+  218          {
+  219   1          va_list args;
   220   1      
-  221   1          va_start(args, fmt);
-  222   1          log_vtagged('W', tag, fmt, args);
-  223   1          va_end(args);
-  224   1      }
-  225          
-  226          /**
-  227           * @brief      带标签的 ERROR 级别日志
-  228           * @param[in]  tag   日志标签
-  229           * @param[in]  fmt   格式化字符串
-  230           * @param[in]  ...   可变参数
-  231           * @return     none
-  232           */
-  233          void log_error(u8 *tag, u8 *fmt, ...)
-  234          {
-  235   1          va_list args;
-  236   1      
-  237   1          if (!log_ready) return;
+  221   1          if (!log_ready) return;
+  222   1      
+  223   1          va_start(args, fmt);
+  224   1          log_vtagged('W', tag, fmt, args);
+  225   1          va_end(args);
+  226   1      }
+  227          
+  228          /**
+  229           * @brief      带标签的 ERROR 级别日志
+  230           * @param[in]  tag   日志标签
+  231           * @param[in]  fmt   格式化字符串
+  232           * @param[in]  ...   可变参数
+  233           * @return     none
+  234           */
+  235          void log_error(u8 *tag, u8 *fmt, ...)
+  236          {
+  237   1          va_list args;
   238   1      
-  239   1          va_start(args, fmt);
-  240   1          log_vtagged('E', tag, fmt, args);
-  241   1          va_end(args);
-  242   1      }
-  243          
-  244          /**
-  245           * @brief      带标签的 DEBUG 级别日志
-  246           * @param[in]  tag   日志标签
-  247           * @param[in]  fmt   格式化字符串
-  248           * @param[in]  ...   可变参数
-  249           * @return     none
-  250           */
-  251          void log_debug(u8 *tag, u8 *fmt, ...)
-  252          {
-  253   1          va_list args;
-  254   1      
-C251 COMPILER V5.60.0,  Log                                                                07/05/26  09:39:32  PAGE 5   
+  239   1          if (!log_ready) return;
+  240   1      
+  241   1          va_start(args, fmt);
+  242   1          log_vtagged('E', tag, fmt, args);
+  243   1          va_end(args);
+  244   1      }
+  245          
+  246          /**
+  247           * @brief      带标签的 DEBUG 级别日志
+  248           * @param[in]  tag   日志标签
+  249           * @param[in]  fmt   格式化字符串
+  250           * @param[in]  ...   可变参数
+  251           * @return     none
+  252           */
+  253          void log_debug(u8 *tag, u8 *fmt, ...)
+  254          {
+C251 COMPILER V5.60.0,  Log                                                                16/05/26  05:32:07  PAGE 5   
 
-  255   1          if (!log_ready) return;
+  255   1          va_list args;
   256   1      
-  257   1          va_start(args, fmt);
-  258   1          log_vtagged('D', tag, fmt, args);
-  259   1          va_end(args);
-  260   1      }
-  261          
-  262          /**
-  263           * @brief      原始日志输出 (无标签、无级别)
-  264           * @param[in]  fmt   格式化字符串
-  265           * @param[in]  ...   可变参数
-  266           * @return     none
-  267           */
-  268          void log_printf(u8 *fmt, ...)
-  269          {
-  270   1          va_list args;
-  271   1      
-  272   1          if (!log_ready) return;
-  273   1      #if AHRS_TEST_ONLY
+  257   1          if (!log_ready) return;
+  258   1      
+  259   1          va_start(args, fmt);
+  260   1          log_vtagged('D', tag, fmt, args);
+  261   1          va_end(args);
+  262   1      }
+  263          
+  264          /**
+  265           * @brief      原始日志输出 (无标签、无级别)
+  266           * @param[in]  fmt   格式化字符串
+  267           * @param[in]  ...   可变参数
+  268           * @return     none
+  269           */
+  270          void log_printf(u8 *fmt, ...)
+  271          {
+  272   1          va_list args;
+  273   1      
+  274   1          if (!log_ready) return;
+  275   1      #if AHRS_TEST_ONLY
                #if !QMI8658_DIAG_ENABLE
                    return;
                #endif
                #endif
-  278   1      
-  279   1          va_start(args, fmt);
-  280   1          log_vprint(fmt, args);
-  281   1          va_end(args);
-  282   1      }
+  280   1      
+  281   1          va_start(args, fmt);
+  282   1          log_vprint(fmt, args);
+  283   1          va_end(args);
+  284   1      }
 *** WARNING C174 IN LINE 52 OF ..\Code_boweny\Function\Log\Log.c: 'log_allow_in_ahrs_test': unreferenced 'static' functi
              -on
 
 
 Module Information          Static   Overlayable
 ------------------------------------------------
-  code size            =       606     ------
+  code size            =       627     ------
   ecode size           =    ------     ------
   data size            =    ------     ------
   idata size           =    ------     ------
@@ -321,7 +323,7 @@ Module Information          Static   Overlayable
   far data size        =    ------     ------
   huge data size       =    ------     ------
   const size           =    ------     ------
-  hconst size          =       223     ------
+  hconst size          =       227     ------
 End of Module Information.
 
 

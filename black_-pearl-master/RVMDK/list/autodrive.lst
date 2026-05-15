@@ -1,0 +1,982 @@
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE autodrive
+OBJECT MODULE PLACED IN .\list\autodrive.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\AutoDrive\autodrive.c XSMALL INTR2 BROWSE INCDIR
+                    -(..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHR
+                    -S;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\C
+                    -ode_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR;..\Code_boweny\Device\AutoDrive) DEBUG PRINT(.\list\autodrive.lst
+                    -) TABS(2) OBJECT(.\list\autodrive.obj) 
+
+stmt  level    source
+
+    1          #include "autodrive.h"
+    2          
+    3          #include <math.h>
+    4          
+    5          #include "autodrive_cfg.h"
+    6          #include "..\GPS\GPS.h"
+    7          #include "..\MOTOR\Motor.h"
+    8          #include "..\..\Function\AHRS\AHRS.h"
+    9          #include "..\..\..\User\Task.h"
+   10          
+   11          #define AUTODRIVE_WORK_OVERTIME            (10U * 60U * 100U)
+   12          #define AUTODRIVE_MIN_ACTIVE_DISTANCE_M    10U
+   13          #define AUTODRIVE_MAX_ACTIVE_DISTANCE_M    800U
+   14          #define AUTODRIVE_ARRIVE_DISTANCE_M        3U
+   15          #define AUTODRIVE_STRAIGHT_DISTANCE_X10_M  15U
+   16          #define AUTODRIVE_MANUAL_TIMEOUT_TICKS     (30U * 100U)
+   17          #define AUTODRIVE_MANUAL_CLOSE_TICKS       300U
+   18          #define AUTODRIVE_DRIVE_PWM                900
+   19          #define AUTODRIVE_DRIVE_FAST_PWM           1000
+   20          #define AUTODRIVE_TURN_PWM                 850
+   21          #define AUTODRIVE_STOP_PWM                 0
+   22          
+   23          static u8 g_autoDrive_switch = 0U;
+   24          static u8 g_autoDrive_state = AUTO_DRIVE_IDLE;
+   25          static u8 g_autoDrive_mode = AUTO_DRIVE_CLOSE;
+   26          static u16 g_autoDrive_turn_times = 0U;
+   27          static u16 g_autodrive_work_overtime = 0U;
+   28          static u8 g_autoDrive_fail_flag = 0U;
+   29          static u8 g_motor_ready = 0U;
+   30          
+   31          static AutoDrive_PointRaw_t g_idle_position;
+   32          static AutoDrive_PointRaw_t g_now_position;
+   33          static AutoDrive_PointRaw_t g_last_position;
+   34          static AutoDrive_PointRaw_t g_return_position;
+   35          static AutoDrive_PointRaw_t g_fish_position;
+   36          static AutoDrive_ReturnConfig_t g_autodrv_cfg;
+   37          
+   38          static u8 g_destination_direction = POSITION_EAST;
+   39          static u8 g_nowrun_direction = POSITION_EAST;
+   40          static u16 g_nowrun_angle = 0U;
+   41          static u16 g_destination_angle = 0U;
+   42          
+   43          static u16 g_link_alive_ticks = 0U;
+   44          static u16 g_link_close_ticks = 0U;
+   45          static u32 g_last_run_update_seq = 0UL;
+   46          static u32 g_last_poll_tick_ms = 0UL;
+   47          static u32 g_last_link_tick_ms = 0UL;
+   48          
+   49          static u32 AutoDrive_Abs32(int32 value)
+   50          {
+   51   1          if (value < 0L) {
+   52   2              return (u32)(-value);
+   53   2          }
+   54   1          return (u32)value;
+   55   1      }
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 2   
+
+   56          
+   57          static u16 AutoDrive_Abs16(int16 value)
+   58          {
+   59   1          if (value < 0) {
+   60   2              return (u16)(-value);
+   61   2          }
+   62   1          return (u16)value;
+   63   1      }
+   64          
+   65          static u8 AutoDrive_PointRawValid(const AutoDrive_PointRaw_t *point)
+   66          {
+   67   1          if (point == 0) {
+   68   2              return 0U;
+   69   2          }
+   70   1          if ((point->lon_ew != 'E') && (point->lon_ew != 'W')) {
+   71   2              return 0U;
+   72   2          }
+   73   1          if ((point->lat_ns != 'N') && (point->lat_ns != 'S')) {
+   74   2              return 0U;
+   75   2          }
+   76   1          if ((point->lon_whole == 0U) || (point->lat_whole == 0U)) {
+   77   2              return 0U;
+   78   2          }
+   79   1          return 1U;
+   80   1      }
+   81          
+   82          static void AutoDrive_CopyPoint(AutoDrive_PointRaw_t *dst, const AutoDrive_PointRaw_t *src)
+   83          {
+   84   1          if ((dst == 0) || (src == 0)) {
+   85   2              return;
+   86   2          }
+   87   1          *dst = *src;
+   88   1      }
+   89          
+   90          static void AutoDrive_PointFromGps(AutoDrive_PointRaw_t *point, const GPS_State_t *gps)
+   91          {
+   92   1          u32 lat_abs;
+   93   1          u32 lon_abs;
+   94   1          u32 lat_deg;
+   95   1          u32 lon_deg;
+   96   1          u32 lat_min_x1e4;
+   97   1          u32 lon_min_x1e4;
+   98   1      
+   99   1          if ((point == 0) || (gps == 0)) {
+  100   2              return;
+  101   2          }
+  102   1      
+  103   1          lat_abs = (u32)((gps->lat_deg1e7 < 0L) ? -gps->lat_deg1e7 : gps->lat_deg1e7);
+  104   1          lon_abs = (u32)((gps->lon_deg1e7 < 0L) ? -gps->lon_deg1e7 : gps->lon_deg1e7);
+  105   1      
+  106   1          lat_deg = lat_abs / 10000000UL;
+  107   1          lon_deg = lon_abs / 10000000UL;
+  108   1      
+  109   1          lat_min_x1e4 = ((lat_abs % 10000000UL) * 6UL + 500UL) / 1000UL;
+  110   1          lon_min_x1e4 = ((lon_abs % 10000000UL) * 6UL + 500UL) / 1000UL;
+  111   1      
+  112   1          point->lon_ew = (gps->lon_deg1e7 < 0L) ? 'W' : 'E';
+  113   1          point->lon_whole = (u16)(lon_deg * 100UL + (lon_min_x1e4 / 10000UL));
+  114   1          point->lon_frac = (u16)(lon_min_x1e4 % 10000UL);
+  115   1          point->lat_ns = (gps->lat_deg1e7 < 0L) ? 'S' : 'N';
+  116   1          point->lat_whole = (u16)(lat_deg * 100UL + (lat_min_x1e4 / 10000UL));
+  117   1          point->lat_frac = (u16)(lat_min_x1e4 % 10000UL);
+  118   1      }
+  119          
+  120          void AutoDrive_GetCurrentPointRaw(AutoDrive_PointRaw_t *point)
+  121          {
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 3   
+
+  122   1          const GPS_State_t *gps;
+  123   1      
+  124   1          gps = GPS_GetState();
+  125   1          if ((point == 0) || (gps == 0)) {
+  126   2              return;
+  127   2          }
+  128   1          AutoDrive_PointFromGps(point, gps);
+  129   1      }
+  130          
+  131          static u8 AutoDrive_GpsReady(void)
+  132          {
+  133   1          const GPS_State_t *gps;
+  134   1      
+  135   1          gps = GPS_GetState();
+  136   1          if (gps == 0) {
+  137   2              return 0U;
+  138   2          }
+  139   1          if (!gps->fix_valid) {
+  140   2              return 0U;
+  141   2          }
+  142   1          if (gps->satellites_used < 7U) {
+  143   2              return 0U;
+  144   2          }
+  145   1          if ((gps->lat_deg1e7 == 0L) || (gps->lon_deg1e7 == 0L)) {
+  146   2              return 0U;
+  147   2          }
+  148   1          return 1U;
+  149   1      }
+  150          
+  151          static void AutoDrive_SetMotorForward(u16 pwm)
+  152          {
+  153   1          Motor_SetBothSpeed((int16)pwm, (int16)pwm);
+  154   1      }
+  155          
+  156          static void AutoDrive_SetMotorBack(u16 pwm)
+  157          {
+  158   1          Motor_SetBothSpeed(-(int16)pwm, -(int16)pwm);
+  159   1      }
+  160          
+  161          static void AutoDrive_SetMotorLeft(u16 pwm)
+  162          {
+  163   1          Motor_SetBothSpeed(-(int16)pwm, (int16)pwm);
+  164   1      }
+  165          
+  166          static void AutoDrive_SetMotorRight(u16 pwm)
+  167          {
+  168   1          Motor_SetBothSpeed((int16)pwm, -(int16)pwm);
+  169   1      }
+  170          
+  171          void AutoDrive_StopMotion(void)
+  172          {
+  173   1          Motor_StopAll();
+  174   1      }
+  175          
+  176          void AutoDrive_Stop(void)
+  177          {
+  178   1          g_autoDrive_state = AUTO_DRIVE_IDLE;
+  179   1          AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
+  180   1      }
+  181          
+  182          void AutoDrive_SetMode(u8 mode)
+  183          {
+  184   1          if ((g_autoDrive_mode != AUTO_DRIVE_CLOSE) && (mode == AUTO_DRIVE_CLOSE)) {
+  185   2              AutoDrive_StopMotion();
+  186   2          }
+  187   1      
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 4   
+
+  188   1          g_autoDrive_mode = mode;
+  189   1          if (g_autoDrive_mode == AUTO_DRIVE_CLOSE) {
+  190   2              g_autoDrive_state = AUTO_DRIVE_IDLE;
+  191   2          }
+  192   1      }
+  193          
+  194          u8 AutoDrive_GetMode(void)
+  195          {
+  196   1          return g_autoDrive_mode;
+  197   1      }
+  198          
+  199          u8 AutoDrive_InActive(void)
+  200          {
+  201   1          if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
+  202   2              if (g_autoDrive_mode == AUTO_DRIVE_GO_HOME_POSITION) {
+  203   3                  return 1U;
+  204   3              }
+  205   2              if (g_autoDrive_mode == AUTO_DRIVE_GO_FISISH_POSITION) {
+  206   3                  return 2U;
+  207   3              }
+  208   2          }
+  209   1          return 0U;
+  210   1      }
+  211          
+  212          u8 AutoDrive_IsBusy(void)
+  213          {
+  214   1          return (g_autoDrive_state != AUTO_DRIVE_IDLE) ? 1U : 0U;
+  215   1      }
+  216          
+  217          u8 AutoDrive_IsCanActive(const AutoDrive_PointRaw_t *point)
+  218          {
+  219   1          u16 distance;
+  220   1      
+  221   1          if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
+  222   2              return 0U;
+  223   2          }
+  224   1          if (!AutoDrive_PointRawValid(point)) {
+  225   2              return 0U;
+  226   2          }
+  227   1          if (!AutoDrive_PointRawValid(&g_idle_position)) {
+  228   2              return 0U;
+  229   2          }
+  230   1          if (!AutoDrive_GpsReady()) {
+  231   2              return 0U;
+  232   2          }
+  233   1      
+  234   1          distance = AutoDrive_GetDistanceNowToDestination((const u8 *)point,
+  235   1                                                           (const u8 *)&g_idle_position);
+  236   1          if ((distance > AUTODRIVE_MIN_ACTIVE_DISTANCE_M) &&
+  237   1              (distance < AUTODRIVE_MAX_ACTIVE_DISTANCE_M)) {
+  238   2              return 1U;
+  239   2          }
+  240   1          return 0U;
+  241   1      }
+  242          
+  243          void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
+  244          {
+  245   1          if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
+  246   2              return;
+  247   2          }
+  248   1      
+  249   1          AutoDrive_CopyPoint(&g_return_position, (const AutoDrive_PointRaw_t *)data_m);
+  250   1          if (!AutoDrive_IsCanActive(&g_return_position)) {
+  251   2              return;
+  252   2          }
+  253   1      
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 5   
+
+  254   1          AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
+  255   1          g_autoDrive_state = AUTO_DRIVE_START;
+  256   1          g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
+  257   1          g_autoDrive_fail_flag = 0U;
+  258   1      }
+  259          
+  260          void AutoDrive_SetFishPositionRaw(const u8 *data_m)
+  261          {
+  262   1          if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
+  263   2              return;
+  264   2          }
+  265   1      
+  266   1          AutoDrive_CopyPoint(&g_fish_position, (const AutoDrive_PointRaw_t *)data_m);
+  267   1          if (!AutoDrive_IsCanActive(&g_fish_position)) {
+  268   2              return;
+  269   2          }
+  270   1      
+  271   1          AutoDrive_SetMode(AUTO_DRIVE_GO_FISISH_POSITION);
+  272   1          g_autoDrive_state = AUTO_DRIVE_START;
+  273   1          g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
+  274   1          g_autoDrive_fail_flag = 0U;
+  275   1      }
+  276          
+  277          void AutoDrive_TriggerReturn(void)
+  278          {
+  279   1          if (g_autodrv_cfg.auto_ret_onoff != 0x30U) {
+  280   2              if (g_autoDrive_fail_flag) {
+  281   3                  return;
+  282   3              }
+  283   2              if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
+  284   3                  return;
+  285   3              }
+  286   2              if (AutoDrive_IsCanActive(&g_autodrv_cfg.ret_point)) {
+  287   3                  AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
+  288   3                  AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
+  289   3                  g_autoDrive_state = AUTO_DRIVE_START;
+  290   3                  g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
+  291   3              }
+  292   2          }
+  293   1      }
+  294          
+  295          void AutoDrive_WorkOvertimeFail(void)
+  296          {
+  297   1          g_autoDrive_fail_flag = 1U;
+  298   1      }
+  299          
+  300          void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len)
+  301          {
+  302   1          if ((data_m == 0) || (len == 0U)) {
+  303   2              return;
+  304   2          }
+  305   1      
+  306   1          g_autoDrive_switch = data_m[0];
+  307   1          g_autodrv_cfg.auto_ret_onoff = data_m[0];
+  308   1          if (len >= (u8)(1U + sizeof(AutoDrive_PointRaw_t))) {
+  309   2              AutoDrive_CopyPoint(&g_autodrv_cfg.ret_point,
+  310   2                                  (const AutoDrive_PointRaw_t *)&data_m[1]);
+  311   2          }
+  312   1          (void)AutoDriveCfg_Save(&g_autodrv_cfg);
+  313   1      }
+  314          
+  315          void AutoDrive_GetStoredConfig(AutoDrive_ReturnConfig_t *cfg)
+  316          {
+  317   1          if (cfg != 0) {
+  318   2              *cfg = g_autodrv_cfg;
+  319   2          }
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 6   
+
+  320   1      }
+  321          
+  322          static void AutoDrive_SetTurnTimes(u16 times)
+  323          {
+  324   1          if (times > 200U) {
+  325   2              times = 200U;
+  326   2          }
+  327   1          g_autoDrive_turn_times = times;
+  328   1      }
+  329          
+  330          static void AutoDrive_StartRunLine(u16 speed)
+  331          {
+  332   1          AutoDrive_SetMotorForward(speed);
+  333   1      }
+  334          
+  335          static void AutoDrive_TurnHandle(void)
+  336          {
+  337   1          if (g_autoDrive_turn_times > 0U) {
+  338   2              g_autoDrive_turn_times--;
+  339   2          } else {
+  340   2              AutoDrive_StartRunLine(AUTODRIVE_DRIVE_FAST_PWM);
+  341   2          }
+  342   1      }
+  343          
+  344          u8 AutoDrive_GetDirectionNowToDestination(const u8 *nowpositionData,
+  345                                                    const u8 *despositionData)
+  346          {
+  347   1          const AutoDrive_PointRaw_t *nowposition;
+  348   1          const AutoDrive_PointRaw_t *desposition;
+  349   1          u8 direction;
+  350   1      
+  351   1          nowposition = (const AutoDrive_PointRaw_t *)nowpositionData;
+  352   1          desposition = (const AutoDrive_PointRaw_t *)despositionData;
+  353   1          direction = 0U;
+  354   1      
+  355   1          if ((nowposition->lon_whole > desposition->lon_whole) ||
+  356   1              ((nowposition->lon_whole == desposition->lon_whole) &&
+  357   1               (nowposition->lon_frac > desposition->lon_frac))) {
+  358   2              direction = POSITION_WEST;
+  359   2              if ((nowposition->lat_whole > desposition->lat_whole) ||
+  360   2                  ((nowposition->lat_whole == desposition->lat_whole) &&
+  361   2                   (nowposition->lat_frac > desposition->lat_frac))) {
+  362   3                  direction = POSITION_WEST_SOUTH;
+  363   3              } else if ((nowposition->lat_whole < desposition->lat_whole) ||
+  364   2                         ((nowposition->lat_whole == desposition->lat_whole) &&
+  365   2                          (nowposition->lat_frac < desposition->lat_frac))) {
+  366   3                  direction = POSITION_WEST_NORTH;
+  367   3              }
+  368   2          }
+  369   1      
+  370   1          if ((nowposition->lon_whole < desposition->lon_whole) ||
+  371   1              ((nowposition->lon_whole == desposition->lon_whole) &&
+  372   1               (nowposition->lon_frac < desposition->lon_frac))) {
+  373   2              direction = POSITION_EAST;
+  374   2              if ((nowposition->lat_whole > desposition->lat_whole) ||
+  375   2                  ((nowposition->lat_whole == desposition->lat_whole) &&
+  376   2                   (nowposition->lat_frac > desposition->lat_frac))) {
+  377   3                  direction = POSITION_EAST_SOUTH;
+  378   3              } else if ((nowposition->lat_whole < desposition->lat_whole) ||
+  379   2                         ((nowposition->lat_whole == desposition->lat_whole) &&
+  380   2                          (nowposition->lat_frac < desposition->lat_frac))) {
+  381   3                  direction = POSITION_EAST_NORTH;
+  382   3              }
+  383   2          }
+  384   1      
+  385   1          if (direction == 0U) {
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 7   
+
+  386   2              if ((nowposition->lat_whole > desposition->lat_whole) ||
+  387   2                  ((nowposition->lat_whole == desposition->lat_whole) &&
+  388   2                   (nowposition->lat_frac > desposition->lat_frac))) {
+  389   3                  direction = POSITION_SOUTH;
+  390   3              } else {
+  391   3                  direction = POSITION_NORTH;
+  392   3              }
+  393   2          }
+  394   1      
+  395   1          return direction;
+  396   1      }
+  397          
+  398          static double AutoDrive_CalDistanceLon(const AutoDrive_PointRaw_t *now,
+  399                                                 const AutoDrive_PointRaw_t *des)
+  400          {
+  401   1          u16 dd1;
+  402   1          u16 dd2;
+  403   1          double sec1;
+  404   1          double sec2;
+  405   1      
+  406   1          dd1 = now->lon_whole / 100U;
+  407   1          dd2 = des->lon_whole / 100U;
+  408   1          sec1 = (double)(now->lon_whole % 100U) + ((double)now->lon_frac) / 10000.0;
+  409   1          sec2 = (double)(des->lon_whole % 100U) + ((double)des->lon_frac) / 10000.0;
+  410   1      
+  411   1          if (dd1 == dd2) {
+  412   2              if (sec1 >= sec2) {
+  413   3                  sec1 -= sec2;
+  414   3              } else {
+  415   3                  sec1 = sec2 - sec1;
+  416   3              }
+  417   2              return sec1 * 1850.0;
+  418   2          }
+  419   1      
+  420   1          if (dd1 > dd2) {
+  421   2              dd1 = dd1 - dd2;
+  422   2              if (sec1 > sec2) {
+  423   3                  sec1 -= sec2;
+  424   3              } else {
+  425   3                  dd1 -= 1U;
+  426   3                  sec1 += 60.0;
+  427   3                  sec1 -= sec2;
+  428   3              }
+  429   2          } else {
+  430   2              dd1 = dd2 - dd1;
+  431   2              if (sec2 > sec1) {
+  432   3                  sec1 = sec2 - sec1;
+  433   3              } else {
+  434   3                  dd1 -= 1U;
+  435   3                  sec2 += 60.0;
+  436   3                  sec1 = sec2 - sec1;
+  437   3              }
+  438   2          }
+  439   1      
+  440   1          if (dd1 != 0U) {
+  441   2              return (double)dd1 * 111130.0 + sec1 * 1850.0;
+  442   2          }
+  443   1          return sec1 * 1850.0;
+  444   1      }
+  445          
+  446          static double AutoDrive_CalDistanceLat(const AutoDrive_PointRaw_t *now,
+  447                                                 const AutoDrive_PointRaw_t *des)
+  448          {
+  449   1          u16 dd1;
+  450   1          u16 dd2;
+  451   1          double sec1;
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 8   
+
+  452   1          double sec2;
+  453   1      
+  454   1          dd1 = now->lat_whole / 100U;
+  455   1          dd2 = des->lat_whole / 100U;
+  456   1          sec1 = (double)(now->lat_whole % 100U) + ((double)now->lat_frac) / 10000.0;
+  457   1          sec2 = (double)(des->lat_whole % 100U) + ((double)des->lat_frac) / 10000.0;
+  458   1      
+  459   1          if (dd1 == dd2) {
+  460   2              if (sec1 >= sec2) {
+  461   3                  sec1 -= sec2;
+  462   3              } else {
+  463   3                  sec1 = sec2 - sec1;
+  464   3              }
+  465   2              return sec1 * 1850.0;
+  466   2          }
+  467   1      
+  468   1          if (dd1 > dd2) {
+  469   2              dd1 = dd1 - dd2;
+  470   2              if (sec1 > sec2) {
+  471   3                  sec1 -= sec2;
+  472   3              } else {
+  473   3                  dd1 -= 1U;
+  474   3                  sec1 += 60.0;
+  475   3                  sec1 -= sec2;
+  476   3              }
+  477   2          } else {
+  478   2              dd1 = dd2 - dd1;
+  479   2              if (sec2 > sec1) {
+  480   3                  sec1 = sec2 - sec1;
+  481   3              } else {
+  482   3                  dd1 -= 1U;
+  483   3                  sec2 += 60.0;
+  484   3                  sec1 = sec2 - sec1;
+  485   3              }
+  486   2          }
+  487   1      
+  488   1          if (dd1 != 0U) {
+  489   2              return (double)dd1 * 111130.0 + sec1 * 1850.0;
+  490   2          }
+  491   1          return sec1 * 1850.0;
+  492   1      }
+  493          
+  494          u16 AutoDrive_GetAngelNowToDestination(const u8 *nowpositionData,
+  495                                                 const u8 *despositionData)
+  496          {
+  497   1          const AutoDrive_PointRaw_t *nowposition;
+  498   1          const AutoDrive_PointRaw_t *desposition;
+  499   1          double distance_width;
+  500   1          double distance_height;
+  501   1          double angel;
+  502   1      
+  503   1          nowposition = (const AutoDrive_PointRaw_t *)nowpositionData;
+  504   1          desposition = (const AutoDrive_PointRaw_t *)despositionData;
+  505   1      
+  506   1          distance_width = AutoDrive_CalDistanceLon(nowposition, desposition);
+  507   1          distance_height = AutoDrive_CalDistanceLat(nowposition, desposition);
+  508   1      
+  509   1          if (distance_width <= 0.0) {
+  510   2              if (distance_height <= 0.0) {
+  511   3                  return 65535U;
+  512   3              }
+  513   2              return 90U;
+  514   2          }
+  515   1      
+  516   1          angel = atan(distance_height / distance_width) * 180.0 / 3.14159265;
+  517   1          if (angel > 360.0) {
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 9   
+
+  518   2              return 65535U;
+  519   2          }
+  520   1          return (u16)angel;
+  521   1      }
+  522          
+  523          u16 AutoDrive_GetDistanceNowToDestination(const u8 *nowpositionData,
+  524                                                    const u8 *despositionData)
+  525          {
+  526   1          const AutoDrive_PointRaw_t *nowposition;
+  527   1          const AutoDrive_PointRaw_t *desposition;
+  528   1          double distance_width;
+  529   1          double distance_height;
+  530   1          double distance;
+  531   1      
+  532   1          nowposition = (const AutoDrive_PointRaw_t *)nowpositionData;
+  533   1          desposition = (const AutoDrive_PointRaw_t *)despositionData;
+  534   1      
+  535   1          distance_width = AutoDrive_CalDistanceLon(nowposition, desposition);
+  536   1          distance_height = AutoDrive_CalDistanceLat(nowposition, desposition);
+  537   1          distance = sqrt(distance_height * distance_height + distance_width * distance_width);
+  538   1      
+  539   1          return (u16)distance;
+  540   1      }
+  541          
+  542          u16 AutoDrive_GetNorthAngel(u8 direction, u8 angel)
+  543          {
+  544   1          switch (direction) {
+  545   2          case POSITION_NORTH:
+  546   2              return 0U;
+  547   2          case POSITION_EAST_NORTH:
+  548   2              return (u16)(90U - angel);
+  549   2          case POSITION_EAST:
+  550   2              return 90U;
+  551   2          case POSITION_EAST_SOUTH:
+  552   2              return (u16)(90U + angel);
+  553   2          case POSITION_SOUTH:
+  554   2              return 180U;
+  555   2          case POSITION_WEST_SOUTH:
+  556   2              return (u16)(270U - angel);
+  557   2          case POSITION_WEST:
+  558   2              return 270U;
+  559   2          case POSITION_WEST_NORTH:
+  560   2              return (u16)(270U + angel);
+  561   2          default:
+  562   2              return 0U;
+  563   2          }
+  564   1      }
+  565          
+  566          static u16 AutoDrive_GetCurrentHeadingDeg(void)
+  567          {
+  568   1          const GPS_State_t *gps;
+  569   1      
+  570   1          gps = GPS_GetState();
+  571   1          if ((gps != 0) && (gps->course_deg_x100 <= 36000U) &&
+  572   1              (gps->speed_kmh_x100 >= 80UL)) {
+  573   2              return (u16)(gps->course_deg_x100 / 100U);
+  574   2          }
+  575   1      
+  576   1          if (AHRS_IsReady()) {
+  577   2              const AHRS_State_t *ahrs;
+  578   2              int16 yaw;
+  579   2      
+  580   2              ahrs = AHRS_GetState();
+  581   2              yaw = ahrs->yaw_deg100;
+  582   2              while (yaw < 0) {
+  583   3                  yaw = (int16)(yaw + 36000);
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 10  
+
+  584   3              }
+  585   2              while (yaw >= 36000) {
+  586   3                  yaw = (int16)(yaw - 36000);
+  587   3              }
+  588   2              return (u16)(yaw / 100U);
+  589   2          }
+  590   1      
+  591   1          return 65535U;
+  592   1      }
+  593          
+  594          static void AutoDrive_UpdateIdlePosition(void)
+  595          {
+  596   1          if (!AutoDrive_GpsReady()) {
+  597   2              return;
+  598   2          }
+  599   1      
+  600   1          AutoDrive_PointFromGps(&g_idle_position, GPS_GetState());
+  601   1      }
+  602          
+  603          static void AutoDrive_UpdateGpsStepPoints(void)
+  604          {
+  605   1          const GPS_State_t *gps;
+  606   1      
+  607   1          gps = GPS_GetState();
+  608   1          if (gps == 0) {
+  609   2              return;
+  610   2          }
+  611   1      
+  612   1          AutoDrive_PointFromGps(&g_now_position, gps);
+  613   1      }
+  614          
+  615          void AutoDrive_Init(void)
+  616          {
+  617   1          AutoDriveCfg_Init();
+  618   1          AutoDriveCfg_Load(&g_autodrv_cfg);
+  619   1          if (g_autodrv_cfg.auto_ret_onoff == 0xFFU) {
+  620   2              g_autodrv_cfg.auto_ret_onoff = 0x30U;
+  621   2          }
+  622   1      
+  623   1          g_autoDrive_switch = g_autodrv_cfg.auto_ret_onoff;
+  624   1          g_autoDrive_state = AUTO_DRIVE_IDLE;
+  625   1          g_autoDrive_mode = AUTO_DRIVE_CLOSE;
+  626   1          g_autoDrive_turn_times = 0U;
+  627   1          g_autodrive_work_overtime = 0U;
+  628   1          g_autoDrive_fail_flag = 0U;
+  629   1          g_link_alive_ticks = 0U;
+  630   1          g_link_close_ticks = 0U;
+  631   1          g_last_run_update_seq = 0UL;
+  632   1          g_last_poll_tick_ms = Task_GetTickMs();
+  633   1          g_last_link_tick_ms = g_last_poll_tick_ms;
+  634   1      
+  635   1          if (!g_motor_ready) {
+  636   2              Motor_Init();
+  637   2              g_motor_ready = 1U;
+  638   2          }
+  639   1          AutoDrive_StopMotion();
+  640   1      }
+  641          
+  642          void AutoDrive_LinkAliveKick(void)
+  643          {
+  644   1          g_link_alive_ticks = 0U;
+  645   1          g_link_close_ticks = AUTODRIVE_MANUAL_CLOSE_TICKS;
+  646   1      }
+  647          
+  648          void AutoDrive_LinkAliveTick(void)
+  649          {
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 11  
+
+  650   1          u32 now_ms;
+  651   1      
+  652   1          now_ms = Task_GetTickMs();
+  653   1          if ((now_ms - g_last_link_tick_ms) < 10U) {
+  654   2              return;
+  655   2          }
+  656   1          g_last_link_tick_ms = now_ms;
+  657   1      
+  658   1          if (g_link_alive_ticks < AUTODRIVE_MANUAL_TIMEOUT_TICKS) {
+  659   2              g_link_alive_ticks++;
+  660   2          } else {
+  661   2              AutoDrive_TriggerReturn();
+  662   2              g_link_alive_ticks = 0U;
+  663   2          }
+  664   1      
+  665   1          if (g_link_close_ticks > 0U) {
+  666   2              g_link_close_ticks--;
+  667   2              if (g_link_close_ticks == 0U) {
+  668   3                  if (AutoDrive_GetMode() == AUTO_DRIVE_CLOSE) {
+  669   4                      AutoDrive_StopMotion();
+  670   4                  }
+  671   3              }
+  672   2          }
+  673   1      }
+  674          
+  675          void AutoDrive_Poll(void)
+  676          {
+  677   1          static u8 running_wait_times = 0U;
+  678   1          const GPS_State_t *gps;
+  679   1          u16 destination_distance;
+  680   1          u16 moved_distance;
+  681   1          u16 turn_angle;
+  682   1          u16 current_heading;
+  683   1          u8 turn_dir;
+  684   1          int16 direction_diff;
+  685   1          u32 now_ms;
+  686   1      
+  687   1          now_ms = Task_GetTickMs();
+  688   1          if ((now_ms - g_last_poll_tick_ms) < 10U) {
+  689   2              return;
+  690   2          }
+  691   1          g_last_poll_tick_ms = now_ms;
+  692   1      
+  693   1          gps = GPS_GetState();
+  694   1          if (gps != 0) {
+  695   2              AutoDrive_UpdateIdlePosition();
+  696   2          }
+  697   1      
+  698   1          switch (g_autoDrive_state) {
+  699   2          case AUTO_DRIVE_IDLE:
+  700   2              break;
+  701   2      
+  702   2          case AUTO_DRIVE_START:
+  703   2              if (g_autoDrive_mode == AUTO_DRIVE_GO_FISISH_POSITION) {
+  704   3                  g_destination_direction =
+  705   3                      AutoDrive_GetDirectionNowToDestination((const u8 *)&g_idle_position,
+  706   3                                                             (const u8 *)&g_fish_position);
+  707   3                  AutoDrive_StartRunLine(AUTODRIVE_DRIVE_PWM);
+  708   3                  AutoDrive_SetTurnTimes(0U);
+  709   3                  g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
+  710   3              } else if (g_autoDrive_mode == AUTO_DRIVE_GO_HOME_POSITION) {
+  711   3                  g_destination_direction =
+  712   3                      AutoDrive_GetDirectionNowToDestination((const u8 *)&g_idle_position,
+  713   3                                                             (const u8 *)&g_return_position);
+  714   3      
+  715   3                  current_heading = AutoDrive_GetCurrentHeadingDeg();
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 12  
+
+  716   3                  if (current_heading == 65535U) {
+  717   4                      current_heading = 0U;
+  718   4                  }
+  719   3      
+  720   3                  switch (g_destination_direction) {
+  721   4                  case POSITION_NORTH:
+  722   4                      direction_diff = (int16)(0 - (int16)current_heading);
+  723   4                      break;
+  724   4                  case POSITION_EAST_NORTH:
+  725   4                      direction_diff = (int16)(315 - (int16)current_heading);
+  726   4                      break;
+  727   4                  case POSITION_EAST:
+  728   4                      direction_diff = (int16)(270 - (int16)current_heading);
+  729   4                      break;
+  730   4                  case POSITION_EAST_SOUTH:
+  731   4                      direction_diff = (int16)(225 - (int16)current_heading);
+  732   4                      break;
+  733   4                  case POSITION_SOUTH:
+  734   4                      direction_diff = (int16)(180 - (int16)current_heading);
+  735   4                      break;
+  736   4                  case POSITION_WEST_SOUTH:
+  737   4                      direction_diff = (int16)(135 - (int16)current_heading);
+  738   4                      break;
+  739   4                  case POSITION_WEST:
+  740   4                      direction_diff = (int16)(90 - (int16)current_heading);
+  741   4                      break;
+  742   4                  case POSITION_WEST_NORTH:
+  743   4                      direction_diff = (int16)(45 - (int16)current_heading);
+  744   4                      break;
+  745   4                  default:
+  746   4                      direction_diff = 0;
+  747   4                      break;
+  748   4                  }
+  749   3      
+  750   3                  if (direction_diff < -180) {
+  751   4                      direction_diff = (int16)(direction_diff + 360);
+  752   4                  } else if (direction_diff > 180) {
+  753   4                      direction_diff = (int16)(direction_diff - 360);
+  754   4                  }
+  755   3      
+  756   3                  if (direction_diff > 5) {
+  757   4                      AutoDrive_SetMotorLeft(AUTODRIVE_TURN_PWM);
+  758   4                  } else if (direction_diff < -5) {
+  759   4                      AutoDrive_SetMotorRight(AUTODRIVE_TURN_PWM);
+  760   4                  } else {
+  761   4                      AutoDrive_SetMotorForward(AUTODRIVE_DRIVE_PWM);
+  762   4                  }
+  763   3      
+  764   3                  AutoDrive_SetTurnTimes((u16)(AutoDrive_Abs16(direction_diff) >> 3));
+  765   3                  g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
+  766   3              } else {
+  767   3                  AutoDrive_Stop();
+  768   3                  break;
+  769   3              }
+  770   2              AutoDrive_TurnHandle();
+  771   2              break;
+  772   2      
+  773   2          case AUTO_DRIVE_GET_DIRECTION:
+  774   2              AutoDrive_TurnHandle();
+  775   2              if (g_autoDrive_turn_times == 0U) {
+  776   3                  if (!AutoDrive_GpsReady()) {
+  777   4                      AutoDrive_Stop();
+  778   4                      break;
+  779   4                  }
+  780   3                  AutoDrive_PointFromGps(&g_last_position, gps);
+  781   3                  g_last_run_update_seq = gps->update_sequence;
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 13  
+
+  782   3                  g_autoDrive_state = AUTO_DRIVE_RUNING;
+  783   3                  AutoDrive_StartRunLine(AUTODRIVE_DRIVE_PWM);
+  784   3                  AutoDrive_SetTurnTimes(100U);
+  785   3              }
+  786   2              break;
+  787   2      
+  788   2          case AUTO_DRIVE_RUNING:
+  789   2              AutoDrive_TurnHandle();
+  790   2      
+  791   2              if (g_autodrive_work_overtime > 0U) {
+  792   3                  g_autodrive_work_overtime--;
+  793   3              } else {
+  794   3                  AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
+  795   3                  AutoDrive_WorkOvertimeFail();
+  796   3                  break;
+  797   3              }
+  798   2      
+  799   2              if (!AutoDrive_GpsReady()) {
+  800   3                  break;
+  801   3              }
+  802   2              if (g_autoDrive_turn_times != 0U) {
+  803   3                  break;
+  804   3              }
+  805   2              if ((gps == 0) || (gps->update_sequence == g_last_run_update_seq)) {
+  806   3                  break;
+  807   3              }
+  808   2      
+  809   2              if (running_wait_times >= 2U) {
+  810   3                  running_wait_times = 0U;
+  811   3              } else {
+  812   3                  running_wait_times++;
+  813   3                  break;
+  814   3              }
+  815   2      
+  816   2              AutoDrive_UpdateGpsStepPoints();
+  817   2              g_nowrun_direction =
+  818   2                  AutoDrive_GetDirectionNowToDestination((const u8 *)&g_last_position,
+  819   2                                                         (const u8 *)&g_now_position);
+  820   2      
+  821   2              if (g_autoDrive_mode == AUTO_DRIVE_GO_FISISH_POSITION) {
+  822   3                  g_destination_angle =
+  823   3                      AutoDrive_GetAngelNowToDestination((const u8 *)&g_now_position,
+  824   3                                                         (const u8 *)&g_fish_position);
+  825   3                  g_destination_direction =
+  826   3                      AutoDrive_GetDirectionNowToDestination((const u8 *)&g_now_position,
+  827   3                                                             (const u8 *)&g_fish_position);
+  828   3                  if (g_destination_angle == 65535U) {
+  829   4                      break;
+  830   4                  }
+  831   3                  destination_distance =
+  832   3                      AutoDrive_GetDistanceNowToDestination((const u8 *)&g_now_position,
+  833   3                                                            (const u8 *)&g_fish_position);
+  834   3              } else if (g_autoDrive_mode == AUTO_DRIVE_GO_HOME_POSITION) {
+  835   3                  g_destination_angle =
+  836   3                      AutoDrive_GetAngelNowToDestination((const u8 *)&g_now_position,
+  837   3                                                         (const u8 *)&g_return_position);
+  838   3                  g_destination_direction =
+  839   3                      AutoDrive_GetDirectionNowToDestination((const u8 *)&g_now_position,
+  840   3                                                             (const u8 *)&g_return_position);
+  841   3                  if (g_destination_angle == 65535U) {
+  842   4                      break;
+  843   4                  }
+  844   3                  destination_distance =
+  845   3                      AutoDrive_GetDistanceNowToDestination((const u8 *)&g_now_position,
+  846   3                                                            (const u8 *)&g_return_position);
+  847   3              } else {
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 14  
+
+  848   3                  AutoDrive_Stop();
+  849   3                  break;
+  850   3              }
+  851   2      
+  852   2              if (destination_distance < AUTODRIVE_ARRIVE_DISTANCE_M) {
+  853   3                  g_autoDrive_state = AUTO_DRIVE_IDLE;
+  854   3                  AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
+  855   3                  AutoDrive_StopMotion();
+  856   3                  break;
+  857   3              }
+  858   2      
+  859   2              g_destination_angle =
+  860   2                  AutoDrive_GetNorthAngel(g_destination_direction, (u8)g_destination_angle);
+  861   2      
+  862   2              moved_distance =
+  863   2                  AutoDrive_GetDistanceNowToDestination((const u8 *)&g_now_position,
+  864   2                                                        (const u8 *)&g_last_position);
+  865   2              if (moved_distance < AUTODRIVE_STRAIGHT_DISTANCE_X10_M) {
+  866   3                  AutoDrive_SetTurnTimes(60U);
+  867   3                  AutoDrive_StartRunLine(AUTODRIVE_DRIVE_FAST_PWM);
+  868   3                  break;
+  869   3              }
+  870   2      
+  871   2              g_nowrun_angle = AutoDrive_GetCurrentHeadingDeg();
+  872   2              if ((g_nowrun_angle == 65535U) || (g_nowrun_angle > 360U)) {
+  873   3                  g_nowrun_angle =
+  874   3                      AutoDrive_GetAngelNowToDestination((const u8 *)&g_last_position,
+  875   3                                                         (const u8 *)&g_now_position);
+  876   3                  if ((g_nowrun_angle == 65535U) || (g_nowrun_angle > 360U)) {
+  877   4                      AutoDrive_StartRunLine(AUTODRIVE_DRIVE_FAST_PWM);
+  878   4                      break;
+  879   4                  }
+  880   3                  g_nowrun_angle =
+  881   3                      AutoDrive_GetNorthAngel(g_nowrun_direction, (u8)g_nowrun_angle);
+  882   3              }
+  883   2      
+  884   2              direction_diff = (int16)((g_destination_angle - g_nowrun_angle + 360U) % 360U);
+  885   2              if (direction_diff > 180) {
+  886   3                  turn_angle = (u16)(360 - direction_diff);
+  887   3                  turn_dir = 1U;
+  888   3              } else {
+  889   3                  turn_angle = (u16)direction_diff;
+  890   3                  turn_dir = 2U;
+  891   3              }
+  892   2      
+  893   2              if (turn_angle < 10U) {
+  894   3                  AutoDrive_SetMotorForward(AUTODRIVE_DRIVE_FAST_PWM);
+  895   3              } else {
+  896   3                  if (turn_dir == 1U) {
+  897   4                      AutoDrive_SetMotorLeft(AUTODRIVE_TURN_PWM);
+  898   4                  } else {
+  899   4                      AutoDrive_SetMotorRight(AUTODRIVE_TURN_PWM);
+  900   4                  }
+  901   3                  AutoDrive_SetTurnTimes(turn_angle);
+  902   3              }
+  903   2      
+  904   2              AutoDrive_CopyPoint(&g_last_position, &g_now_position);
+  905   2              g_last_run_update_seq = gps->update_sequence;
+  906   2              break;
+  907   2      
+  908   2          default:
+  909   2              g_autodrive_work_overtime = 0U;
+  910   2              AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
+  911   2              break;
+  912   2          }
+  913   1      }
+C251 COMPILER V5.60.0,  autodrive                                                          12/05/26  18:27:34  PAGE 15  
+
+*** WARNING C174 IN LINE 156 OF ..\Code_boweny\Device\AutoDrive\autodrive.c: 'AutoDrive_SetMotorBack': unreferenced 'sta
+             -tic' function
+*** WARNING C174 IN LINE 49 OF ..\Code_boweny\Device\AutoDrive\autodrive.c: 'AutoDrive_Abs32': unreferenced 'static' fun
+             -ction
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      3224     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =        93         27
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =       100     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  2 WARNING(S),  0 ERROR(S)

@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      07/05/26  09:39:26  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      16/05/26  05:32:04  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_EEPROM
@@ -66,7 +66,7 @@ stmt  level    source
    52          // 返回: non.
    53          // 版本: V1.0, 2012-10-22
    54          //========================================================================
-C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      07/05/26  09:39:26  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      16/05/26  05:32:04  PAGE 2   
 
    55          void EEPROM_read_n(u32 EE_address,u8 *DataAddress,u16 number)
    56          {
@@ -134,7 +134,7 @@ stmt  level    source
   109   2          IAP_ADDRH = (u8)(EE_address >> 8);  //送地址中字节（地址需要改变时才需重新送地址�
              -�
   110   2          IAP_ADDRL = (u8)EE_address;         //送地址低字节（地址需要改变时才需重新送地址�
-C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      07/05/26  09:39:26  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_EEPROM                                                      16/05/26  05:32:04  PAGE 3   
 
              -�
   111   2          IAP_DATA  = *DataAddress;         //送数据到IAP_DATA，只有数据改变时才需重新送

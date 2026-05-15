@@ -1,0 +1,734 @@
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE LT8920_SPI
+OBJECT MODULE PLACED IN .\Objects\LT8920_SPI.obj
+COMPILER INVOKED BY: E:\Keil_v5\C51\BIN\C51.EXE App\Wireless\LT8920\LT8920_SPI.c LARGE BROWSE INCDIR(.\Driver\Inc;.\App\
+                    -Config;.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Wireless;.\
+                    -App\Gyro;.\App\Gps;.\App\AutoDrive;.\App\ADC;.\App\eeprom;.\App\compass) DEFINE(HW_V16,MID_SHIP,MAG_QMC_6309,GPS_DK2_RMC
+                    -) DEBUG OBJECTEXTEND PRINT(.\Listings\LT8920_SPI.lst) OBJECT(.\Objects\LT8920_SPI.obj)
+
+line level    source
+
+   1          #include "LT8920_SPI.h"
+   2          
+   3          #include "wirelessProtocal.h"
+   4          
+   5          unsigned char RegH,RegL;
+   6          
+   7          
+   8          unsigned char RXBusy_Send=0,RXBusy_Rec=0;
+   9          unsigned char Rx_TimeOUT=0;                     //1mS++ / 或者放在定时器�??�??+1
+  10          unsigned char transferKey[2]={0};
+  11          unsigned char RF_Receive_Channel[3] = {0};
+  12          bit s_rf_init_ok = 0;
+  13          
+  14          
+  15          const unsigned char LDT89xxconfig[CFG_LEN][3]= 
+  16          {
+  17                  {0, 0x6F, 0xE0},
+  18                  {1, 0x56, 0x81},
+  19                  {2, 0x66, 0x17},
+  20                  {4, 0x9C, 0xC9},
+  21                  {5, 0x66, 0x37},
+  22                  {7, 0x00, 0x30},        //channel freq and Start/Stop Tx,Rx
+  23                  {8, 0x6C, 0x90},        
+  24          
+  25                  {9, 0x48, 0x00},        //0x4800(max:6dBm)
+  26                  // {9,RF_Power>>8,RF_Power&0xFF},               //设置功率
+  27          
+  28                  {10, 0x7F, 0xFD},
+  29                  {11, 0x00, 0x08},       //RSSI on
+  30                  {12, 0x00, 0x00},
+  31                  {13, 0x48, 0xBD},
+  32          
+  33                  {22, 0x00, 0xff},
+  34                  {23, 0x80, 0x05},
+  35                  {24, 0x00, 0x67},
+  36                  {25, 0x16, 0x59},
+  37                  {26, 0x19, 0xE0},
+  38                  
+  39          #ifdef Air_rate_1M
+                      {27, 0x13, 0x01},               //1Mbps
+              #else
+  42                  {27, 0x13, 0x00},               //exclude 1Mbps
+  43          #endif
+  44                  
+  45                  {28, 0x18, 0x00},
+  46                  
+  47                  {32, 0x48, 0x00},
+  48                  {33, 0x3f, 0xC7},
+  49                  {34, 0x20, 0x00},
+  50                  // {35, 0x03, 0x00},
+  51                  {35, 0x00, 0x00},
+  52                  {36, 0x03, 0x80},
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 2   
+
+  53            {37, 0x03, 0x80},
+  54                  // {37, 0x06, 0x8C},
+  55                  {38, 0x5A, 0x5A},
+  56                  // {39, 0x5A, 0x5A},
+  57            {39, 0x03, 0x80},
+  58          
+  59                  {40, 0x44, 0x02},
+  60                  {41, 0xB0, 0x00}, 
+  61                  {42, 0xFD, 0xB0},
+  62                  {43, 0x00, 0x0F},
+  63                  
+  64          #ifdef Air_rate_62K5
+  65                  //62.5K
+  66                  {44, 0x10, 0x00},
+  67                  {45, 0x05, 0x52},
+  68          #endif
+  69          #ifdef Air_rate_125K    
+                      //125K
+                      {44, 0x08, 0x00},
+                      {45, 0x05, 0x52},       
+              #endif
+  74          #ifdef Air_rate_250K    
+                      //250K
+                      {44, 0x04, 0x00},
+                      {45, 0x05, 0x52},               
+              #endif
+  79          #ifdef Air_rate_1M      
+                      //1Mbps
+                      {44, 0x01, 0x00},
+                      {45, 0x01, 0x52},               
+              #endif
+  84                  {50, 0x00, 0x00},
+  85                  // {52, 0x80, 0x80},
+  86          };
+  87          
+  88          
+  89          //----------------------------------------------------------
+  90          //unsigned char SNDLY;
+  91          
+  92          void SPI_SendByte(unsigned char buf)
+  93          {
+  94   1      #if SlowSPI_io  
+                unsigned char mcnt;
+                //unsigned int SNDLY;
+                for(mcnt=0;mcnt<8;mcnt++)
+                {
+                  RF_CLK_L;   //Bus ready;
+                              NOPN(5);
+              //    _nop_();_nop_();_nop_();_nop_();_nop_();
+                  //for(SNDLY=0;SNDLY<500;SNDLY++);
+                  if(buf&0x80)        RF_MOSI_H;
+                  else                RF_MOSI_L;
+                  
+                  RF_CLK_H;   //Send bit;     
+                              NOPN(5);
+              //    _nop_();_nop_();_nop_();_nop_();_nop_();
+                  //for(SNDLY=0;SNDLY<500;SNDLY++);
+                  buf<<=1;
+                  
+                }
+                RF_CLK_L;     //Bus ready;
+                //RF_MOSI_L;  
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 3   
+
+              #else
+ 116   1        RF_CLK_H;
+ 117   1        if(buf&0x80)  RF_MOSI_H;
+ 118   1        else                  RF_MOSI_L;
+ 119   1        RF_CLK_L;
+ 120   1        
+ 121   1        RF_CLK_H;
+ 122   1        if(buf&0x40)  RF_MOSI_H;
+ 123   1        else                  RF_MOSI_L;
+ 124   1        RF_CLK_L;
+ 125   1        
+ 126   1        RF_CLK_H;
+ 127   1        if(buf&0x20)  RF_MOSI_H;
+ 128   1        else                  RF_MOSI_L;
+ 129   1        RF_CLK_L;
+ 130   1        
+ 131   1        RF_CLK_H;
+ 132   1        if(buf&0x10)  RF_MOSI_H;
+ 133   1        else                  RF_MOSI_L;
+ 134   1        RF_CLK_L;
+ 135   1        
+ 136   1        RF_CLK_H;
+ 137   1        if(buf&0x08)  RF_MOSI_H;
+ 138   1        else                  RF_MOSI_L;
+ 139   1        RF_CLK_L;
+ 140   1        
+ 141   1        RF_CLK_H;
+ 142   1        if(buf&0x04)  RF_MOSI_H;
+ 143   1        else                  RF_MOSI_L;
+ 144   1        RF_CLK_L;
+ 145   1        
+ 146   1        RF_CLK_H;
+ 147   1        if(buf&0x02)  RF_MOSI_H;
+ 148   1        else                  RF_MOSI_L;
+ 149   1        RF_CLK_L;
+ 150   1        
+ 151   1        RF_CLK_H;
+ 152   1        if(buf&0x01)  RF_MOSI_H;
+ 153   1        else                  RF_MOSI_L;
+ 154   1        RF_CLK_L;
+ 155   1      #endif    
+ 156   1      }
+ 157          
+ 158          unsigned char SPI_ReadByte(uint8_t role)
+ 159          {
+ 160   1        unsigned char retvalue=0;     
+ 161   1      #if SlowSPI_io  
+                unsigned char mcnt;
+                //unsigned int SNDLY;
+                RF_CLK_L;             //Bus ready
+                for (mcnt=0;mcnt<8;mcnt++)
+                {
+                  RF_CLK_H;   //Slaver Chip OutPut Data
+                              NOPN(6);
+              //              _nop_();_nop_();_nop_();_nop_();_nop_();_nop_();
+                  //for(SNDLY=0;SNDLY<1050;SNDLY++);
+                  retvalue<<=1;
+                  RF_CLK_L;           //Bus ready     
+                  //for(SNDLY=0;SNDLY<1050;SNDLY++);
+                              NOPN(6);
+              //    _nop_();_nop_();_nop_();_nop_();_nop_();_nop_();
+                              if(role==LT8920_SEND)
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 4   
+
+                              {
+                                      if(RF_MISO_SEND)        retvalue|=1;
+                                      else            retvalue&=0xfe;
+                              }
+                              else
+                              {
+                                      if(RF_MISO_REC) retvalue|=1;
+                                      else            retvalue&=0xfe;
+                              }
+                  
+                }
+                RF_CLK_L;             //Bus ready     
+              
+              #else
+ 191   1      if(role==LT8920_SEND){
+ 192   2       RF_CLK_H;
+ 193   2        RF_CLK_L;
+ 194   2        if(RF_MISO_SEND)      retvalue|=0X80;
+ 195   2        
+ 196   2        RF_CLK_H;
+ 197   2        RF_CLK_L;
+ 198   2        if(RF_MISO_SEND)      retvalue|=0X40;
+ 199   2        
+ 200   2        RF_CLK_H;
+ 201   2        RF_CLK_L;
+ 202   2        if(RF_MISO_SEND)      retvalue|=0X20;
+ 203   2        
+ 204   2        RF_CLK_H;
+ 205   2        RF_CLK_L;
+ 206   2        if(RF_MISO_SEND)      retvalue|=0X10;
+ 207   2        
+ 208   2        RF_CLK_H;
+ 209   2        RF_CLK_L;
+ 210   2        if(RF_MISO_SEND)      retvalue|=0X08;
+ 211   2        
+ 212   2        RF_CLK_H;
+ 213   2        RF_CLK_L;
+ 214   2        if(RF_MISO_SEND)      retvalue|=0X04;
+ 215   2        
+ 216   2        RF_CLK_H;
+ 217   2        RF_CLK_L;
+ 218   2        if(RF_MISO_SEND)      retvalue|=0X02;
+ 219   2        
+ 220   2        RF_CLK_H;
+ 221   2        RF_CLK_L;
+ 222   2        if(RF_MISO_SEND)      retvalue|=0X01;
+ 223   2      }else{
+ 224   2        RF_CLK_H;
+ 225   2        RF_CLK_L;
+ 226   2        if(RF_MISO_REC)       retvalue|=0X80;
+ 227   2        
+ 228   2        RF_CLK_H;
+ 229   2        RF_CLK_L;
+ 230   2        if(RF_MISO_REC)       retvalue|=0X40;
+ 231   2        
+ 232   2        RF_CLK_H;
+ 233   2        RF_CLK_L;
+ 234   2        if(RF_MISO_REC)       retvalue|=0X20;
+ 235   2        
+ 236   2        RF_CLK_H;
+ 237   2        RF_CLK_L;
+ 238   2        if(RF_MISO_REC)       retvalue|=0X10;
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 5   
+
+ 239   2        
+ 240   2        RF_CLK_H;
+ 241   2        RF_CLK_L;
+ 242   2        if(RF_MISO_REC)       retvalue|=0X08;
+ 243   2        
+ 244   2        RF_CLK_H;
+ 245   2        RF_CLK_L;
+ 246   2        if(RF_MISO_REC)       retvalue|=0X04;
+ 247   2        
+ 248   2        RF_CLK_H;
+ 249   2        RF_CLK_L;
+ 250   2        if(RF_MISO_REC)       retvalue|=0X02;
+ 251   2        
+ 252   2        RF_CLK_H;
+ 253   2        RF_CLK_L;
+ 254   2        if(RF_MISO_REC)       retvalue|=0X01;
+ 255   2      }
+ 256   1       
+ 257   1        
+ 258   1      #endif  
+ 259   1        return retvalue;
+ 260   1      }
+ 261          
+ 262          void LT_ReadReg(unsigned char reg,uint8_t role) //数据更新在RegH，RegL
+ 263          {
+ 264   1        if(role==LT8920_SEND){
+ 265   2          RF_SS_SEND_L;
+ 266   2        }else{
+ 267   2          RF_SS_REC_L;
+ 268   2        }
+ 269   1        
+ 270   1        SPI_SendByte(reg|0x80);       //Read MSB.7=1; 
+ 271   1        RegH=SPI_ReadByte(role); 
+ 272   1        RegL=SPI_ReadByte(role); 
+ 273   1        
+ 274   1        if(role==LT8920_SEND){
+ 275   2          RF_SS_SEND_H;
+ 276   2        }else{
+ 277   2          RF_SS_REC_H;
+ 278   2        }
+ 279   1      
+ 280   1      
+ 281   1      }
+ 282          
+ 283          #if 0
+              uint16_t LT_ReadRegReply(unsigned char reg,uint8_t role)                //返回16位寄存器数据
+              {
+                if(role==LT8920_SEND){
+                  RF_SS_SEND_L;
+                }else{
+                  RF_SS_REC_L;
+                }
+                
+                SPI_SendByte(reg|0x80);       //Read MSB.7=1; 
+                RegH=SPI_ReadByte(role); 
+                RegL=SPI_ReadByte(role); 
+                if(role==LT8920_SEND){
+                  RF_SS_SEND_H;
+                }else{
+                  RF_SS_REC_H;
+                }
+                      
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 6   
+
+                return (RegH*256)+RegL;
+              }
+              
+              #endif
+ 305          
+ 306          void LT_WriteReg(unsigned char reg, unsigned char H, unsigned char L,uint8_t role)
+ 307          {
+ 308   1        if(role==LT8920_SEND){
+ 309   2          RF_SS_SEND_L;
+ 310   2        }else{
+ 311   2          RF_SS_REC_L;
+ 312   2        }
+ 313   1        
+ 314   1        SPI_SendByte(reg);    //Read MSB.7=0;
+ 315   1        SPI_SendByte(H);
+ 316   1        SPI_SendByte(L);
+ 317   1        if(role==LT8920_SEND){
+ 318   2          RF_SS_SEND_H;
+ 319   2        }else{
+ 320   2          RF_SS_REC_H;
+ 321   2        }
+ 322   1      }
+ 323          
+ 324          void LT_WriteBUF(unsigned char reg, unsigned char *pBuf, unsigned char len,uint8_t role)
+ 325          {
+ 326   1        unsigned char i;
+ 327   1        
+ 328   1        if(role==LT8920_SEND){
+ 329   2          RF_SS_SEND_L;
+ 330   2        }else{
+ 331   2          RF_SS_REC_L;
+ 332   2        }
+ 333   1        
+ 334   1        SPI_SendByte(reg);    //Read MSB.7=0;
+ 335   1        SPI_SendByte(len);    //Lenth
+ 336   1        for(i=0; i<len; i++)
+ 337   1          SPI_SendByte(pBuf[i]);
+ 338   1        if(role==LT8920_SEND){
+ 339   2          RF_SS_SEND_H;
+ 340   2        }else{
+ 341   2          RF_SS_REC_H;
+ 342   2        }
+ 343   1      }
+ 344          
+ 345          unsigned char LT_ReadBUF(unsigned char reg, unsigned char *pBuf,uint8_t role)
+ 346          {
+ 347   1        unsigned char i,len;
+ 348   1        
+ 349   1        if(role==LT8920_SEND){
+ 350   2          RF_SS_SEND_L;
+ 351   2        }else{
+ 352   2          RF_SS_REC_L;
+ 353   2        }
+ 354   1        
+ 355   1        SPI_SendByte(reg|0X80);       //Read MSB.7=0;
+ 356   1        len=SPI_ReadByte(role);
+ 357   1        if (len>64)
+ 358   1        {
+ 359   2          len = 64;
+ 360   2        }
+ 361   1        
+ 362   1        for(i=0; i<len; i++)
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 7   
+
+ 363   1        {
+ 364   2          pBuf[i] = SPI_ReadByte(role);
+ 365   2        }
+ 366   1        
+ 367   1        if(role==LT8920_SEND){
+ 368   2          RF_SS_SEND_H;
+ 369   2        }else{
+ 370   2          RF_SS_REC_H;
+ 371   2        }
+ 372   1        
+ 373   1        return len;
+ 374   1      }
+ 375          
+ 376          unsigned char LT89xx_INIT(void)
+ 377          {
+ 378   1        unsigned char CFG_CNT;
+ 379   1        uint8_t DATA[3] = {0};
+ 380   1        uint8_t checkSuccessTimes = 0,checkTimes = 10;
+ 381   1              
+ 382   1      
+ 383   1        GPIO_InitTypeDef      GPIO_InitStructure;        
+ 384   1              GPIO_InitStructure.Pin  = GPIO_Pin_4|GPIO_Pin_5;//RXEN mosi
+ 385   1              GPIO_InitStructure.Mode = GPIO_OUT_PP;         
+ 386   1              GPIO_Inilize(GPIO_P3,&GPIO_InitStructure);
+ 387   1       
+ 388   1          GPIO_InitStructure.Pin  = GPIO_Pin_1|GPIO_Pin_0|GPIO_Pin_3;//sck cs TXEN
+ 389   1              GPIO_InitStructure.Mode = GPIO_OUT_PP;         
+ 390   1              GPIO_Inilize(GPIO_P2,&GPIO_InitStructure);
+ 391   1       
+ 392   1              GPIO_InitStructure.Pin  = GPIO_Pin_7;//rst
+ 393   1              GPIO_InitStructure.Mode = GPIO_OUT_PP;         
+ 394   1              GPIO_Inilize(GPIO_P3,&GPIO_InitStructure);
+ 395   1                      
+ 396   1              GPIO_InitStructure.Pin  = GPIO_Pin_6;//miso
+ 397   1              GPIO_InitStructure.Mode = GPIO_PullUp;         
+ 398   1              GPIO_Inilize(GPIO_P3,&GPIO_InitStructure);
+ 399   1      
+ 400   1              RX_EN_H;
+ 401   1        while(checkTimes-- > 0)
+ 402   1        {
+ 403   2              RF_RST_H;         delay_ms(10);  
+ 404   2          RF_RST_L;     delay_ms(100);
+ 405   2          RF_RST_H;     delay_ms(100);     
+ 406   2            
+ 407   2          RF_CLK_L;
+ 408   2          for(CFG_CNT=0;CFG_CNT<CFG_LEN;CFG_CNT++)
+ 409   2          {
+ 410   3            LT_WriteReg(LDT89xxconfig[CFG_CNT][0],LDT89xxconfig[CFG_CNT][1],LDT89xxconfig[CFG_CNT][2],LT8920_SEN
+             -D);   //д�Ĵ�����Ϣ
+ 411   3       //     LT_WriteReg(LDT89xxconfig[CFG_CNT][0],LDT89xxconfig[CFG_CNT][1],LDT89xxconfig[CFG_CNT][2],LT8920_R
+             -EC);
+ 412   3            DATA[0]=LDT89xxconfig[CFG_CNT][0];
+ 413   3            DATA[1]=LDT89xxconfig[CFG_CNT][1];
+ 414   3            DATA[2]=LDT89xxconfig[CFG_CNT][2];        
+ 415   3      
+ 416   3          }
+ 417   2      
+ 418   2                      checkSuccessTimes = 0;
+ 419   2      
+ 420   2          LT_ReadReg(0,LT8920_SEND);
+ 421   2          if(RegH==0x6F&&RegL==0XE0)  
+ 422   2                      {
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 8   
+
+ 423   3            printf("RF tx init OK!\r\n");
+ 424   3            checkSuccessTimes++;
+ 425   3                              s_rf_init_ok = 1;
+ 426   3                      }
+ 427   2                      else
+ 428   2                      { 
+ 429   3                              printf("RF tx init ERROR!\r\n");
+ 430   3                              //return 1;     //error
+ 431   3                      }
+ 432   2      
+ 433   2          LT_ReadReg(0,LT8920_REC);
+ 434   2          if(RegH==0x6F&&RegL==0XE0)  
+ 435   2                      {
+ 436   3            printf("RF Rx init OK!\r\n");
+ 437   3            checkSuccessTimes++;
+ 438   3                      }
+ 439   2                      else
+ 440   2                      {
+ 441   3                              printf("RF Rx init ERROR!\r\n");
+ 442   3                              //return 1;     //error
+ 443   3                      }
+ 444   2          if(checkSuccessTimes == 2){
+ 445   3            break;
+ 446   3          }
+ 447   2        }
+ 448   1              return 0;
+ 449   1      }
+ 450          
+ 451          
+ 452          
+ 453          unsigned char LT8920_GetPKT(uint8_t role)
+ 454          {
+ 455   1      
+ 456   1              #if (PKT_readReg == 1)
+ 457   1                      LT_ReadReg(48,role);                                    //读取寄存器的PKT状�?
+ 458   1                      if(RegL&0x40)   return 1;
+ 459   1                      else                                    return 0;
+ 460   1              #endif  
+ 461   1              
+ 462   1      }
+ 463          
+ 464          #if 0
+              void LT8920_Carrier_Wave(unsigned char FreqChannel,uint8_t role)
+              {
+                      //单载�??
+                      LT_WriteReg(32,0x18,0X07,role);
+                      LT_WriteReg(34,0x83,0X0B,role);
+                      LT_WriteReg(11,0x80,0X08,role);                 
+                      LT_WriteReg(07,0X01,FreqChannel,role);  
+              }
+              
+              void LT8920_Sleep(uint8_t role)
+              {
+                      LT_WriteReg(07,0X00,0x00,role);         //IDLE
+                      LT_WriteReg(35,0X43,0x00,role);         //进入LT89xx休眠    
+              }
+              
+              void LT8920_Wakeup(uint8_t role)
+              {
+                      if(role==LT8920_SEND){
+                  RF_SS_SEND_L;
+                }else{
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 9   
+
+                  RF_SS_REC_L;
+                }
+                      
+                      delay_ms(5);                                    //SS拉低要大�??2ms
+                if(role==LT8920_SEND){
+                  RF_SS_SEND_H;
+                }else{
+                  RF_SS_REC_H;
+                }
+              }
+              #endif
+ 496          
+ 497          void LT8920_TxData(unsigned char FreqChannel,unsigned char *pBuf,unsigned char length,uint8_t role)
+ 498          {
+ 499   1          TX_EN_H;
+ 500   1      //      printf("Fre  autodrive = %bd\r\n",FreqChannel);
+ 501   1              LT_WriteReg(7,0,FreqChannel,role);      //IDLE
+ 502   1              LT_WriteReg(52, 0x80, 0x80,role);       //清除指针
+ 503   1              // LT_WriteReg( 8, 0x6c, 0x90);
+ 504   1              LT_WriteBUF(50,pBuf,length,role);       //写入fifo
+ 505   1              
+ 506   1              LT_WriteReg(7,1,FreqChannel,role); //发射数据
+ 507   1              
+ 508   1              delay_us(100);
+ 509   1              while(LT8920_GetPKT(role) ==0)
+ 510   1              {
+ 511   2                      #if (PKT_readReg == 0)
+                                      delay_us(100);                          //读取PKT引脚
+                              #endif          
+ 514   2                      #if (PKT_readReg == 1)
+ 515   2                              delay_us(1000);                         //查�?�寄存器的PKT状�?
+ 516   2                      #endif                  
+ 517   2              }
+ 518   1              
+ 519   1              LT_WriteReg(7,0,FreqChannel,role);//发完数据,进入IDLE
+ 520   1      
+ 521   1        if(role == LT8920_SEND){
+ 522   2              RXBusy_Send=0;
+ 523   2        }else{
+ 524   2              RXBusy_Rec=0;
+ 525   2        }
+ 526   1        TX_EN_L;
+ 527   1      }
+ 528          
+ 529          #if 0
+              unsigned char LT8920_RxData(unsigned char FreqChannel,unsigned char *pBuf,unsigned char length,uint8_t rol
+             -e)
+              {
+                unsigned char Status=0,len,RXBusy;
+                      #if (PKT_readReg == 1)  //寄存器查�??PKT�??1mS查�??一�??
+                              delay_us(1000);
+                      #endif                          
+                      
+                if(role == LT8920_SEND){
+                  RXBusy = RXBusy_Send;
+                }else{
+                  RXBusy = RXBusy_Rec;
+                }
+                      if(RXBusy==0)
+                      {
+                              RXBusy=1;
+                              LT_WriteReg(7,0,FreqChannel,role);
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 10  
+
+                              
+                              LT_WriteReg(52, 0x80, 0x80,role);
+                              LT_WriteReg( 8, 0x6c, 0x90,role);
+                              LT_WriteReg(7,0,FreqChannel|0X80,role); 
+                              return Status;
+                      }
+                      if(LT8920_GetPKT(role) && RXBusy)
+                      {
+                              #if (PKT_readReg == 0)
+                                      LT_ReadReg(48); 
+                              #endif                          
+                              RXBusy=0; 
+              
+                  if(role == LT8920_SEND){
+                    RXBusy_Send = RXBusy;
+                  }else{
+                    RXBusy_Rec = RXBusy;
+                  }
+              
+                
+                              Rx_TimeOUT=0;
+                              if((RegH&0x80)==0)
+                              {
+                                      len = LT_ReadBUF(50,pBuf,role);
+                                      return len;
+                              }
+                      }       
+                      //Rx_TimeOUT++;                 //1mS++ / 或者放在定时器�??�??+1
+                      if(Rx_TimeOUT>100)
+                      {
+                              Rx_TimeOUT=0;
+                              if(role == LT8920_SEND){
+                    RXBusy_Send = RXBusy;
+                  }else{
+                    RXBusy_Rec = RXBusy;
+                  }
+                      }                       
+                      return Status;  
+              }
+              
+              #endif
+ 587          
+ 588          void LT8920_OpenRx(unsigned char FreqChannel,uint8_t role)
+ 589          {
+ 590   1          if(role == LT8920_SEND){
+ 591   2            RXBusy_Send = 1;
+ 592   2          }else{
+ 593   2            RXBusy_Rec = 1;
+ 594   2          }
+ 595   1                      LT_WriteReg(7,0,FreqChannel,role);
+ 596   1                      LT_WriteReg(52, 0x80, 0x80,role);
+ 597   1          LT_WriteReg( 8, 0x6c, 0x90,role);
+ 598   1                      LT_WriteReg(7,0,FreqChannel|0X80,role);         
+ 599   1      } 
+ 600          
+ 601          
+ 602          
+ 603          
+ 604          uint8_t RF_DATA[100];
+ 605          
+ 606          
+ 607          void RF_Receive(uint8_t FreqChannel,uint8_t role){
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 11  
+
+ 608   1              
+ 609   1              uint8_t len = 0,RXBusy;
+ 610   1              
+ 611   1              if(role == LT8920_SEND){
+ 612   2                      RXBusy = RXBusy_Send;
+ 613   2              }else{
+ 614   2                      RXBusy = RXBusy_Rec;
+ 615   2              }
+ 616   1              if(RXBusy == 0){
+ 617   2                      LT8920_OpenRx(FreqChannel,role);
+ 618   2              }
+ 619   1              if(LT8920_GetPKT(role) && RXBusy==1){
+ 620   2                      #if (PKT_readReg == 0)
+                              LT_ReadReg(48); 
+                              #endif  
+ 623   2                      RXBusy=0; 
+ 624   2                      if(role == LT8920_SEND){
+ 625   3                        RXBusy_Send = RXBusy;
+ 626   3                      }else{
+ 627   3                        RXBusy_Rec = RXBusy;
+ 628   3                      }
+ 629   2      
+ 630   2                      Rx_TimeOUT = 0;
+ 631   2      
+ 632   2                      // len = LT_ReadBUF(32,RF_DATA); 
+ 633   2                      // return array:00 3f c7 20 00 00 00 6e 6e 03 80 5a 5a fc fc 44 02 b0 00 fd b0 00 0f 10 12 05 52 3f 12 1
+             -2 12 12 0e 12 12 06 65 65 a0 65 65 a0 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0
+             -0 00 00  end
+ 634   2                      len = LT_ReadBUF(50,RF_DATA,role);
+ 635   2                      // return array:06 65 65 a0 65 65 a0  end
+ 636   2                      // printf("rf len=%bd\r\n",len);
+ 637   2                      if(len > 0){
+ 638   3                        WirelessProtocal_Receive_Handle(RF_DATA,len);
+ 639   3                      }
+ 640   2              }
+ 641   1              else{
+ 642   2                      Rx_TimeOUT++;
+ 643   2              }
+ 644   1      
+ 645   1              if(Rx_TimeOUT > 10){
+ 646   2                      RXBusy = 0;
+ 647   2                      if(role == LT8920_SEND){
+ 648   3                        RXBusy_Send = RXBusy;
+ 649   3                      }else{
+ 650   3                        RXBusy_Rec = RXBusy;
+ 651   3                      }
+ 652   2                      Rx_TimeOUT = 0;
+ 653   2              }
+ 654   1      }
+ 655          
+ 656          
+ 657          
+ 658          #if 0
+              #include "timer.h"
+              
+              void rf_test(void)
+              {       
+                      uint8_t i;
+                      
+                      for (i = 0;i < 100 ;i ++)
+                      {       RF_RST_L;
+                              RF_SS_REC_L;
+C51 COMPILER V9.52.0.0   LT8920_SPI                                                        04/17/2026 09:17:59 PAGE 12  
+
+              
+                              printf("rf test  LOW!\r\n");
+                              
+                              SysTimer_delay10ms(200);
+              
+                              RF_RST_H;
+                              RF_SS_REC_H;
+              
+                              printf("rf test  HIGH!\r\n");
+                              SysTimer_delay10ms(200);
+                      }
+              }
+              #endif
+ 681          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1323    ----
+   CONSTANT SIZE    =     77    ----
+   XDATA SIZE       =    212      31
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      1    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

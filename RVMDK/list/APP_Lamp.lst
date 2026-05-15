@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  APP_Lamp                                                           07/05/26  09:39:22  PAGE 1   
+C251 COMPILER V5.60.0,  APP_Lamp                                                           13/05/26  12:22:10  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_Lamp
@@ -67,7 +67,7 @@ Module Information          Static   Overlayable
   ebitaddressable size =    ------     ------
   far data size        =    ------     ------
   huge data size       =    ------     ------
-C251 COMPILER V5.60.0,  APP_Lamp                                                           07/05/26  09:39:22  PAGE 2   
+C251 COMPILER V5.60.0,  APP_Lamp                                                           13/05/26  12:22:10  PAGE 2   
 
   const size           =    ------     ------
   hconst size          =    ------     ------

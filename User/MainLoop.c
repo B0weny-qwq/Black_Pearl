@@ -82,6 +82,7 @@ static void MAG_StandalonePoll(void)
 #if ENABLE_IMU_AHRS_POLL
 static HeadingEstimator_t xdata g_heading;
 static int16 g_heading_rel_cd_snapshot = 0;
+static int16 g_gyro_z_dps100_snapshot = 0;
 static u8 g_heading_ready_snapshot = 0U;
 static char xdata g_roll_buf[10];
 static char xdata g_pitch_buf[10];
@@ -413,6 +414,7 @@ static void IMU_AhrsPoll(void)
                        raw_mag_valid,
                        heading_static_flag,
                        heading_dt_s);
+        g_gyro_z_dps100_snapshot = att->gyro_z_dps100;
     }
 
     if (yaw_zero_valid != 0U) {
@@ -620,6 +622,15 @@ int16 MainLoop_GetHeadingRelativeDeg100(void)
 {
 #if ENABLE_IMU_MODULE && ENABLE_IMU_AHRS_POLL
     return g_heading_rel_cd_snapshot;
+#else
+    return 0;
+#endif
+}
+
+int16 MainLoop_GetGyroZDps100(void)
+{
+#if ENABLE_IMU_MODULE && ENABLE_IMU_AHRS_POLL
+    return g_gyro_z_dps100_snapshot;
 #else
     return 0;
 #endif

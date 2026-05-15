@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_I2C                                                         07/05/26  09:39:26  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_I2C                                                         16/05/26  05:32:04  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_I2C
@@ -66,7 +66,7 @@ stmt  level    source
    54          // 函数: void Wait (void)
    55          // 描述: 等待主机模式I2C控制器执行完成I2CMSCR.
    56          // 参数: none.
-C251 COMPILER V5.60.0,  STC32G_I2C                                                         07/05/26  09:39:26  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_I2C                                                         16/05/26  05:32:04  PAGE 2   
 
    57          // 返回: none.
    58          // 版本: V1.0, 2012-11-22
@@ -134,7 +134,7 @@ stmt  level    source
   120          //========================================================================
   121          // 函数: void SendACK (void)
   122          // 描述: I2C发送ACK函数.
-C251 COMPILER V5.60.0,  STC32G_I2C                                                         07/05/26  09:39:26  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_I2C                                                         16/05/26  05:32:04  PAGE 3   
 
   123          // 参数: none.
   124          // 返回: none.
@@ -202,7 +202,7 @@ stmt  level    source
   184   1        Start();                                //发送起始命令
   185   1        SendData(dev_addr);                     //发送设备地址+写命令
   186   1        RecvACK();
-C251 COMPILER V5.60.0,  STC32G_I2C                                                         07/05/26  09:39:26  PAGE 4   
+C251 COMPILER V5.60.0,  STC32G_I2C                                                         16/05/26  05:32:04  PAGE 4   
 
   187   1        SendData(mem_addr);                     //发送存储地址
   188   1        RecvACK();

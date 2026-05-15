@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_PWM
@@ -66,7 +66,7 @@ stmt  level    source
    54   2      
    55   2          if(PWMx->PWM_EnoSelect & ENO2P)
    56   2          {
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 2   
 
    57   3            PWMA_CC2E_Enable();     //开启输入捕获/比较输出
    58   3            PWMA_ENO |= ENO2P;
@@ -134,7 +134,7 @@ stmt  level    source
   120   2          {
   121   3            PWMA_CC4E_Enable();     //开启输入捕获/比较输出
   122   3            PWMA_ENO |= ENO4P;
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 3   
 
   123   3          }
   124   2          else
@@ -202,7 +202,7 @@ stmt  level    source
   185   2          if(PWMx->PWM_EnoSelect & ENO6P)
   186   2          {
   187   3            PWMB_CC6E_Enable();     //开启输入捕获/比较输出
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 4   
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 4   
 
   188   3            PWMB_ENO |= ENO6P;
   189   3          }
@@ -270,7 +270,7 @@ stmt  level    source
   250   2          PWMB_AutoReload(PWMx->PWM_Period);  //周期设置
   251   2          PWMB_BrakeOutputEnable(PWMx->PWM_MainOutEnable);  //主输出使能
   252   2          PWMB_CEN_Enable(PWMx->PWM_CEN_Enable);  //使能计数器
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 5   
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 5   
 
   253   2          return  SUCCESS;
   254   2        }
@@ -338,7 +338,7 @@ stmt  level    source
   316   1      }
   317          
   318          //========================================================================
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 6   
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 6   
 
   319          // 函数: ReadPWMA(void)
   320          // 描述: 异步读取PWMA特殊功能寄存器函数. 
@@ -406,7 +406,7 @@ stmt  level    source
   382          void WritePWMB(u8 addr, u8 dat)
   383          {
   384   1        while (HSPWMB_ADR & 0x80); //等待前一个异步读写完成
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 7   
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 7   
 
   385   1        HSPWMB_DAT = dat;      //准备需要写入的数据
   386   1        HSPWMB_ADR = addr & 0x7f;  //设置间接访问地址,只需要设置原XFR地址的低7位
@@ -474,7 +474,7 @@ stmt  level    source
   448   3            tmpCCER2 |= 0x01;
   449   3          }
   450   2          else
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 8   
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 8   
 
   451   2          {
   452   3            tmpENO &= ~ENO3P;
@@ -542,7 +542,7 @@ stmt  level    source
   514   2          if(PWMx->PWM_EnoSelect & ENO5P)
   515   2          {
   516   3            tmpENO |= ENO5P;
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 9   
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 9   
 
   517   3            tmpCCER1 |= 0x01;
   518   3          }
@@ -610,7 +610,7 @@ stmt  level    source
   580          
   581          //========================================================================
   582          // 函数: UpdateHSPwm
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 10  
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 10  
 
   583          // 描述: HSPWM占空比更新程序.
   584          // 参数: PWM: PWM通道/组号, PWMx结构参数,请参考PWM.h里的定义.
@@ -678,7 +678,7 @@ stmt  level    source
   646   2            WritePWMB((u8)&PWMB_CCR6H, (u8)(PWMx->PWM6_Duty >> 8)); //设置输出PWM的占空比
   647   2            WritePWMB((u8)&PWMB_CCR6L, (u8)PWMx->PWM6_Duty);
   648   2            WritePWMB((u8)&PWMB_CCR7H, (u8)(PWMx->PWM7_Duty >> 8)); //设置输出PWM的占空比
-C251 COMPILER V5.60.0,  STC32G_PWM                                                         07/05/26  09:39:27  PAGE 11  
+C251 COMPILER V5.60.0,  STC32G_PWM                                                         16/05/26  05:32:05  PAGE 11  
 
   649   2            WritePWMB((u8)&PWMB_CCR7L, (u8)PWMx->PWM7_Duty);
   650   2            WritePWMB((u8)&PWMB_CCR8H, (u8)(PWMx->PWM8_Duty >> 8)); //设置输出PWM的占空比

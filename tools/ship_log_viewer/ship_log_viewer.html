@@ -383,7 +383,6 @@
           <div class="card">
             <div class="label">遥控链路</div>
             <div id="rcValue" class="value">离线</div>
-            <div id="rcMeta" class="meta">等待 AA...BB 头尾包</div>
           </div>
           <div class="card">
             <div class="label">遥控输入油门</div>
@@ -629,7 +628,6 @@
       pairValue: document.getElementById("pairValue"),
       pairMeta: document.getElementById("pairMeta"),
       rcValue: document.getElementById("rcValue"),
-      rcMeta: document.getElementById("rcMeta"),
       throttleInputValue: document.getElementById("throttleInputValue"),
       throttleInputMeta: document.getElementById("throttleInputMeta"),
       throttleOutputValue: document.getElementById("throttleOutputValue"),
@@ -779,7 +777,6 @@
       el.pairValue.textContent = state.last.pair;
       el.pairMeta.textContent = state.last.pairMeta;
       el.rcValue.textContent = state.last.rcValue;
-      el.rcMeta.textContent = state.last.rcMeta;
       el.throttleInputValue.textContent = state.last.throttleInputValue;
       el.throttleInputMeta.textContent = state.last.throttleInputMeta;
       el.throttleOutputValue.textContent = state.last.throttleOutputValue;

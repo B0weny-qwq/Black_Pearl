@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_Timer                                                       07/05/26  09:39:27  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_Timer                                                       16/05/26  05:32:04  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_Timer
@@ -66,7 +66,7 @@ stmt  level    source
    52   2          Timer2_Run(TIMx->TIM_Run);
    53   2          return  SUCCESS;    //成功
    54   2        }
-C251 COMPILER V5.60.0,  STC32G_Timer                                                       07/05/26  09:39:27  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_Timer                                                       16/05/26  05:32:04  PAGE 2   
 
    55   1      
    56   1        if(TIM == Timer3)   //Timer3,固定为16位自动重装, 中断无优先级

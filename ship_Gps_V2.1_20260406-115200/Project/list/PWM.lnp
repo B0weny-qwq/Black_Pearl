@@ -1,0 +1,16 @@
+".\list\STC8G_H_GPIO.obj",
+".\list\STC8G_H_Delay.obj",
+".\list\STC8G_H_Soft_I2C.obj",
+".\list\DcMotor.obj",
+".\list\DcMotor_Gpio.obj",
+".\list\gyro.obj",
+".\list\main.obj",
+".\list\LT8920_SPI.obj",
+".\list\timer.obj",
+".\list\utils_printf.obj",
+".\list\pwm.obj",
+".\list\pwm_Gpio.obj",
+".\list\pwm_Timer.obj" 
+TO ".\list\PWM" 
+PRINT(".\list\PWM.m51") RAMSIZE(256) 
+REMOVEUNUSED 

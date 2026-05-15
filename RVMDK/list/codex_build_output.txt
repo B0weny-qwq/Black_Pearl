@@ -1,0 +1,6 @@
+Build target 'Target 1'
+linking...
+Program Size: data=13.2 edata+hdata=3952 xdata=6608 const=12001 code=42960
+creating hex file from ".\list\STC32G-LIB"...
+".\list\STC32G-LIB" - 0 Error(s), 0 Warning(s).
+Build Time Elapsed:  00:00:00

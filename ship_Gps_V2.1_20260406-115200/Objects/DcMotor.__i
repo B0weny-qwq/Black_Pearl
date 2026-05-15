@@ -1,0 +1,1 @@
+"App\DcMotor\DcMotor.c" LARGE OPTIMIZE (8,SPEED) BROWSE INCDIR(.\Driver\Inc;.\App\Config;.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Wireless;.\App\Gyro) DEBUG OBJECTEXTEND PRINT(.\Listings\DcMotor.lst) TABS (2) OBJECT(.\Objects\DcMotor.obj)

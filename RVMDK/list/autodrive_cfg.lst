@@ -1,0 +1,150 @@
+C251 COMPILER V5.60.0,  autodrive_cfg                                                      16/05/26  05:32:07  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE autodrive_cfg
+OBJECT MODULE PLACED IN .\list\autodrive_cfg.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Device\AutoDrive\autodrive_cfg.c XSMALL INTR2 BROWSE IN
+                    -CDIR(..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function
+                    -\AHRS;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;
+                    -..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\autodrive_cfg.lst) TABS(2) OBJECT(.\list\
+                    -autodrive_cfg.obj) 
+
+stmt  level    source
+
+    1          #include "autodrive_cfg.h"
+    2          
+    3          #include "..\..\..\Driver\inc\STC32G_EEPROM.h"
+    4          #define AUTODRIVE_CFG_MAGIC      0x41554432UL
+    5          #define AUTODRIVE_CFG_VERSION    0x0002U
+    6          #define AUTODRIVE_CFG_FLASH_ADDR 0x0001F800UL
+    7          
+    8          typedef struct
+    9          {
+   10              u32 magic;
+   11              u16 version;
+   12              u8 length;
+   13              u8 checksum;
+   14              AutoDrive_ReturnConfig_t cfg;
+   15          } AutoDrive_ConfigImage_t;
+   16          
+   17          static u8 AutoDriveCfg_Checksum(const u8 *buf, u8 len)
+   18          {
+   19   1          u8 i;
+   20   1          u8 sum;
+   21   1      
+   22   1          sum = 0U;
+   23   1          for (i = 0U; i < len; i++) {
+   24   2              sum = (u8)(sum + buf[i]);
+   25   2          }
+   26   1          return sum;
+   27   1      }
+   28          
+   29          static void AutoDriveCfg_Default(AutoDrive_ReturnConfig_t *cfg)
+   30          {
+   31   1          if (cfg == 0) {
+   32   2              return;
+   33   2          }
+   34   1      
+   35   1          cfg->auto_ret_onoff = 0x30U;
+   36   1          cfg->ret_point.lon_ew = 0U;
+   37   1          cfg->ret_point.lon_whole = 0U;
+   38   1          cfg->ret_point.lon_frac = 0U;
+   39   1          cfg->ret_point.lat_ns = 0U;
+   40   1          cfg->ret_point.lat_whole = 0U;
+   41   1          cfg->ret_point.lat_frac = 0U;
+   42   1      }
+   43          
+   44          void AutoDriveCfg_Init(void)
+   45          {
+   46   1          DisableEEPROM();
+   47   1      }
+   48          
+   49          void AutoDriveCfg_Load(AutoDrive_ReturnConfig_t *cfg)
+   50          {
+   51   1          AutoDrive_ConfigImage_t image;
+   52   1          u8 *raw;
+   53   1          u8 expect;
+   54   1          u16 i;
+   55   1      
+C251 COMPILER V5.60.0,  autodrive_cfg                                                      16/05/26  05:32:07  PAGE 2   
+
+   56   1          if (cfg == 0) {
+   57   2              return;
+   58   2          }
+   59   1      
+   60   1          raw = (u8 *)&image;
+   61   1          for (i = 0U; i < (u16)sizeof(image); i++) {
+   62   2              raw[i] = 0U;
+   63   2          }
+   64   1          EEPROM_read_n(AUTODRIVE_CFG_FLASH_ADDR, raw, (u16)sizeof(image));
+   65   1      
+   66   1          if ((image.magic != AUTODRIVE_CFG_MAGIC) ||
+   67   1              (image.version != AUTODRIVE_CFG_VERSION) ||
+   68   1              (image.length != (u8)sizeof(AutoDrive_ReturnConfig_t))) {
+   69   2              AutoDriveCfg_Default(cfg);
+   70   2              return;
+   71   2          }
+   72   1      
+   73   1          expect = AutoDriveCfg_Checksum((const u8 *)&image.cfg, image.length);
+   74   1          if (expect != image.checksum) {
+   75   2              AutoDriveCfg_Default(cfg);
+   76   2              return;
+   77   2          }
+   78   1      
+   79   1          *cfg = image.cfg;
+   80   1          if (cfg->auto_ret_onoff == 0xFFU) {
+   81   2              AutoDriveCfg_Default(cfg);
+   82   2          }
+   83   1      }
+   84          
+   85          u8 AutoDriveCfg_Save(const AutoDrive_ReturnConfig_t *cfg)
+   86          {
+   87   1          AutoDrive_ConfigImage_t image;
+   88   1          u8 *raw;
+   89   1          u16 i;
+   90   1      
+   91   1          if (cfg == 0) {
+   92   2              return 0U;
+   93   2          }
+   94   1      
+   95   1          raw = (u8 *)&image;
+   96   1          for (i = 0U; i < (u16)sizeof(image); i++) {
+   97   2              raw[i] = 0U;
+   98   2          }
+   99   1      
+  100   1          image.magic = AUTODRIVE_CFG_MAGIC;
+  101   1          image.version = AUTODRIVE_CFG_VERSION;
+  102   1          image.length = (u8)sizeof(AutoDrive_ReturnConfig_t);
+  103   1          image.cfg = *cfg;
+  104   1          image.checksum = AutoDriveCfg_Checksum((const u8 *)&image.cfg, image.length);
+  105   1      
+  106   1          EEPROM_SectorErase(AUTODRIVE_CFG_FLASH_ADDR);
+  107   1          EEPROM_write_n(AUTODRIVE_CFG_FLASH_ADDR, raw, (u16)sizeof(image));
+  108   1          return 1U;
+  109   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       331     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------         38
+  bit size             =    ------     ------
+C251 COMPILER V5.60.0,  autodrive_cfg                                                      16/05/26  05:32:07  PAGE 3   
+
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =    ------     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

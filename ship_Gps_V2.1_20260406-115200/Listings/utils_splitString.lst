@@ -1,0 +1,102 @@
+C51 COMPILER V9.52.0.0   UTILS_SPLITSTRING                                                 04/17/2026 09:18:01 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE UTILS_SPLITSTRING
+OBJECT MODULE PLACED IN .\Objects\utils_splitString.obj
+COMPILER INVOKED BY: E:\Keil_v5\C51\BIN\C51.EXE App\Utils\utils_splitString.c LARGE BROWSE INCDIR(.\Driver\Inc;.\App\Con
+                    -fig;.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Wireless;.\App
+                    -\Gyro;.\App\Gps;.\App\AutoDrive;.\App\ADC;.\App\eeprom;.\App\compass) DEFINE(HW_V16,MID_SHIP,MAG_QMC_6309,GPS_DK2_RMC) D
+                    -EBUG OBJECTEXTEND PRINT(.\Listings\utils_splitString.lst) OBJECT(.\Objects\utils_splitString.obj)
+
+line level    source
+
+   1          #include "utils_splitString.h"
+   2          
+   3          #if 0
+              uint16_t split_string_ByChar(uint8_t * src, uint8_t ch, uint8_t * dest, uint8_t * index, uint16_t max){
+                      uint16_t i=0;
+                      uint16_t count=1;
+                      
+                      index[0]=0;
+              
+                      if(dest==NULL){
+                              while(*src){
+                                      if(*src == ch){
+                                              if(count<max){
+                                                      index[count]=i+1;
+                                  *src=0;
+                                                  count++;
+                                  if(count==max){
+                                      break;
+                                  }
+                              }
+                                      }
+                                      src++;
+                                      i++;
+                              }
+                      }else{
+                              while(*src){
+                                      if(*src == ch){
+                                              if(count<max){
+                                                      index[count]=i+1;
+                                                      *dest=0;
+                                                      count++;
+                                                      if(count==max){
+                                                              break;
+                                                      }
+                                              }       
+                                      }else{
+                                              *dest = *src;
+                                      }
+                                      src++;
+                                      dest++;
+                                      i++;
+                              }
+                              *dest=0;
+                      }
+                      return count;
+              }
+              
+              #endif
+  49          
+  50          uint8_t get_NTime_String_ByChar(uint8_t *data_m,uint16_t dataLen,uint8_t flagchar,uint8_t ntime,uint8_t *s
+             -aveTable,uint8_t maxLen){
+  51   1          uint8_t startIndex = 0,endIndex = 0,flagNTimes = 0,cpyLen = 0;
+C51 COMPILER V9.52.0.0   UTILS_SPLITSTRING                                                 04/17/2026 09:18:01 PAGE 2   
+
+  52   1              uint16_t i=0;
+  53   1          for(;i<dataLen;i++){
+  54   2              if(data_m[i]==flagchar){
+  55   3                  flagNTimes++;
+  56   3              }
+  57   2              if(flagNTimes==ntime && data_m[i]==flagchar){
+  58   3                  startIndex = i+1;
+  59   3              }else if(flagNTimes==(ntime+1) && data_m[i]==flagchar){
+  60   3                  endIndex = i;
+  61   3                  break;
+  62   3              }
+  63   2          }
+  64   1          if(startIndex == 0 && endIndex == 0){
+  65   2              return 0;
+  66   2          }else if(startIndex > 0 && endIndex==0){
+  67   2              endIndex = dataLen-1;
+  68   2          }
+  69   1          cpyLen = ((endIndex-startIndex)<= maxLen)?endIndex-startIndex:maxLen;
+  70   1          strncpy((char *)saveTable,(char *)data_m+startIndex,cpyLen);
+  71   1          return endIndex-startIndex;
+  72   1      }
+  73          
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    327    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----      17
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

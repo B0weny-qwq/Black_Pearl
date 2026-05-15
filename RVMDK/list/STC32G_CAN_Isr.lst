@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_CAN_Isr                                                     07/05/26  09:39:30  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_CAN_Isr                                                     13/05/26  12:22:16  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_CAN_Isr
@@ -66,7 +66,7 @@ stmt  level    source
    52   1        if((isr & 0x20) == 0x20)  //EWI
    53   1        {
    54   2          CANAR = MR;
-C251 COMPILER V5.60.0,  STC32G_CAN_Isr                                                     07/05/26  09:39:30  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_CAN_Isr                                                     13/05/26  12:22:16  PAGE 2   
 
    55   2          CANDR &= ~0x04;  //清除 Reset Mode, 从BUS-OFF状态退出
    56   2          
@@ -134,7 +134,7 @@ stmt  level    source
   117   1        if((isr & 0x40) == 0x40)  //ALI
   118   1        {
   119   2          CANAR = ISR;
-C251 COMPILER V5.60.0,  STC32G_CAN_Isr                                                     07/05/26  09:39:30  PAGE 3   
+C251 COMPILER V5.60.0,  STC32G_CAN_Isr                                                     13/05/26  12:22:16  PAGE 3   
 
   120   2          CANDR = 0x40;    //CLR FLAG
   121   2        } 

@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  STC32G_Timer_Isr                                                   07/05/26  09:39:29  PAGE 1   
+C251 COMPILER V5.60.0,  STC32G_Timer_Isr                                                   16/05/26  05:32:05  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE STC32G_Timer_Isr
@@ -66,7 +66,7 @@ stmt  level    source
    53          void Timer3_ISR_Handler (void) interrupt TMR3_VECTOR    //进中断时已经清除标志
    54          {
    55   1        // TODO: 在此处添加用户代码
-C251 COMPILER V5.60.0,  STC32G_Timer_Isr                                                   07/05/26  09:39:29  PAGE 2   
+C251 COMPILER V5.60.0,  STC32G_Timer_Isr                                                   16/05/26  05:32:05  PAGE 2   
 
    56   1        P64 = ~P64;
    57   1      }

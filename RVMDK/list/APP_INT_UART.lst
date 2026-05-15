@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  APP_INT_UART                                                       07/05/26  09:39:22  PAGE 1   
+C251 COMPILER V5.60.0,  APP_INT_UART                                                       13/05/26  12:22:10  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_INT_UART
@@ -66,7 +66,7 @@ stmt  level    source
    53          // 描述: 用户初始化程序.
    54          // 参数: None.
    55          // 返回: None.
-C251 COMPILER V5.60.0,  APP_INT_UART                                                       07/05/26  09:39:22  PAGE 2   
+C251 COMPILER V5.60.0,  APP_INT_UART                                                       13/05/26  12:22:10  PAGE 2   
 
    56          // 版本: V1.0, 2020-09-28
    57          //========================================================================
@@ -134,7 +134,7 @@ stmt  level    source
   114   1        PD = 1;   //Sleep
   115   1        _nop_();
   116   1        _nop_();
-C251 COMPILER V5.60.0,  APP_INT_UART                                                       07/05/26  09:39:22  PAGE 3   
+C251 COMPILER V5.60.0,  APP_INT_UART                                                       13/05/26  12:22:10  PAGE 3   
 
   117   1        _nop_();
   118   1        _nop_();

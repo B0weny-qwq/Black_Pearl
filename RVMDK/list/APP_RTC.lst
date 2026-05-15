@@ -1,4 +1,4 @@
-C251 COMPILER V5.60.0,  APP_RTC                                                            07/05/26  09:39:22  PAGE 1   
+C251 COMPILER V5.60.0,  APP_RTC                                                            13/05/26  12:22:11  PAGE 1   
 
 
 C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_RTC
@@ -66,7 +66,7 @@ stmt  level    source
    51          //========================================================================
    52          
    53          void IO_KeyScan(void);   //50ms call
-C251 COMPILER V5.60.0,  APP_RTC                                                            07/05/26  09:39:22  PAGE 2   
+C251 COMPILER V5.60.0,  APP_RTC                                                            13/05/26  12:22:11  PAGE 2   
 
    54          void DisplayRTC(void);
    55          void WriteRTC(void);
@@ -134,7 +134,7 @@ stmt  level    source
   112   1        IO_KeyState1 = 0;
   113   1        IO_KeyHoldCnt = 0;
   114   1        cnt50ms = 0;
-C251 COMPILER V5.60.0,  APP_RTC                                                            07/05/26  09:39:22  PAGE 3   
+C251 COMPILER V5.60.0,  APP_RTC                                                            13/05/26  12:22:11  PAGE 3   
 
   115   1      
   116   1        printf("STC32G RTC Test!\r\n");
@@ -202,7 +202,7 @@ stmt  level    source
   178   3            WriteRTC();
   179   3            DisplayRTC();
   180   3          }
-C251 COMPILER V5.60.0,  APP_RTC                                                            07/05/26  09:39:22  PAGE 4   
+C251 COMPILER V5.60.0,  APP_RTC                                                            13/05/26  12:22:11  PAGE 4   
 
   181   2          if(KeyCode == 28)   //minute -1
   182   2          {
@@ -270,7 +270,7 @@ stmt  level    source
   244                    |        |        |        |
   245          X         |        |        |        |
   246          P00 ---- K00 ---- K01 ---- K02 ---- K03 ----
-C251 COMPILER V5.60.0,  APP_RTC                                                            07/05/26  09:39:22  PAGE 5   
+C251 COMPILER V5.60.0,  APP_RTC                                                            13/05/26  12:22:11  PAGE 5   
 
   247                    |        |        |        |
   248          P01 ---- K04 ---- K05 ---- K06 ---- K07 ----
@@ -338,7 +338,7 @@ stmt  level    source
   310   3                  {
   311   4                      j = T_KeyTable[IO_KeyState >> 4];
   312   4                      if((j != 0) && (T_KeyTable[IO_KeyState& 0x0f] != 0)) 
-C251 COMPILER V5.60.0,  APP_RTC                                                            07/05/26  09:39:22  PAGE 6   
+C251 COMPILER V5.60.0,  APP_RTC                                                            13/05/26  12:22:11  PAGE 6   
 
   313   4                          KeyCode = (j - 1) * 4 + T_KeyTable[IO_KeyState & 0x0f] + 16;    //计算键码，17~3
              -2

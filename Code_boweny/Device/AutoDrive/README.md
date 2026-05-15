@@ -75,11 +75,12 @@ void AutoDrive_LinkAliveKick(void);
 ```text
 IDLE
   -> START
-  -> GET_DIRECTION
   -> RUNING
   -> 到点 / 超时 / 失败
   -> CLOSE + STOP
 ```
+
+说明：`AUTO_DRIVE_GET_DIRECTION` 只保留为兼容旧状态值，当前进入后会回到 `START`，不再执行老工程那种“定时左/右转修正”。
 
 ## 当前激活条件
 
@@ -102,36 +103,39 @@ IDLE
 
 ## 当前航向来源
 
-`AutoDrive_GetCurrentHeadingDeg()` 的优先级如下：
+`AutoDrive` 不再自己实现 yaw PID 和左右电机极性，而是调用 `ShipProtocol_ApplyYawHoldTarget()`，复用遥控自稳模式已经验证过的 yaw-hold 链路。
 
-1. GPS 航向
-   条件：`gps->course_deg_x100` 有效，且 `gps->speed_kmh_x100 >= 80`
-2. AHRS 航向
-   条件：`AHRS_IsReady() != 0`
-3. 都不可用时返回 `65535`
+当前航向来源：
+
+1. `MainLoop_GetHeadingDeg100()`
+   条件：`MainLoop_IsHeadingReady() != 0`
+2. 航向不可用时停止电机，不做开环直行
 
 说明：
 
-- 也就是当前 AutoDrive 不是只靠 GPS，也不是只靠 AHRS。
-- 高速移动时优先用 GPS 航向，低速或 GPS 航向不足时退回 AHRS yaw。
+- GPS 用来给目标点算目标航向和到点距离。
+- yaw-hold 自稳链路负责 PID、左右极性、差速限幅、陀螺阻尼和输出斜坡。
+- 当前已经去掉老工程“定时左/右转修正”，不再用 `turn_times` 这种倒计时转向。
 
 ## 当前电机输出
 
-`AutoDrive` 直接调用 `Motor_SetBothSpeed()` 输出双电机差速。
+`AutoDrive` 不直接输出左右差速；正常巡航由 `ShipProtocol_ApplyYawHoldTarget()` 输出双电机差速，航向自稳不可用时停止电机。
 
 当前关键常量：
 
-- `AUTODRIVE_DRIVE_PWM = 900`
-- `AUTODRIVE_DRIVE_FAST_PWM = 1000`
-- `AUTODRIVE_TURN_PWM = 850`
+- `AUTODRIVE_CRUISE_BASE_SPEED = 850`
+- `SHIP_YAW_HOLD_PERIOD_MS = 50`
+- `SHIP_YAW_HOLD_DEADBAND_CD`
+- `SHIP_YAW_HOLD_OUTPUT_LIMIT`
+- `SHIP_YAW_HOLD_OUTPUT_SIGN`
 - `AUTODRIVE_ARRIVE_DISTANCE_M = 3`
-- `AUTODRIVE_STRAIGHT_DISTANCE_X10_M = 15`
 - `AUTODRIVE_WORK_OVERTIME = 10 * 60 * 100`
 
 含义：
 
-- 直行巡航使用 `900` 或 `1000`
-- 转向差速使用 `850`
+- 基础巡航速度为 `850`
+- 每 `50ms` 按自稳模式做一次航向修正
+- 左右电机极性严格跟随遥控自稳模式，不在 AutoDrive 内单独判断
 - 距离目标点小于 `3m` 判定到点
 - 运行超时会退出并置失败标志
 

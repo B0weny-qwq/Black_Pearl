@@ -1,0 +1,188 @@
+C251 COMPILER V5.60.0,  APP_SPI_PS                                                         12/05/26  17:56:45  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE APP_SPI_PS
+OBJECT MODULE PLACED IN .\list\APP_SPI_PS.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\App\src\APP_SPI_PS.c XSMALL INTR2 BROWSE INCDIR(..\Driver\inc;..\Us
+                    -er;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Fun
+                    -ction\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WI
+                    -RELESS;..\Code_boweny\Device\MOTOR;..\Code_boweny\Device\AutoDrive) DEBUG PRINT(.\list\APP_SPI_PS.lst) TABS(2) OBJECT(.\
+                    -list\APP_SPI_PS.obj) 
+
+stmt  level    source
+
+    1          /*---------------------------------------------------------------------*/
+    2          /* --- Web: www.STCAI.com ---------------------------------------------*/
+    3          /*---------------------------------------------------------------------*/
+    4          
+    5          #include  "APP.h"
+    6          #include  "STC32G_GPIO.h"
+    7          #include  "STC32G_SPI.h"
+    8          #include  "STC32G_UART.h"
+    9          #include  "STC32G_NVIC.h"
+   10          
+   11          /*************  功能说明  **************
+   12          
+   13          通过串口发送数据给MCU1，MCU1将接收到的数据由SPI发送给MCU2，MCU2再通过串口发�
+             -�出去.
+   14          
+   15          设置方法 2：
+   16          两个设备初始化时都设置 SSIG 为 0，MSTR 设置为0，此时两个设备都是不忽略 SS 的
+             -从机模式。
+   17          当其中一个设备需要启动传输时，先检测 SS 管脚的电平，如果时候高电平，
+   18          就将自己设置成忽略 SS 的主模式，自己的 SS 脚输出低电平，拉低对方的 SS 脚，
+             -即可进行数据传输。
+   19          
+   20                   MCU1                          MCU2
+   21            |-----------------|           |-----------------|
+   22            |            MISO |-----------| MISO            |
+   23          --| TX         MOSI |-----------| MOSI         TX |--
+   24            |            SCLK |-----------| SCLK            |
+   25          --| RX           SS |-----------| SS           RX |--
+   26            |-----------------|           |-----------------|
+   27          
+   28          
+   29          下载时, 选择时钟 24MHz (可以在配置文件"config.h"中修改).
+   30          
+   31          ******************************************/
+   32          
+   33          //========================================================================
+   34          //                               本地常量声明 
+   35          //========================================================================
+   36          
+   37          
+   38          //========================================================================
+   39          //                               本地变量声明
+   40          //========================================================================
+   41          
+   42          bit UartReceived=0;
+   43          
+   44          //========================================================================
+   45          //                               本地函数声明
+   46          //========================================================================
+   47          
+   48          
+   49          //========================================================================
+   50          //                            外部函数和变量声明
+   51          //========================================================================
+   52          
+C251 COMPILER V5.60.0,  APP_SPI_PS                                                         12/05/26  17:56:45  PAGE 2   
+
+   53          
+   54          //========================================================================
+   55          // 函数: SPI_PS_init
+   56          // 描述: 用户初始化程序.
+   57          // 参数: None.
+   58          // 返回: None.
+   59          // 版本: V1.0, 2020-09-27
+   60          //========================================================================
+   61          void SPI_PS_init(void)
+   62          {
+   63   1        SPI_InitTypeDef   SPI_InitStructure;
+   64   1        COMx_InitDefine   COMx_InitStructure;         //结构定义
+   65   1      
+   66   1        COMx_InitStructure.UART_Mode      = UART_8bit_BRTx;   //模式,   UART_ShiftRight,UART_8bit_BRTx,UART_9bi
+             -t,UART_9bit_BRTx
+   67   1      //  COMx_InitStructure.UART_BRT_Use   = BRT_Timer2;     //选择波特率发生器, BRT_Timer2 (注意: 串�
+             -��2固定使用BRT_Timer2, 所以不用选择)
+   68   1        COMx_InitStructure.UART_BaudRate  = 115200ul;     //波特率,     110 ~ 115200
+   69   1        COMx_InitStructure.UART_RxEnable  = ENABLE;       //接收允许,   ENABLE 或 DISABLE
+   70   1        UART_Configuration(UART2, &COMx_InitStructure);   //初始化串口2 UART1,UART2,UART3,UART4
+   71   1        NVIC_UART2_Init(ENABLE,Priority_1);   //中断使能, ENABLE/DISABLE; 优先级(低到高) Priority_0,Pri
+             -ority_1,Priority_2,Priority_3
+   72   1      
+   73   1        SPI_InitStructure.SPI_Enable    = ENABLE;       //SPI启动    ENABLE, DISABLE
+   74   1        SPI_InitStructure.SPI_SSIG      = DISABLE;        //片选位     ENABLE(忽略SS引脚功能), DISABLE(SS�
+             -�定主机从机)
+   75   1        SPI_InitStructure.SPI_FirstBit  = SPI_MSB;        //移位方向   SPI_MSB, SPI_LSB
+   76   1        SPI_InitStructure.SPI_Mode      = SPI_Mode_Slave;   //主从选择   SPI_Mode_Master, SPI_Mode_Slave
+   77   1        SPI_InitStructure.SPI_CPOL      = SPI_CPOL_Low;     //时钟相位   SPI_CPOL_High,   SPI_CPOL_Low
+   78   1        SPI_InitStructure.SPI_CPHA      = SPI_CPHA_2Edge;   //数据边沿   SPI_CPHA_1Edge,  SPI_CPHA_2Edge
+   79   1        SPI_InitStructure.SPI_Speed     = SPI_Speed_4;      //SPI速度    SPI_Speed_4, SPI_Speed_8, SPI_Speed_16, 
+             -SPI_Speed_2
+   80   1        SPI_Init(&SPI_InitStructure);
+   81   1        NVIC_SPI_Init(ENABLE,Priority_3);   //中断使能, ENABLE/DISABLE; 优先级(低到高) Priority_0,Prior
+             -ity_1,Priority_2,Priority_3
+   82   1      
+   83   1        P2_MODE_IO_PU(GPIO_Pin_All);    //P2 设置为准双向口
+   84   1        P4_MODE_IO_PU(GPIO_Pin_6 | GPIO_Pin_7);   //P4.6,P4.7 设置为准双向口
+   85   1      
+   86   1        SPI_SS_2 = 1;
+   87   1      }
+   88          
+   89          //========================================================================
+   90          // 函数: Sample_SPI_PS
+   91          // 描述: 用户应用程序.
+   92          // 参数: None.
+   93          // 返回: None.
+   94          // 版本: V1.0, 2020-09-27
+   95          //========================================================================
+   96          void Sample_SPI_PS(void)
+   97          {
+   98   1        u8 i;
+   99   1        
+  100   1        if(COM2.RX_TimeOut > 0)
+  101   1        {
+  102   2          if(--COM2.RX_TimeOut == 0)
+  103   2          {
+  104   3            if(COM2.RX_Cnt > 0)
+  105   3            {
+  106   4              UartReceived = 1;   //设置串口接收标志
+  107   4            }
+  108   3          }
+  109   2        }
+  110   1        if((UartReceived) && (SPI_SS_2))
+  111   1        {
+  112   2          SPI_SS_2 = 0;     //拉低从机 SS 管脚
+C251 COMPILER V5.60.0,  APP_SPI_PS                                                         12/05/26  17:56:45  PAGE 3   
+
+  113   2          SPI_SetMode(SPI_Mode_Master);
+  114   2          for(i=0;i<COM2.RX_Cnt;i++)
+  115   2          {
+  116   3            SPI_WriteByte(RX2_Buffer[i]); //发送串口数据
+  117   3          }
+  118   2          SPI_SS_2 = 1;    //拉高从机的 SS 管脚
+  119   2          SPI_SetMode(SPI_Mode_Slave);
+  120   2          COM2.RX_Cnt = 0;
+  121   2          UartReceived = 0;
+  122   2        }
+  123   1        
+  124   1        if(SPI_RxTimerOut > 0)
+  125   1        {
+  126   2          if(--SPI_RxTimerOut == 0)
+  127   2          {
+  128   3            if(SPI_RxCnt > 0)
+  129   3            {
+  130   4              for(i=0; i<SPI_RxCnt; i++)  TX2_write2buff(SPI_RxBuffer[i]);
+  131   4            }
+  132   3            SPI_RxCnt = 0;
+  133   3          }
+  134   2        }
+  135   1      }
+  136          
+  137          
+  138          
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       241     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------         16
+  bit size             =         1     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =    ------     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

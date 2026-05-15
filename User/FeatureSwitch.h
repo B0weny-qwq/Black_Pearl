@@ -49,6 +49,9 @@
  */
 #define SHIP_MANUAL_CONTROL_PERIOD_MS  10UL
 
+/* manual RC axis low-pass: 1 = 50% new sample per 10 ms, 0 = no filter. */
+#define SHIP_AXIS_FILTER_SHIFT         1U
+
 /**
  * @brief  船体 yaw 自稳总开关
  * @details
@@ -68,10 +71,10 @@
 /**
  * @brief  船体 yaw 自稳控制周期
  * @details
- * - 当前值 100ms
+ * - 当前值 50ms
  * - 周期过快会放大噪声，过慢会降低修正响应
  */
-#define SHIP_YAW_HOLD_PERIOD_MS        100UL
+#define SHIP_YAW_HOLD_PERIOD_MS        50UL
 
 /**
  * @brief  船体 yaw 自稳日志开关
@@ -107,10 +110,40 @@
 /**
  * @brief  yaw 自稳最大差速比例（permille）
  * @details
- * - 500 表示 PID 满输出时，差速修正最多为当前基础油门的 50%
+ * - 200 表示 PID 满输出时，差速修正最多为当前基础油门的 20%
  * - 可防止自稳态把单侧电机直接压死或拉满
  */
-#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 500
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 200
+
+/* raw LR must stay within center +/- this value; otherwise yaw-hold exits immediately. */
+#define SHIP_YAW_HOLD_RAW_STEER_GATE 10U
+
+/* forbid yaw-hold at very low throttle where differential correction is ineffective. */
+#define SHIP_YAW_HOLD_MIN_THROTTLE_SPEED 250
+
+/* 1 keeps current sign; -1 flips yaw correction if field test shows positive feedback. */
+#define SHIP_YAW_HOLD_OUTPUT_SIGN 1
+
+/* reduce yaw-hold base speed only after yaw-hold is active and yaw error is large. */
+#define SHIP_YAW_HOLD_DERATE_ENABLE 1
+
+/* yaw error in centi-degree where base derate begins, 300 = 3.00 deg. */
+#define SHIP_YAW_HOLD_DERATE_START_CD 300
+
+/* yaw error in centi-degree where base derate reaches max, 1000 = 10.00 deg. */
+#define SHIP_YAW_HOLD_DERATE_FULL_CD 1000
+
+/* motor speed cap used at full derate; unit is speed, not PWM duty. */
+#define SHIP_YAW_HOLD_DERATE_MIN_BASE 800
+
+/* yaw-hold gyro damping, Q10 output units per deg/s. */
+#define SHIP_YAW_HOLD_GYRO_DAMP_Q10    3072
+
+/* max final differential speed change per 10 ms manual-control step. */
+#define SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP 20
+
+/* wait N stable centered-steering frames before locking yaw target. */
+#define SHIP_YAW_HOLD_STEER_STABLE_FRAMES 2U
 
 /**
  * @brief  手动自稳的转向门限
@@ -127,13 +160,13 @@
  * - Q10 定点
  * - 当前值偏保守，先保证不明显过冲
  */
-#define SHIP_YAW_HOLD_KP_Q10           1024
+#define SHIP_YAW_HOLD_KP_Q10           512
 
 /**
  * @brief  yaw 自稳误差死区（centi-degree）
  * @details 小误差直接忽略，降低静止抖动和输出突增
  */
-#define SHIP_YAW_HOLD_DEADBAND_CD      80
+#define SHIP_YAW_HOLD_DEADBAND_CD      50
 
 /**
  * @brief  yaw 自稳积分增益

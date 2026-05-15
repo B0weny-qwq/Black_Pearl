@@ -1,0 +1,164 @@
+C51 COMPILER V9.60.7.0   PWM_TIMER                                                         04/29/2024 14:17:22 PAGE 1   
+
+
+C51 COMPILER V9.60.7.0, COMPILATION OF MODULE PWM_TIMER
+OBJECT MODULE PLACED IN .\Objects\pwm_Timer.obj
+COMPILER INVOKED BY: D:\Keil_v5_c51\C51\BIN\C51.EXE App\PWM\pwm_Timer.c LARGE OPTIMIZE(8,SPEED) BROWSE INCDIR(.\Driver\I
+                    -nc;.\App\Config;.\App\DcMotor;.\App\Led;.\App\Timer;.\App\Interrupt;.\App\PWM;.\App\Utils;.\App\Wireless\LT8920;.\App\Gy
+                    -ro) DEBUG OBJECTEXTEND PRINT(.\Listings\pwm_Timer.lst) TABS(2) OBJECT(.\Objects\pwm_Timer.obj)
+
+line level    source
+
+   1          #include "pwm_Timer.h"
+   2          
+   3          /*************  本地变量声明  **************/
+   4          bit PWM1_Flag;
+   5          bit PWM2_Flag;
+   6          
+   7          PWMx_Duty PWMA_Duty;
+   8          
+   9          /*************  外部函数和变量声明 *****************/
+  10          
+  11          void PWM_Config(void)
+  12          {
+  13   1      
+  14   1        PWMx_InitDefine PWMx_InitStructure;
+  15   1      
+  16   1        PWMA_Duty.PWM1_Duty = 128;
+  17   1        PWMA_Duty.PWM2_Duty = 256;
+  18   1      
+  19   1      
+  20   1      
+  21   1        PWMx_InitStructure.PWM_Mode    =  CCMRn_PWM_MODE1;  //模式,   CCMRn_FREEZE,CCMRn_MATCH_VALID,CCMRn_MATCH_I
+             -NVALID,CCMRn_ROLLOVER,CCMRn_FORCE_INVALID,CCMRn_FORCE_VALID,CCMRn_PWM_MODE1,CCMRn_PWM_MODE2
+  22   1        PWMx_InitStructure.PWM_Duty    = PWMA_Duty.PWM1_Duty; //PWM占空比时间, 0~Period
+  23   1        PWMx_InitStructure.PWM_EnoSelect   = ENO1P | ENO1N; //输出通道选择, ENO1P,ENO1N,ENO2P,ENO2N,ENO3P,E
+             -NO3N,ENO4P,ENO4N / ENO5P,ENO6P,ENO7P,ENO8P
+  24   1        PWM_Configuration(PWM1, &PWMx_InitStructure);     //初始化PWM,  PWMA,PWMB
+  25   1        PWM1_SW(PWM1_SW_P10_P11);
+  26   1        PWMx_InitStructure.PWM_Mode    =  CCMRn_PWM_MODE1;  //模式,   CCMRn_FREEZE,CCMRn_MATCH_VALID,CCMRn_MATCH_I
+             -NVALID,CCMRn_ROLLOVER,CCMRn_FORCE_INVALID,CCMRn_FORCE_VALID,CCMRn_PWM_MODE1,CCMRn_PWM_MODE2
+  27   1        PWMx_InitStructure.PWM_Duty    = PWMA_Duty.PWM2_Duty; //PWM占空比时间, 0~Period
+  28   1        PWMx_InitStructure.PWM_EnoSelect   = ENO2P | ENO2N; //输出通道选择, ENO1P,ENO1N,ENO2P,ENO2N,ENO3P,E
+             -NO3N,ENO4P,ENO4N / ENO5P,ENO6P,ENO7P,ENO8P
+  29   1        PWM_Configuration(PWM2, &PWMx_InitStructure); 
+  30   1      
+  31   1        PWMx_InitStructure.PWM_Mode    =  CCMRn_PWM_MODE1;  //模式,   CCMRn_FREEZE,CCMRn_MATCH_VALID,CCMRn_MATCH_I
+             -NVALID,CCMRn_ROLLOVER,CCMRn_FORCE_INVALID,CCMRn_FORCE_VALID,CCMRn_PWM_MODE1,CCMRn_PWM_MODE2
+  32   1        PWMx_InitStructure.PWM_Duty    = PWMA_Duty.PWM1_Duty; //PWM占空比时间, 0~Period
+  33   1        PWMx_InitStructure.PWM_EnoSelect   = ENO2P | ENO2N; //输出通道选择, ENO1P,ENO1N,ENO2P,ENO2N,ENO3P,E
+             -NO3N,ENO4P,ENO4N / ENO5P,ENO6P,ENO7P,ENO8P
+  34   1        PWM_Configuration(PWM2, &PWMx_InitStructure);     //初始化PWM,  PWMA,PWMB  
+  35   1        PWM2_SW(PWM2_SW_P12_P13);
+  36   1        
+  37   1        PWMx_InitStructure.PWM_Period   = 2047;         //周期时间,   0~65535
+  38   1        PWMx_InitStructure.PWM_DeadTime = 0;          //死区发生器设置, 0~255
+  39   1        PWMx_InitStructure.PWM_MainOutEnable= ENABLE;     //主输出使能, ENABLE,DISABLE
+  40   1        PWMx_InitStructure.PWM_CEN_Enable   = ENABLE;     //使能计数器, ENABLE,DISABLE
+  41   1        PWM_Configuration(PWMA, &PWMx_InitStructure);     //初始化PWM通用寄存器,  PWMA,PWMB
+  42   1      
+  43   1        NVIC_PWM_Init(PWMA,DISABLE,Priority_0);
+  44   1      
+  45   1      }
+  46          
+  47          
+C51 COMPILER V9.60.7.0   PWM_TIMER                                                         04/29/2024 14:17:22 PAGE 2   
+
+  48          void pwm_Timer_Init(void){
+  49   1      #if 0
+                Timer0_Stop();
+                // TMOD = (TMOD & ~0x03) | (TIM_16BitAutoReload << 4);
+                Timer0_CLK_Select(TIM_CLOCK_1T);    //定时器时钟1T模式
+                Timer0_CLK_Output(DISABLE);
+                T0_Load(65536UL - (MAIN_Fosc / 10000)); //10Khz
+                Timer0_Run(ENABLE);
+                Timer0_Interrupt(Priority_2);
+              #else
+  58   1        TIM_InitTypeDef   TIM_InitStructure;                  //结构定义
+  59   1        TIM_InitStructure.TIM_Mode      = TIM_16BitAutoReload;  //指定工作模式,   TIM_16BitAutoReload,TIM_1
+             -6Bit,TIM_8BitAutoReload,TIM_16BitAutoReloadNoMask
+  60   1        TIM_InitStructure.TIM_ClkSource = TIM_CLOCK_1T;         //指定时钟源,     TIM_CLOCK_1T,TIM_CLOCK_12T
+             -,TIM_CLOCK_Ext
+  61   1        TIM_InitStructure.TIM_ClkOut    = DISABLE;              //是否输出高速脉冲, ENABLE或DISABLE
+  62   1        TIM_InitStructure.TIM_Value     = 65536UL - (MAIN_Fosc / 1000UL);   //初值,
+  63   1        TIM_InitStructure.TIM_Run       = ENABLE;               //是否初始化后启动定时器, ENABLE或DIS
+             -ABLE
+  64   1        Timer_Inilize(Timer0,&TIM_InitStructure);               //初始化Timer0   Timer0,Timer1,Timer2,Timer3,T
+             -imer4
+  65   1        NVIC_Timer0_Init(ENABLE,Priority_0);    //中断使能, ENABLE/DISABLE; 优先级(低到高) Priority_0,P
+             -riority_1,Priority_2,Priority_3
+  66   1      
+  67   1      #endif  
+  68   1      }
+  69          
+  70          void pwm_Timer_Switch(uint8_t onOff){
+  71   1        // if (onOff)
+  72   1        // {
+  73   1        //  Timer0_Run(ENABLE);
+  74   1        // }else{
+  75   1        //  Timer0_Stop();
+  76   1        // }
+  77   1        
+  78   1      }
+*** WARNING C280 IN LINE 70 OF App\PWM\pwm_Timer.c: 'onOff': unreferenced local variable
+  79          
+  80          //========================================================================
+  81          // 函数: Timer0_ISR_Handler
+  82          // 描述: Timer0中断函数.
+  83          // 参数: none.
+  84          // 返回: none.
+  85          // 版本: V1.0, 2020-09-23
+  86          //========================================================================
+  87          void Timer0_ISR_Handler (void) interrupt TMR0_VECTOR    //进中断时已经清除标志
+  88          {
+  89   1      
+  90   1        // TODO: 在此处添加用户代码
+  91   1        if(!PWM1_Flag)
+  92   1        {
+  93   2          PWMA_Duty.PWM1_Duty++;
+  94   2          if(PWMA_Duty.PWM1_Duty >= 2047) PWM1_Flag = 1;
+  95   2        }
+  96   1        else
+  97   1        {
+  98   2          PWMA_Duty.PWM1_Duty--;
+  99   2          if(PWMA_Duty.PWM1_Duty <= 0) PWM1_Flag = 0;
+ 100   2        }
+ 101   1      
+ 102   1        if(!PWM2_Flag)
+ 103   1        {
+C51 COMPILER V9.60.7.0   PWM_TIMER                                                         04/29/2024 14:17:22 PAGE 3   
+
+ 104   2          PWMA_Duty.PWM2_Duty++;
+ 105   2          if(PWMA_Duty.PWM2_Duty >= 2047) PWM2_Flag = 1;
+ 106   2        }
+ 107   1        else
+ 108   1        {
+ 109   2          PWMA_Duty.PWM2_Duty--;
+ 110   2          if(PWMA_Duty.PWM2_Duty <= 0) PWM2_Flag = 0;
+ 111   2        }
+ 112   1      
+ 113   1        UpdatePwm(PWMA, &PWMA_Duty);
+ 114   1      }
+ 115          
+ 116          // void PWMA_Isr() interrupt 26
+ 117          // {
+ 118          //     if (PWMA_SR1 & 0x01)
+ 119          //     {
+ 120          //         PWMA_SR1 &= ~0x01;
+ 121          //         // P10 = ~P10;                             //测试端口
+ 122          //     }
+ 123          // }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    431    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     16      17
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  1 WARNING(S),  0 ERROR(S)

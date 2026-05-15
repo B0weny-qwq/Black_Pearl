@@ -1,0 +1,346 @@
+C251 COMPILER V5.60.0,  HeadingEstimator                                                   16/05/26  05:32:07  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE HeadingEstimator
+OBJECT MODULE PLACED IN .\list\HeadingEstimator.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\Code_boweny\Function\AHRS\HeadingEstimator.c XSMALL INTR2 BROWSE IN
+                    -CDIR(..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function
+                    -\AHRS;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;
+                    -..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR) DEBUG PRINT(.\list\HeadingEstimator.lst) TABS(2) OBJECT(.\li
+                    -st\HeadingEstimator.obj) 
+
+stmt  level    source
+
+    1          #include "HeadingEstimator.h"
+    2          
+    3          #define HEADING_FLOAT_ABS(value) \
+    4              (((value) < 0.0f) ? (-(value)) : (value))
+    5          
+    6          #define HEADING_WRAP360_INPLACE(value) \
+    7              do { \
+    8                  while ((value) >= 360.0f) { \
+    9                      (value) -= 360.0f; \
+   10                  } \
+   11                  while ((value) < 0.0f) { \
+   12                      (value) += 360.0f; \
+   13                  } \
+   14              } while (0)
+   15          
+   16          #define HEADING_WRAP180_INPLACE(value) \
+   17              do { \
+   18                  while ((value) >= 180.0f) { \
+   19                      (value) -= 360.0f; \
+   20                  } \
+   21                  while ((value) < -180.0f) { \
+   22                      (value) += 360.0f; \
+   23                  } \
+   24              } while (0)
+   25          
+   26          #define HEADING_CLAMP_BIAS_INPLACE(value) \
+   27              do { \
+   28                  if ((value) > HEADING_BIAS_LIMIT_DPS) { \
+   29                      (value) = HEADING_BIAS_LIMIT_DPS; \
+   30                  } else if ((value) < -HEADING_BIAS_LIMIT_DPS) { \
+   31                      (value) = -HEADING_BIAS_LIMIT_DPS; \
+   32                  } \
+   33              } while (0)
+   34          
+   35          static int32 Heading_RoundDeg100(float angle_deg)
+   36          {
+   37   1          float scaled;
+   38   1      
+   39   1          scaled = angle_deg * 100.0f;
+   40   1          if (scaled >= 0.0f) {
+   41   2              return (int32)(scaled + 0.5f);
+   42   2          }
+   43   1          return (int32)(scaled - 0.5f);
+   44   1      }
+   45          
+   46          void Heading_Init(HeadingEstimator_t *h)
+   47          {
+   48   1          if (h == 0) {
+   49   2              return;
+   50   2          }
+   51   1      
+   52   1          h->heading_deg = 0.0f;
+   53   1          h->heading_zero_deg = 0.0f;
+   54   1          h->gyro_z_bias_dps = 0.0f;
+   55   1          h->yaw_gyro_deg = 0.0f;
+C251 COMPILER V5.60.0,  HeadingEstimator                                                   16/05/26  05:32:07  PAGE 2   
+
+   56   1          h->yaw_mag_deg = 0.0f;
+   57   1          h->heading_pred_deg = 0.0f;
+   58   1          h->heading_err_deg = 0.0f;
+   59   1          h->static_mag_ref_deg = 0.0f;
+   60   1          h->mag_confidence = 0.0f;
+   61   1          h->last_yaw_mag_deg = 0.0f;
+   62   1          h->mag_valid = 0U;
+   63   1          h->mag_used = 0U;
+   64   1          h->static_flag = 0U;
+   65   1          h->static_mag_ref_valid = 0U;
+   66   1          h->raw_mag_valid = 0U;
+   67   1          h->last_mag_sample_valid = 0U;
+   68   1      }
+   69          
+   70          void Heading_ResetZero(HeadingEstimator_t *h)
+   71          {
+   72   1          if (h == 0) {
+   73   2              return;
+   74   2          }
+   75   1      
+   76   1          HEADING_WRAP360_INPLACE(h->heading_deg);
+   77   1          h->heading_zero_deg = h->heading_deg;
+   78   1      }
+   79          
+   80          void Heading_SetHeadingDeg(HeadingEstimator_t *h, float heading_deg)
+   81          {
+   82   1          if (h == 0) {
+   83   2              return;
+   84   2          }
+   85   1      
+   86   1          HEADING_WRAP360_INPLACE(heading_deg);
+   87   1          h->heading_deg = heading_deg;
+   88   1          h->yaw_gyro_deg = heading_deg;
+   89   1          h->yaw_mag_deg = heading_deg;
+   90   1          h->heading_pred_deg = heading_deg;
+   91   1          h->heading_err_deg = 0.0f;
+   92   1          h->static_mag_ref_deg = heading_deg;
+   93   1          h->mag_valid = 0U;
+   94   1          h->mag_used = 0U;
+   95   1          h->static_mag_ref_valid = 0U;
+   96   1          h->raw_mag_valid = 0U;
+   97   1          h->last_mag_sample_valid = 0U;
+   98   1      #if HEADING_USE_INTERNAL_BIAS
+                   h->gyro_z_bias_dps = 0.0f;
+               #else
+  101   1          h->gyro_z_bias_dps = 0.0f;
+  102   1      #endif
+  103   1      }
+  104          
+  105          void Heading_Update(HeadingEstimator_t *h,
+  106                              float gyro_z_dps,
+  107                              float yaw_mag_deg,
+  108                              u8 mag_valid,
+  109                              u8 static_flag,
+  110                              float dt)
+  111          {
+  112   1          float value;
+  113   1          float heading_pred;
+  114   1          float gz_corr;
+  115   1          float err;
+  116   1          float static_err;
+  117   1          float kmag;
+  118   1          u8 raw_mag_valid;
+  119   1          u8 mag_sample_valid;
+  120   1          u8 mag_used;
+  121   1      
+C251 COMPILER V5.60.0,  HeadingEstimator                                                   16/05/26  05:32:07  PAGE 3   
+
+  122   1          if ((h == 0) || (dt <= 0.0f)) {
+  123   2              return;
+  124   2          }
+  125   1      
+  126   1          h->static_flag = static_flag;
+  127   1      
+  128   1          value = yaw_mag_deg;
+  129   1          HEADING_WRAP360_INPLACE(value);
+  130   1          h->yaw_mag_deg = value;
+  131   1          h->heading_err_deg = 0.0f;
+  132   1      
+  133   1      #if HEADING_USE_INTERNAL_BIAS
+                   gz_corr = gyro_z_dps - h->gyro_z_bias_dps;
+               #else
+  136   1          h->gyro_z_bias_dps = 0.0f;
+  137   1          gz_corr = gyro_z_dps;
+  138   1      #endif
+  139   1          if (static_flag && (HEADING_FLOAT_ABS(gz_corr) < HEADING_GYRO_DEADZONE_DPS)) {
+  140   2              gz_corr = 0.0f;
+  141   2          }
+  142   1      
+  143   1          heading_pred = h->heading_deg + (gz_corr * dt);
+  144   1          HEADING_WRAP360_INPLACE(heading_pred);
+  145   1          h->heading_deg = heading_pred;
+  146   1          h->heading_pred_deg = heading_pred;
+  147   1      
+  148   1          h->yaw_gyro_deg += (gz_corr * dt);
+  149   1          HEADING_WRAP360_INPLACE(h->yaw_gyro_deg);
+  150   1      
+  151   1          raw_mag_valid = mag_valid ? 1U : 0U;
+  152   1          mag_used = 0U;
+  153   1          mag_sample_valid = 0U;
+  154   1          h->raw_mag_valid = raw_mag_valid;
+  155   1          h->mag_valid = raw_mag_valid;
+  156   1          h->mag_used = 0U;
+  157   1      
+  158   1          if (!static_flag) {
+  159   2              h->static_mag_ref_valid = 0U;
+  160   2          }
+  161   1      
+  162   1          if (raw_mag_valid) {
+  163   2              if (h->last_mag_sample_valid) {
+  164   3                  err = value - h->last_yaw_mag_deg;
+  165   3                  HEADING_WRAP180_INPLACE(err);
+  166   3                  if (HEADING_FLOAT_ABS(err) > HEADING_MAG_JUMP_GATE_DEG) {
+  167   4                      raw_mag_valid = 0U;
+  168   4                  } else {
+  169   4                      mag_sample_valid = 1U;
+  170   4                  }
+  171   3              } else {
+  172   3                  mag_sample_valid = 1U;
+  173   3              }
+  174   2          } else {
+  175   2              h->last_mag_sample_valid = 0U;
+  176   2              h->static_mag_ref_valid = 0U;
+  177   2          }
+  178   1      
+  179   1          if (mag_sample_valid) {
+  180   2              err = value - heading_pred;
+  181   2              HEADING_WRAP180_INPLACE(err);
+  182   2              h->heading_err_deg = err;
+  183   2      
+  184   2              if (static_flag) {
+  185   3                  if (!h->static_mag_ref_valid) {
+  186   4                      h->static_mag_ref_deg = value;
+  187   4                      h->static_mag_ref_valid = 1U;
+C251 COMPILER V5.60.0,  HeadingEstimator                                                   16/05/26  05:32:07  PAGE 4   
+
+  188   4                  }
+  189   3      
+  190   3                  static_err = value - h->static_mag_ref_deg;
+  191   3                  HEADING_WRAP180_INPLACE(static_err);
+  192   3                  if ((HEADING_FLOAT_ABS(static_err) <= HEADING_STATIC_MAG_STABLE_DEG) &&
+  193   3                      (HEADING_FLOAT_ABS(err) <= HEADING_STATIC_MAG_ERR_GATE_DEG) &&
+  194   3                      !HEADING_DBG_FORCE_MAG_OFF) {
+  195   4                      kmag = HEADING_KMAG_STATIC;
+  196   4                      h->heading_deg = heading_pred + (kmag * err);
+  197   4                      HEADING_WRAP360_INPLACE(h->heading_deg);
+  198   4                      mag_used = 1U;
+  199   4                  }
+  200   3              } else if ((HEADING_FLOAT_ABS(gz_corr) >= HEADING_MAG_FUSE_MIN_GZ_DPS) &&
+  201   2                         !HEADING_DBG_FORCE_MAG_OFF) {
+  202   3                  err = value - heading_pred;
+  203   3                  HEADING_WRAP180_INPLACE(err);
+  204   3                  if (HEADING_FLOAT_ABS(err) <= HEADING_MAG_ERR_GATE_DEG) {
+  205   4                      h->heading_deg = heading_pred + (HEADING_KMAG_MOVE * err);
+  206   4                      HEADING_WRAP360_INPLACE(h->heading_deg);
+  207   4                      mag_used = 1U;
+  208   4                  }
+  209   3              }
+  210   2      
+  211   2              if (mag_used) {
+  212   3                  h->last_yaw_mag_deg = value;
+  213   3                  h->last_mag_sample_valid = 1U;
+  214   3              }
+  215   2          }
+  216   1      
+  217   1          h->mag_used = mag_used;
+  218   1          h->mag_confidence = mag_used ? 1.0f : 0.0f;
+  219   1      }
+  220          
+  221          float Heading_GetDeg(const HeadingEstimator_t *h)
+  222          {
+  223   1          float angle_deg;
+  224   1      
+  225   1          if (h == 0) {
+  226   2              return 0.0f;
+  227   2          }
+  228   1      
+  229   1          angle_deg = h->heading_deg;
+  230   1          HEADING_WRAP360_INPLACE(angle_deg);
+  231   1          return angle_deg;
+  232   1      }
+  233          
+  234          int32 Heading_GetDeg100(const HeadingEstimator_t *h)
+  235          {
+  236   1          float angle_deg;
+  237   1      
+  238   1          if (h == 0) {
+  239   2              return 0L;
+  240   2          }
+  241   1      
+  242   1          angle_deg = h->heading_deg;
+  243   1          HEADING_WRAP360_INPLACE(angle_deg);
+  244   1          return Heading_RoundDeg100(angle_deg);
+  245   1      }
+  246          
+  247          int32 Heading_GetRelativeDeg100(const HeadingEstimator_t *h)
+  248          {
+  249   1          float angle_deg;
+  250   1      
+  251   1          if (h == 0) {
+  252   2              return 0L;
+  253   2          }
+C251 COMPILER V5.60.0,  HeadingEstimator                                                   16/05/26  05:32:07  PAGE 5   
+
+  254   1      
+  255   1          angle_deg = h->heading_deg;
+  256   1          HEADING_WRAP360_INPLACE(angle_deg);
+  257   1          angle_deg -= h->heading_zero_deg;
+  258   1          HEADING_WRAP180_INPLACE(angle_deg);
+  259   1          return Heading_RoundDeg100(angle_deg);
+  260   1      }
+  261          
+  262          int32 Heading_GetGyroDeg100(const HeadingEstimator_t *h)
+  263          {
+  264   1          float angle_deg;
+  265   1      
+  266   1          if (h == 0) {
+  267   2              return 0L;
+  268   2          }
+  269   1      
+  270   1          angle_deg = h->yaw_gyro_deg;
+  271   1          HEADING_WRAP360_INPLACE(angle_deg);
+  272   1          return Heading_RoundDeg100(angle_deg);
+  273   1      }
+  274          
+  275          int32 Heading_GetMagDeg100(const HeadingEstimator_t *h)
+  276          {
+  277   1          float angle_deg;
+  278   1      
+  279   1          if (h == 0) {
+  280   2              return 0L;
+  281   2          }
+  282   1      
+  283   1          angle_deg = h->yaw_mag_deg;
+  284   1          HEADING_WRAP360_INPLACE(angle_deg);
+  285   1          return Heading_RoundDeg100(angle_deg);
+  286   1      }
+  287          
+  288          int32 Heading_GetBiasDps100(const HeadingEstimator_t *h)
+  289          {
+  290   1          if (h == 0) {
+  291   2              return 0L;
+  292   2          }
+  293   1      
+  294   1      #if !HEADING_USE_INTERNAL_BIAS
+  295   1          return 0L;
+  296   1      #else
+                   return Heading_RoundDeg100(h->gyro_z_bias_dps);
+               #endif
+  299   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      2061     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------         22
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =    ------     ------
+End of Module Information.
+
+C251 COMPILER V5.60.0,  HeadingEstimator                                                   16/05/26  05:32:07  PAGE 6   
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
