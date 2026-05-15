@@ -59,10 +59,10 @@
 /**
  * @brief  船体 yaw 自稳控制周期
  * @details
- * - 当前值 150ms
+ * - 当前值 100ms
  * - 周期过快会放大噪声，过慢会降低修正响应
  */
-#define SHIP_YAW_HOLD_PERIOD_MS        150UL
+#define SHIP_YAW_HOLD_PERIOD_MS        100UL
 
 /**
  * @brief  船体 yaw 自稳日志开关
@@ -99,7 +99,7 @@
  * - Q10 定点
  * - 当前值偏保守，先保证不明显过冲
  */
-#define SHIP_YAW_HOLD_KP_Q10           4
+#define SHIP_YAW_HOLD_KP_Q10           2048
 
 /**
  * @brief  yaw 自稳误差死区（centi-degree）
@@ -117,7 +117,7 @@
  * @brief  yaw 自稳微分增益
  * @details 当前关闭，避免噪声放大。
  */
-#define SHIP_YAW_HOLD_KD_Q10           0
+#define SHIP_YAW_HOLD_KD_Q10           256
 /** @} */
 
 /* Core modules */

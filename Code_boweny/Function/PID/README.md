@@ -93,6 +93,102 @@ output     = (kp * error + ki * integral + kd * derivative) >> 10
 output     = clamp(output)
 ```
 
+## 航向自稳定流程：手动油门 + PID 差速
+
+本项目的手动航向自稳定在 `Code_boweny/Device/WIRELESS/ship_protocol.c` 中实现，PID 本身只负责输出航向误差修正量，不直接接管油门。
+
+### 1. 更新频率
+
+- 遥控器油门帧为 `SHIP_CMD_THROTTLE(0x11)`，收到一帧才调用一次 `ShipProtocol_ApplyManualControl()`。
+- 手动目标 PWM 不在 10ms 调度器里重复刷新，因此目标输出更新频率与遥控器油门帧更新频率一致。
+- `Motor` 模块只接收最新目标值；底层 PWM 波形仍按硬件 PWM 定时器频率连续输出。
+
+### 2. 遥控输入转为左右输入油门
+
+收到 `0x11` 后先解析：
+
+```text
+lr  = 左右摇杆
+ud  = 前后油门
+key = 按键
+```
+
+随后做滤波、死区和曲线映射：
+
+```text
+throttle_speed = ThrottleToSignedSpeed(filtered_ud)
+steering_speed = SteeringToSignedSpeed(filtered_lr)
+left_input     = clamp(throttle_speed + steering_speed)
+right_input    = clamp(throttle_speed - steering_speed)
+```
+
+这里的 `left_input/right_input` 是遥控器原始意图对应的左右电机输入油门。
+
+### 3. 进入手动航向自稳定的条件
+
+只有同时满足以下条件，才会叠加 PID：
+
+- `SHIP_YAW_HOLD_ENABLE=1`
+- `SHIP_YAW_HOLD_MANUAL_ENABLE=1`
+- 转向输入在 `SHIP_YAW_HOLD_STEER_GATE` 内，认为用户想直线走
+- 若 `SHIP_YAW_HOLD_FORWARD_ONLY=1`，则只允许前进油门进入自稳定
+- `MainLoop_IsHeadingReady()` 返回可用航向
+
+如果不满足这些条件，直接按普通差速开环输出 `left_input/right_input`。
+
+### 4. PID 如何计算
+
+第一次进入自稳定时，锁定当前相对航向作为目标：
+
+```text
+yaw_hold_target_cd = current_yaw_cd
+```
+
+后续每到 `SHIP_YAW_HOLD_PERIOD_MS` 更新一次 PID：
+
+```text
+yaw_error_cd = wrap(yaw_hold_target_cd - current_yaw_cd)
+if abs(yaw_error_cd) <= SHIP_YAW_HOLD_DEADBAND_CD:
+    yaw_error_cd = 0
+
+pid_output = PID_UpdateTarget(yaw_pid, yaw_error_cd, 0)
+```
+
+注意：这里 PID 的输出只是航向修正强度，不是电机油门。
+
+### 5. 自稳定输出如何叠加到油门
+
+自稳定时两个电机先取同一个基础油门，基础油门不是单独的 `throttle_speed`，而是左右输入油门的最大值：
+
+```text
+base = max(abs(left_input), abs(right_input))
+if throttle_speed < 0:
+    base = -base
+```
+
+然后把 PID 输出按基础油门比例换算成差速修正：
+
+```text
+yaw_output = pid_output * abs(base) / 100
+yaw_output = clamp(yaw_output, -abs(base)/2, abs(base)/2)
+```
+
+最终输出：
+
+```text
+left_speed  = clamp(base + yaw_output)
+right_speed = clamp(base - yaw_output)
+```
+
+也就是说，自稳定控制方式是：
+
+```text
+两个电机共同基础油门 = max(左输入油门, 右输入油门)
+PID 只在这个共同基础油门上做左右差速修正
+```
+
+它不是“偏航后单独锁死一个电机、另一个拉满”，也不是让 PID 替代遥控器油门。
+
 ## 注意事项
 
 - `PID_Update()` 返回 `int16`，通常可直接映射到电机 PWM 命令或舵机控制量。

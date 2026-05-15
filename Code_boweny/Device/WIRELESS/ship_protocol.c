@@ -462,6 +462,8 @@ static int16 ShipProtocol_LimitSpeed(int16 speed)
 static int16 ShipProtocol_YawOutputToSpeed(int16 yaw_output, int16 throttle_speed)
 {
     int32 scale;
+    int16 yaw_speed;
+    int16 yaw_limit;
 
     scale = (int32)MOTOR_SPEED_MAX;
     if (throttle_speed > 0) {
@@ -470,7 +472,15 @@ static int16 ShipProtocol_YawOutputToSpeed(int16 yaw_output, int16 throttle_spee
         scale = (int32)(-throttle_speed);
     }
 
-    return ShipProtocol_LimitSpeed((int16)(((int32)yaw_output * scale) / 100L));
+    yaw_speed = ShipProtocol_LimitSpeed((int16)(((int32)yaw_output * scale) / 100L));
+    yaw_limit = (int16)(scale / 2L);
+    if (yaw_speed > yaw_limit) {
+        yaw_speed = yaw_limit;
+    } else if (yaw_speed < (int16)(-yaw_limit)) {
+        yaw_speed = (int16)(-yaw_limit);
+    }
+
+    return yaw_speed;
 }
 
 static u8 ShipProtocol_AbsAxisDiff(u8 value)
@@ -914,6 +924,9 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
     int16 right_speed;
     int16 abs_throttle;
     int16 abs_steering;
+    int16 abs_left_input;
+    int16 abs_right_input;
+    int16 yaw_base_speed;
     ShipMotion_t target_motion;
     int16 yaw_cd;
     int16 yaw_output;
@@ -942,6 +955,10 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
     left_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed + steering_speed));
     right_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed - steering_speed));
     target_motion = SHIP_MOTION_STOP;
+    abs_left_input = 0;
+    abs_right_input = 0;
+    yaw_base_speed = 0;
+    yaw_cd = 0;
     yaw_output = 0;
 
     if ((abs_throttle == 0) && (abs_steering == 0)) {
@@ -964,17 +981,25 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
         ) {
         now_ms = Task_GetTickMs();
         if (ShipProtocol_UpdateYawHoldPid(now_ms, &yaw_cd, &pid_updated) != 0U) {
-            yaw_output = ShipProtocol_YawOutputToSpeed(g_ship_rt.yaw_hold_output, throttle_speed);
-            left_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed + yaw_output));
-            right_speed = ShipProtocol_LimitSpeed((int16)(throttle_speed - yaw_output));
+            abs_left_input = (left_speed >= 0) ? left_speed : (int16)(-left_speed);
+            abs_right_input = (right_speed >= 0) ? right_speed : (int16)(-right_speed);
+            yaw_base_speed = (abs_left_input >= abs_right_input) ? abs_left_input : abs_right_input;
+            if (throttle_speed < 0) {
+                yaw_base_speed = (int16)(-yaw_base_speed);
+            }
+
+            yaw_output = ShipProtocol_YawOutputToSpeed(g_ship_rt.yaw_hold_output, yaw_base_speed);
+            left_speed = ShipProtocol_LimitSpeed((int16)(yaw_base_speed + yaw_output));
+            right_speed = ShipProtocol_LimitSpeed((int16)(yaw_base_speed - yaw_output));
             target_motion = (throttle_speed >= 0) ? SHIP_MOTION_FORWARD : SHIP_MOTION_BACKWARD;
             if (log_this_sample != 0U) {
                 LOGI(SHIP_TAG,
-                     "yaw hold tgt=%d yr=%d out=%d throttle=%d steer=%d gate=%u left=%d right=%d",
+                     "yaw hold tgt=%d yr=%d out=%d throttle=%d base=%d steer=%d gate=%u left=%d right=%d",
                      g_ship_rt.yaw_hold_target_cd,
                      yaw_cd,
                      yaw_output,
                      throttle_speed,
+                     yaw_base_speed,
                      steering_speed,
                      (u16)SHIP_YAW_HOLD_STEER_GATE,
                      left_speed,
@@ -1009,9 +1034,15 @@ static void ShipProtocol_ApplyManualControl(u8 left_right, u8 front_back, u8 log
                                    target_motion,
                                    (abs_throttle >= abs_steering) ? abs_throttle : abs_steering,
                                    log_this_sample);
-    ShipProtocol_ApplyMotion(target_motion,
-                             (abs_throttle >= abs_steering) ? abs_throttle : abs_steering,
-                             log_this_sample);
+    ShipProtocol_EnsureMotorInit();
+#if SHIP_THROTTLE_PWM_ENABLE
+    Motor_SetBothSpeed(left_speed, right_speed);
+#endif
+    g_ship_rt.motion = target_motion;
+    if (log_this_sample != 0U) {
+        ShipProtocol_LogMotion(target_motion, left_speed, right_speed);
+        ShipProtocol_LogPwmSnapshot(1U);
+    }
     ShipProtocol_LogMotorOutput((u8)target_motion, yaw_cd, throttle_speed, yaw_output, left_speed, right_speed, log_this_sample);
 }
 
@@ -2516,12 +2547,6 @@ void ShipProtocol_RunScheduler(void)
                 ShipProtocol_ReopenWorkRx(SHIP_REASON_C("legacy remote recovery"), 1U, 1U);
             }
 
-            if ((g_ship_rt.throttle_online != 0U) &&
-                (g_ship_rt.valid != 0U) &&
-                (g_ship_rt.pulse_active == 0U) &&
-                (AutoDrive_IsBusy() == 0U)) {
-                ShipProtocol_ApplyManualControl(g_ship_rt.lr, g_ship_rt.ud, 0U);
-            }
             ShipProtocol_LogPowerSample(&g_ship_power_sample, 0U);
         }
 

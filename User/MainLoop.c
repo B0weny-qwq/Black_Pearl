@@ -376,7 +376,7 @@ static void IMU_AhrsPoll(void)
     }
 
     att = AHRS_GetState();
-    if ((att->flags & AHRS_FLAG_GYRO_BIAS_READY) == 0U) {
+    if ((att->flags & AHRS_FLAG_READY) == 0U) {
         yaw_zero_valid = 0;
         yaw_gyro_zero_cd = 0L;
         yaw_mag_zero_cd = 0L;
