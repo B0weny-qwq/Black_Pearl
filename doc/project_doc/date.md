@@ -44,11 +44,14 @@
 
 ---
 
-## [2026-05-15] - v1.7.63 手动 yaw 自稳单位与满量程修复
+## [2026-05-15] - v1.7.63 手动 yaw 自稳单位与控制刷新修复
 
 ### Bug 修复
 - **[PID 单位混用]** 手动 yaw 自稳之前直接把 `yaw_error_cd`（0.01°）喂给 PID，而 PID 输出限幅按 `±100` 百分比使用，导致刚超过 1.5° 死区就容易打满。修复：先把角度误差按 `SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 归一化到 `±SHIP_YAW_HOLD_OUTPUT_LIMIT`，再进入 PID。
 - **[差速输出锁死]** 原差速换算只按基础油门比例限幅，没有考虑 `MOTOR_SPEED_MAX - abs(base)` 的真实余量，高油门下 `base + PID` 会被电机满量程长期夹死。修复：差速上限同时受 `SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE` 和电机剩余余量约束。
+- **[上电自转]** 无遥控油门时空闲 yaw-hold 仍会在 AHRS ready 后按满量程差速驱动电机，导致上电自己转几圈。修复：移除无油门空闲 yaw-hold 电机接管，只有有效手动油门或其它显式运动命令才驱动电机。
+- **[遥控卡顿]** 油门滤波和 `Motor_SetBothSpeed()` 只在收到 `0x11` 帧时执行，遥控帧率低或偶发丢帧时输出会变成阶梯。修复：`0x11` 只更新最新输入值，手动控制由 `ShipProtocol_ServiceManualControl()` 每 10ms 使用最新输入连续刷新。
+- **[日志控制耦合]** 原手动控制路径用同一个 `log_this_sample` 决定是否打印以及是否立即执行控制，导致日志限频可能间接影响控制刷新节奏。修复：`0x11` 只更新输入并独立限频打印输入日志，内部手动控制按 `SHIP_MANUAL_CONTROL_PERIOD_MS` 独立运行，电机/自稳日志按 `SHIP_MOT_LOG_PERIOD_MS` 独立打印。
 - **[诊断信息不足]** `[MOT]` 和 yaw-hold 日志之前只显示 `yaw/out/left/right`，无法直接判断是角度误差、归一输入、PID 输出还是差速映射出问题。修复：增加 `tgt/err/in/pid/diff/base` 等字段。
 
 ### 优化改进
@@ -57,12 +60,12 @@
 - **[高油门保护]** `SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=500` 表示满 PID 输出最多给当前基础油门 50% 差速，同时仍保证不超过电机上限余量。
 
 ### 变更记录
-- **[ship_protocol.c]** 新增 `ShipProtocol_YawErrorToControl()` 和 `ShipProtocol_YawControlToSpeed()`，把 yaw 控制链路拆成“角度误差归一化”和“PID 输出转电机差速”两层。
-- **[FeatureSwitch.h]** 同步新增 `SHIP_YAW_HOLD_FULL_ERROR_CD`、`SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE`，并更新 yaw-hold 参数。
+- **[ship_protocol.c]** 新增 `ShipProtocol_YawErrorToControl()`、`ShipProtocol_YawControlToSpeed()`、`ShipProtocol_ServiceManualControl()` 和 `ShipProtocol_LogManualControlSample()`，把 yaw 控制链路拆成“角度误差归一化”“PID 输出转电机差速”“最新遥控输入连续刷新”和“日志快照独立输出”四层。
+- **[FeatureSwitch.h]** 同步新增 `SHIP_YAW_HOLD_FULL_ERROR_CD`、`SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE` 和 `SHIP_MANUAL_CONTROL_PERIOD_MS`，并更新 yaw-hold 参数。
 - **[PID README / total.md]** 同步记录手动自稳真实流程、单位、满量程和高油门余量限制。
 
 ### 开发者备注
-- 遥控器 `0x11` 油门目标更新仍只跟随油门帧；底层电机 PWM 仍由硬件定时器按 PWM 频率连续输出。
+- 遥控器 `0x11` 只负责更新最新 `lr/ud/key` 输入；手动控制目标按 10ms 调度连续刷新；日志按 `SHIP_RC_INPUT_LOG_PERIOD_MS` / `SHIP_MOT_LOG_PERIOD_MS` 独立输出；底层电机 PWM 仍由硬件定时器按 PWM 频率连续输出。
 - 当前修复目标是让自稳定输出进入线性可调区，不再“偏一点就单侧锁死”；若现场修正方向相反，应优先核对 yaw 正方向与左右电机转向映射。
 
 ---

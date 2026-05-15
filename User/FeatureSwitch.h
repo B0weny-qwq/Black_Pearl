@@ -41,6 +41,15 @@
 #define SHIP_THROTTLE_PWM_ENABLE       1
 
 /**
+ * @brief  手动控制目标刷新周期
+ * @details
+ * - 单位为 ms，当前值 10ms
+ * - 只决定内部 `Motor_SetBothSpeed()` 目标刷新节拍
+ * - 不等同于遥控器 `0x11` 输入帧率、日志打印周期或底层 PWM 硬件频率
+ */
+#define SHIP_MANUAL_CONTROL_PERIOD_MS  10UL
+
+/**
  * @brief  船体 yaw 自稳总开关
  * @details
  * - 1：启用差速 yaw 自稳
@@ -74,7 +83,9 @@
 
 /**
  * @brief  船体 yaw 自稳日志周期
- * @details 当前为 1000ms，避免上位机被高频日志刷屏。
+ * @details
+ * - 当前为 1000ms，避免上位机被高频日志刷屏
+ * - 只限制 yaw-hold 诊断打印，不参与 PID 或电机目标刷新
  */
 #define SHIP_YAW_HOLD_LOG_PERIOD_MS    1000UL
 
@@ -625,6 +636,7 @@
  * @details
  * - 这些宏单位均为 ms
  * - 0 表示不限制，1 以上表示最小打印间隔
+ * - 这些宏只限制日志输出，不参与手动控制目标刷新或 PWM 硬件输出
  */
 #define SHIP_RX_LOG_PERIOD_MS          100U
 #define SHIP_RX_CRC_LOG_THRESHOLD      10U

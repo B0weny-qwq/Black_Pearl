@@ -99,9 +99,11 @@ output     = clamp(output)
 
 ### 1. 更新频率
 
-- 遥控器油门帧为 `SHIP_CMD_THROTTLE(0x11)`，收到一帧才调用一次 `ShipProtocol_ApplyManualControl()`。
-- 手动目标 PWM 不在 10ms 调度器里重复刷新，因此目标输出更新频率与遥控器油门帧更新频率一致。
-- `Motor` 模块只接收最新目标值；底层 PWM 波形仍按硬件 PWM 定时器频率连续输出。
+- 遥控器油门输入只由 `SHIP_CMD_THROTTLE(0x11)` 更新，`lr/ud/key` 的来源频率与遥控器油门帧一致。
+- 手动控制目标由 `ShipProtocol_ServiceManualControl()` 按 `SHIP_MANUAL_CONTROL_PERIOD_MS=10ms` 使用最新 `lr/ud/key` 连续刷新，避免遥控帧率低或偶发丢帧时电机目标一顿一顿。
+- `Motor` 模块只接收最新目标 speed；底层 PWM 波形仍按硬件 PWM 定时器频率连续输出。
+- 日志由独立限频控制：`SHIP_RC_INPUT_LOG_PERIOD_MS` 只限制 `0x11` 输入日志，`SHIP_MOT_LOG_PERIOD_MS` 只限制手动控制/电机诊断日志，`SHIP_YAW_HOLD_LOG_PERIOD_MS` 只限制 `[MOT]` 诊断日志。日志打印不触发、不跳过、不延后内部控制计算。
+- 无遥控油门时不会启动空闲 yaw-hold 驱动电机，避免上电后 AHRS ready 触发电机自转。
 
 ### 2. 遥控输入转为左右输入油门
 
