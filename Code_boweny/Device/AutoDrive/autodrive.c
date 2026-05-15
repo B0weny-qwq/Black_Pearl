@@ -143,8 +143,8 @@ static void AutoDrive_PointFromGps(AutoDrive_PointRaw_t *point, const GPS_State_
     lat_deg = lat_abs / 10000000UL;
     lon_deg = lon_abs / 10000000UL;
 
-    lat_min_x1e4 = ((lat_abs % 10000000UL) * 6UL + 500UL) / 1000UL;
-    lon_min_x1e4 = ((lon_abs % 10000000UL) * 6UL + 500UL) / 1000UL;
+    lat_min_x1e4 = ((lat_abs % 10000000UL) * 6UL + 50UL) / 100UL;
+    lon_min_x1e4 = ((lon_abs % 10000000UL) * 6UL + 50UL) / 100UL;
 
     point->lon_ew = (gps->lon_deg1e7 < 0L) ? 'W' : 'E';
     point->lon_whole = (u16)(lon_deg * 100UL + (lon_min_x1e4 / 10000UL));
@@ -196,6 +196,26 @@ static u8 AutoDrive_GetSatCount(void)
         return gps->satellites_used_gsa;
     }
     return gps->satellites_used;
+}
+
+static u8 AutoDrive_GetReadyCurrentPoint(AutoDrive_PointRaw_t *point)
+{
+    const GPS_State_t *gps;
+
+    if (point == 0) {
+        return 0U;
+    }
+    if (AutoDrive_GpsReady() == 0U) {
+        return 0U;
+    }
+
+    gps = GPS_GetState();
+    if (gps == 0) {
+        return 0U;
+    }
+
+    AutoDrive_PointFromGps(point, gps);
+    return AutoDrive_PointRawValid(point);
 }
 
 static void AutoDrive_SetDiagReason(u8 reason)
@@ -267,6 +287,7 @@ u8 AutoDrive_IsBusy(void)
 
 u8 AutoDrive_IsCanActive(const AutoDrive_PointRaw_t *point)
 {
+    AutoDrive_PointRaw_t current_point;
     u16 distance;
 
     if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
@@ -275,17 +296,15 @@ u8 AutoDrive_IsCanActive(const AutoDrive_PointRaw_t *point)
     if (AutoDrive_PointRawValid(point) == 0U) {
         return 0U;
     }
-    if (AutoDrive_PointRawValid(&g_idle_position) == 0U) {
-        return 0U;
-    }
-    if (AutoDrive_GpsReady() == 0U) {
+    if (AutoDrive_GetReadyCurrentPoint(&current_point) == 0U) {
         return 0U;
     }
 
     distance = AutoDrive_GetDistanceNowToDestination((const u8 *)point,
-                                                     (const u8 *)&g_idle_position);
+                                                     (const u8 *)&current_point);
     if ((distance > AUTODRIVE_MIN_ACTIVE_DISTANCE_M) &&
         (distance < AUTODRIVE_MAX_ACTIVE_DISTANCE_M)) {
+        AutoDrive_CopyPoint(&g_idle_position, &current_point);
         return 1U;
     }
     return 0U;
@@ -828,7 +847,7 @@ void AutoDrive_Poll(void)
     g_last_poll_tick_ms = now_ms;
 
     gps = GPS_GetState();
-    if (gps != 0) {
+    if ((gps != 0) && (g_autoDrive_state == AUTO_DRIVE_IDLE)) {
         AutoDrive_UpdateIdlePosition();
     }
 
