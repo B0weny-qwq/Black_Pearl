@@ -3,8 +3,8 @@
 #include "autodrive_cfg.h"
 #include "..\GPS\GPS.h"
 #include "..\Motor\Motor.h"
-#include "..\..\Function\AHRS\AHRS.h"
 #include "..\WIRELESS\ship_protocol.h"
+#include "..\..\..\User\MainLoop.h"
 #include "..\..\..\User\Task.h"
 
 #define AUTODRIVE_WORK_OVERTIME            (10U * 60U * 100U)
@@ -676,19 +676,16 @@ u16 AutoDrive_GetNorthAngel(u8 direction, u8 angel)
 
 static u16 AutoDrive_GetStartHeadingDeg(void)
 {
-    if (AHRS_IsReady()) {
-        const AHRS_State_t *ahrs;
-        int16 yaw;
+    u16 heading_cd;
+    u16 heading;
 
-        ahrs = AHRS_GetState();
-        yaw = ahrs->yaw_deg100;
-        while (yaw < 0) {
-            yaw = (int16)(yaw + 36000);
+    if (MainLoop_IsHeadingReady() != 0U) {
+        heading_cd = (u16)(MainLoop_GetHeadingDeg100() % 36000U);
+        heading = (u16)((heading_cd + 50U) / 100U);
+        if (heading >= 360U) {
+            heading = 0U;
         }
-        while (yaw >= 36000) {
-            yaw = (int16)(yaw - 36000);
-        }
-        return (u16)(yaw / 100U);
+        return heading;
     }
 
     {
@@ -706,7 +703,18 @@ static u16 AutoDrive_GetStartHeadingDeg(void)
 
 static u16 AutoDrive_GetRunHeadingDeg(void)
 {
+    u16 heading_cd;
+    u16 heading;
     const GPS_State_t *gps;
+
+    if (MainLoop_IsHeadingReady() != 0U) {
+        heading_cd = (u16)(MainLoop_GetHeadingDeg100() % 36000U);
+        heading = (u16)((heading_cd + 50U) / 100U);
+        if (heading >= 360U) {
+            heading = 0U;
+        }
+        return heading;
+    }
 
     gps = GPS_GetState();
     if ((gps != 0) && (gps->fix_valid != 0U) &&

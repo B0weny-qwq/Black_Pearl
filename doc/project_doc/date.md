@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-05-15
- * @version v1.7.63
+ * @date    2026-05-18
+ * @version v1.7.65
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -41,6 +41,31 @@
 - **[船体 yaw 自稳参数收口]** `SHIP_YAW_HOLD_*` 参数统一收在 `User/FeatureSwitch.h`，并将 `SHIP_YAW_HOLD_KP_Q10` 从 `31` 下调到 `12`，保持 P-only，先把差速自稳从“偏猛”收回到可调区间。
 - **[日志节流]** `SHIP_YAW_HOLD_LOG_PERIOD_MS` 继续保留，用于限制 `[MOT]` 诊断输出频率，避免上位机被高频 motor 日志刷屏。
 - **[FeatureSwitch 中文化]** `User/FeatureSwitch.h` 重写为中文 Doxygen 风格，逐组补齐核心模块、轮询、IMU、无线、协议、配对、yaw 自稳和旧兼容参数说明，避免后续再出现“只写了一个注释”的不完整配置说明。
+
+---
+
+## [2026-05-18] - v1.7.65 GPS 定点巡航目标航向与上位机航向核对
+
+### 新增功能
+- **[上位机船头朝向]** `tools/ship_log_viewer/ship_log_viewer.html` 新增“船头朝向”指南针卡片，优先显示 `[HDG] y=...` 的 `HDG fused` 融合绝对航向；`[MAG] ... compass=... stable=...` 仅作为未收到融合航向时的调试参考。
+
+### Bug 修复
+- **[磁罗盘方向反]** 实测船头正北时上位机显示约 `219.3° SW`，且旋转方向与手机指南针相反。修复：在 `User/MainLoop.c` 写入 `MAG_COMPASS_DIRECTION_SIGN=-1` 与 `MAG_COMPASS_INSTALL_OFFSET_CD=21930`，使修正公式等价于 `corrected_heading = 219.3° - raw_heading`。
+- **[上位机指针跨 0° 跳转]** 原指针直接使用归一化角度 `rotate(0..360)`，跨正北时会从 `359°` 跳到 `1°` 并反向大转。修复：增加 `compassNeedleDeg` 累计角度，显示值仍为 `0..359.9°`，但动画按最短角度连续旋转。
+
+### 优化改进
+- **[目标航向口径]** 明确 GPS 定点巡航的 `target_heading_cd` 不是启动时固定一次的角度；`AUTO_DRIVE_RUNING` 状态下每当 `gps->update_sequence` 变化，`AutoDrive_UpdateTargetHeading()` 都会用最新当前 GPS 点和目标点重算目标航向。
+- **[控制周期口径]** GPS 未更新的 10ms 控制周期内，`ShipProtocol_ApplyYawHoldTarget()` 继续使用上一帧 GPS 计算出的 `target_heading_cd`；GPS 一旦更新，目标角立即重算，再进入 yaw-hold PID。
+- **[航向来源口径]** GPS 定点巡航当前船头角必须取 `MainLoop_GetHeadingDeg100()` 的融合绝对航向，不能退回 GPS course-only，也不能另写定时左/右转修正逻辑。
+
+### 变更记录
+- **[README]** 根 README 补充自动驾驶/返航关键行为，说明 `0x13/0x14/0x15` 只写点位/配置，巡航角度由 GPS 当前点实时计算。
+- **[total.md]** 同步当前总览版本到 `v1.7.65`，补充 `target_heading_cd` 随 GPS 新坐标重算、融合航向来源和磁罗盘方向/零点修正。
+- **[ship_log_viewer README]** 记录“船头朝向”卡片的数据优先级与现场判断方式。
+
+### 开发者备注
+- 现场验证角度链路时，优先看上位机 `船头朝向=HDG fused`、`0x16` 里的 `current_heading/target_heading/dist`，以及 `[SHIP] yaw hold tgt/err/pid/left/right`。
+- 只要 `target_heading` 指向目标点、`current_heading` 跟实际船头一致、`err=target-current` 正负随偏差变化，巡航角度链路就是通的；后续再调 PID 强弱和到点半径。
 
 ---
 

@@ -2,8 +2,8 @@
  * @file    total.md
  * @brief   Black Pearl v1.1 当前工程总览
  * @author  boweny
- * @date    2026-05-16
- * @version v1.7.64
+ * @date    2026-05-18
+ * @version v1.7.65
  */
 
 # Black Pearl v1.1 当前工程总览
@@ -19,6 +19,8 @@
 - 当前工作区 `0x11` wire payload 仍是旧版 `lr/ud/key`；遥控输入值只由 `0x11` 油门帧更新，手动控制目标则由 `ShipProtocol_ServiceManualControl()` 每 `SHIP_MANUAL_CONTROL_PERIOD_MS=10ms` 使用最新输入连续刷新，底层 PWM 仍按硬件定时器频率输出；`SHIP_RC_INPUT_LOG_PERIOD_MS`、`SHIP_MOT_LOG_PERIOD_MS` 和 `SHIP_YAW_HOLD_LOG_PERIOD_MS` 只限制日志打印，不能影响控制更新。手动控制应用层已开启 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，并以 `SHIP_YAW_HOLD_STEER_GATE=15U` 作为直线自稳门限；当前无遥控油门时不会启动空闲 yaw-hold 驱动电机。yaw 误差先按 `SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 归一化到 `±1000` 控制量，再按当前基础油门和电机满量程余量换算成左右差速，避免小角度偏航直接打满或高油门单侧锁死。
 - 工程硬约束：所有“自稳模式/航向修正/返航循迹/钓点巡航”都必须走 `ShipProtocol_ApplyYawHoldTarget()` / yaw-hold PID 路线，复用当前已验证的左右极性、差速限幅、陀螺阻尼和输出斜坡；禁止在 `AutoDrive` 或其他模块里另写定时左/右转、另写左右电机极性、另写第二套 yaw PID。
 - `AutoDrive` 并非独立主循环入口，而是隐藏在 `ShipProtocol_RunScheduler()` 内初始化与轮询；`0x13/0x14/0x15`、低电返航和链路超时都会走到这条链。当前 `AutoDrive` 只负责 GPS 点位规划、目标航向和到点判断，电机自稳输出必须交给 yaw-hold PID 公共链路。
+- 返航/钓点巡航的 `target_heading_cd` 不是启动时固定一次的角度；`AUTO_DRIVE_RUNING` 状态下每当 `gps->update_sequence` 变化，都会用最新当前 GPS 点和目标点重新计算目标航向，随后继续调用 `ShipProtocol_ApplyYawHoldTarget(target_heading_cd, AUTODRIVE_CRUISE_BASE_SPEED)`。GPS 未更新的 10ms 控制周期内只沿用上一帧目标航向。
+- 当前 GPS 定点巡航的当前船头角必须来自 `MainLoop_GetHeadingDeg100()` 的融合绝对航向；磁力计已按实测 `MAG_COMPASS_DIRECTION_SIGN=-1`、`MAG_COMPASS_INSTALL_OFFSET_CD=21930` 修正正北零点与旋转方向，上位机“船头朝向”应显示 `HDG fused` 才能证明航向链已 ready。
 
 ## 2. 当前开关
 
@@ -95,7 +97,7 @@ MainLoop_RunOnce()
 
 - `IMU_AhrsPoll()` 持续更新 AHRS 与 `HeadingEstimator`，为 yaw-hold 提供相对航向。
 - `ShipProtocol_RunScheduler()` 负责旧遥控器配对、收帧、分发命令和合法帧后立即回发 `0x12`，同时内部执行 `AutoDrive_Init()`、`AutoDrive_LinkAliveTick()` 与 `AutoDrive_Poll()`。
-- `AutoDrive_Poll()` 进入返航/钓点巡航后只更新目标航向与距离，到点阈值由 `AUTODRIVE_ARRIVE_DISTANCE_M=3` 判定；实际电机差速必须通过 `ShipProtocol_ApplyYawHoldTarget()` 输出，保持和手动自稳完全同一条 PID 路线。
+- `AutoDrive_Poll()` 进入返航/钓点巡航后根据 GPS 新点更新目标航向与距离，到点阈值由 `AUTODRIVE_ARRIVE_DISTANCE_M=3` 判定；实际电机差速必须通过 `ShipProtocol_ApplyYawHoldTarget()` 输出，保持和手动自稳完全同一条 PID 路线。
 - `MAG_StandalonePoll()` 当前关闭，磁力计由 AHRS 低频读取。
 
 ## 5. 旧遥控器协议核对
@@ -108,7 +110,7 @@ MainLoop_RunOnce()
 | `0x12` GPS 回传 | 固定 15 字节：`sat, angle, E, lon1, lon2, W, lat1, lat2, power_level, autodrive_status` |
 | `0x13/0x14` 点位 | 10 字节旧格式：`lon_dir, lon1, lon2, lat_dir, lat1, lat2` |
 | `0x15` 自动返航配置 | 正常 11 字节帧为 `switch + 10 字节点位`，写入当前 MCU flash 配置区 |
-| 返航/钓点巡航自稳 | `AutoDrive` 只算目标航向和距离；电机修正统一调用 `ShipProtocol_ApplyYawHoldTarget()`，必须复用 yaw-hold PID，不允许定时左/右转 |
+| 返航/钓点巡航自稳 | `AutoDrive` 在 GPS `update_sequence` 变化时用最新当前点和目标点重算 `target_heading_cd` 与距离；电机修正统一调用 `ShipProtocol_ApplyYawHoldTarget()`，必须复用 yaw-hold PID，不允许定时左/右转 |
 | 电量回传 | 使用当前工程检测电压 ADC 通道 `ADC_CH8`，按旧版电量等级 `0..4` 回传 |
 | 低电返航 | 电量等级 `0`、600 tick、自动驾驶关闭、当前油门小于 10 时触发返航入口 |
 
@@ -123,6 +125,7 @@ MainLoop_RunOnce()
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-18 | `v1.7.65` | 同步 GPS 定点巡航角度策略：`target_heading_cd` 随 GPS 新坐标实时重算，GPS 未更新时沿用上一帧目标角；当前船头角来自融合绝对航向 `MainLoop_GetHeadingDeg100()`，并记录磁罗盘方向/零点修正。 |
 | 2026-05-16 | `v1.7.64` | 明确工程级自稳约束：所有自稳模式、返航循迹和钓点巡航都必须走 yaw-hold PID 公共路线；AutoDrive 只负责 GPS 规划目标航向和到点判断，不允许另写定时左/右转或第二套左右极性。 |
 | 2026-05-15 | `v1.7.63` | 修正手动 yaw 自稳单位和量程，并恢复 10ms 手动控制连续刷新；日志打印与内部控制更新解耦；无遥控油门时不再启动空闲 yaw-hold，避免上电自转和遥控阶梯卡顿。 |
 | 2026-05-13 | `v1.7.62` | 复核各 device README、补齐 `AutoDrive/README.md`，同步 `AutoDrive` 实际接入路径和头文件注释口径。 |

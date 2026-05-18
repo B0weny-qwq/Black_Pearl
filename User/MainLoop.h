@@ -7,6 +7,7 @@ void MainLoop_Bootstrap(void);
 void MainLoop_RunOnce(void);
 u8 MainLoop_IsHeadingReady(void);
 u16 MainLoop_GetHeadingDeg100(void);
+u8 MainLoop_IsMagHeadingFallback(void);
 int16 MainLoop_GetHeadingRelativeDeg100(void);
 int16 MainLoop_GetGyroZDps100(void);
 

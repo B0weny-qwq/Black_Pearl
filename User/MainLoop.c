@@ -25,8 +25,54 @@ static void Wireless_MinimalTestUnit(void)
 }
 #endif
 
-#if ENABLE_MAG_MODULE && ENABLE_MAG_STANDALONE_POLL
+#if ENABLE_MAG_MODULE
+#define MAG_ANGLE_90_CD     9000L
+#define MAG_ANGLE_180_CD    18000L
+#define MAG_ANGLE_360_CD    36000L
+
+#ifndef MAG_COMPASS_READY_COUNT
+#define MAG_COMPASS_READY_COUNT        5U
+#endif
+#ifndef MAG_COMPASS_IIR_DIV
+#define MAG_COMPASS_IIR_DIV            8L
+#endif
+#ifndef MAG_COMPASS_JUMP_GATE_CD
+#define MAG_COMPASS_JUMP_GATE_CD       3000L
+#endif
+#ifndef MAG_COMPASS_NORM_TRACK_PCT
+#define MAG_COMPASS_NORM_TRACK_PCT     25U
+#endif
+#ifndef MAG_COMPASS_NORM_REJECT_PCT
+#define MAG_COMPASS_NORM_REJECT_PCT    80U
+#endif
+#ifndef MAG_COMPASS_HORIZ_MIN_SUM
+#define MAG_COMPASS_HORIZ_MIN_SUM      40UL
+#endif
+#ifndef MAG_COMPASS_RAW_OFFSET_CD
+#define MAG_COMPASS_RAW_OFFSET_CD      0L
+#endif
+#ifndef MAG_COMPASS_DIRECTION_SIGN
+/* Current board mount makes raw compass angle run opposite to phone compass. */
+#define MAG_COMPASS_DIRECTION_SIGN     (-1L)
+#endif
+#ifndef MAG_COMPASS_INSTALL_OFFSET_CD
+/* Boat bow points true north while raw compass shows 219.3 deg. */
+#define MAG_COMPASS_INSTALL_OFFSET_CD  21930L
+#endif
+#ifndef MAG_COMPASS_DECLINATION_CD
+#define MAG_COMPASS_DECLINATION_CD     0L
+#endif
+
+static u8 g_mag_heading_ready_snapshot = 0U;
+static u16 g_mag_heading_deg100_snapshot = 0U;
+static u8 g_mag_filter_started = 0U;
+static u8 g_mag_filter_stable_count = 0U;
+static u32 g_mag_norm_base = 0UL;
+static int32 g_mag_heading_iir_cd = 0L;
+
+#if ENABLE_MAG_STANDALONE_POLL
 #define MAG_TEST_PERIOD_MS  SHIP_MAG_LOG_PERIOD_MS
+#endif
 
 static u32 MAG_Abs16ToU32(int16 value)
 {
@@ -40,6 +86,195 @@ static u32 MAG_Abs16ToU32(int16 value)
     return (u32)v;
 }
 
+static u32 MAG_Abs32ToU32(int32 value)
+{
+    if (value < 0L) {
+        return (u32)(-value);
+    }
+    return (u32)value;
+}
+
+static u16 MAG_WrapDeg100(int32 angle_cd)
+{
+    while (angle_cd >= MAG_ANGLE_360_CD) {
+        angle_cd -= MAG_ANGLE_360_CD;
+    }
+    while (angle_cd < 0L) {
+        angle_cd += MAG_ANGLE_360_CD;
+    }
+    return (u16)angle_cd;
+}
+
+static u16 MAG_Atan01Deg100(u16 z_q10)
+{
+    int32 z;
+    int32 curve;
+    int32 angle;
+
+    if (z_q10 > 1024U) {
+        z_q10 = 1024U;
+    }
+
+    z = (int32)z_q10;
+    curve = 4500L + ((1564L * (1024L - z)) / 1024L);
+    angle = (z * curve) / 1024L;
+    return (u16)angle;
+}
+
+static u16 MAG_Atan2Deg100(int32 y, int32 x)
+{
+    u32 ax;
+    u32 ay;
+    u16 z_q10;
+    int32 base;
+    int32 angle;
+
+    ax = (x < 0L) ? (u32)(-x) : (u32)x;
+    ay = (y < 0L) ? (u32)(-y) : (u32)y;
+
+    if ((ax == 0UL) && (ay == 0UL)) {
+        return 0U;
+    }
+
+    if (ax >= ay) {
+        z_q10 = (u16)((ay * 1024UL) / ax);
+        base = (int32)MAG_Atan01Deg100(z_q10);
+        angle = (x >= 0L) ? base : (MAG_ANGLE_180_CD - base);
+    } else {
+        z_q10 = (u16)((ax * 1024UL) / ay);
+        base = (int32)MAG_Atan01Deg100(z_q10);
+        angle = (x >= 0L) ? (MAG_ANGLE_90_CD - base) : (MAG_ANGLE_90_CD + base);
+    }
+
+    if (y < 0L) {
+        angle = -angle;
+    }
+
+    return MAG_WrapDeg100(angle);
+}
+
+static int32 MAG_WrapDiffDeg100(int32 diff_cd)
+{
+    while (diff_cd >= MAG_ANGLE_180_CD) {
+        diff_cd -= MAG_ANGLE_360_CD;
+    }
+    while (diff_cd < -MAG_ANGLE_180_CD) {
+        diff_cd += MAG_ANGLE_360_CD;
+    }
+    return diff_cd;
+}
+
+static u8 MAG_CompassHeadingDeg100(int16 raw_x, int16 raw_y, int16 raw_z,
+                                   u16 *heading_out,
+                                   u32 *norm1_out,
+                                   u32 *horiz_sum_out)
+{
+    int16 body_x;
+    int16 body_y;
+    int16 body_z;
+    int32 compass_cd;
+    u32 norm1;
+    u32 horiz_sum;
+
+    if ((heading_out == 0) || (norm1_out == 0) || (horiz_sum_out == 0)) {
+        return 0U;
+    }
+
+    body_x = 0;
+    body_y = 0;
+    body_z = 0;
+    AHRS_MapRawMagToBody(raw_x, raw_y, raw_z, &body_x, &body_y, &body_z);
+    norm1 = MAG_Abs16ToU32(body_x) + MAG_Abs16ToU32(body_y) + MAG_Abs16ToU32(body_z);
+    horiz_sum = MAG_Abs16ToU32(body_x) + MAG_Abs16ToU32(body_y);
+    *norm1_out = norm1;
+    *horiz_sum_out = horiz_sum;
+    if ((norm1 == 0UL) || (horiz_sum < (u32)MAG_COMPASS_HORIZ_MIN_SUM)) {
+        return 0U;
+    }
+
+    compass_cd = (int32)MAG_Atan2Deg100((int32)(-body_y), (int32)body_x);
+    compass_cd += (int32)MAG_COMPASS_RAW_OFFSET_CD;
+    compass_cd *= (int32)MAG_COMPASS_DIRECTION_SIGN;
+    compass_cd += (int32)MAG_COMPASS_INSTALL_OFFSET_CD;
+    compass_cd += (int32)MAG_COMPASS_DECLINATION_CD;
+    *heading_out = MAG_WrapDeg100(compass_cd);
+    return 1U;
+}
+
+static u8 MAG_UpdateCompassFilter(int16 raw_x, int16 raw_y, int16 raw_z,
+                                  u16 *heading_out)
+{
+    u16 raw_heading_cd;
+    u32 norm1;
+    u32 horiz_sum;
+    u32 norm_diff;
+    int32 heading_diff_cd;
+
+    if (heading_out == 0) {
+        return 0U;
+    }
+    if (MAG_CompassHeadingDeg100(raw_x, raw_y, raw_z,
+                                 &raw_heading_cd,
+                                 &norm1,
+                                 &horiz_sum) == 0U) {
+        return 0U;
+    }
+
+    if (g_mag_norm_base == 0UL) {
+        g_mag_norm_base = norm1;
+    }
+    if (norm1 > g_mag_norm_base) {
+        norm_diff = norm1 - g_mag_norm_base;
+    } else {
+        norm_diff = g_mag_norm_base - norm1;
+    }
+    if ((g_mag_norm_base > 0UL) &&
+        ((norm_diff * 100UL) > (g_mag_norm_base * (u32)MAG_COMPASS_NORM_REJECT_PCT))) {
+        if (g_mag_filter_stable_count > 0U) {
+            g_mag_filter_stable_count--;
+        }
+        return 0U;
+    }
+    if ((g_mag_norm_base > 0UL) &&
+        ((norm_diff * 100UL) <= (g_mag_norm_base * (u32)MAG_COMPASS_NORM_TRACK_PCT))) {
+        g_mag_norm_base += ((int32)norm1 - (int32)g_mag_norm_base) / 8L;
+    }
+
+    if (g_mag_filter_started == 0U) {
+        g_mag_heading_iir_cd = (int32)raw_heading_cd;
+        g_mag_heading_deg100_snapshot = raw_heading_cd;
+        g_mag_filter_started = 1U;
+        g_mag_filter_stable_count = 1U;
+        return 0U;
+    }
+
+    heading_diff_cd = MAG_WrapDiffDeg100((int32)raw_heading_cd - g_mag_heading_iir_cd);
+    if (MAG_Abs32ToU32(heading_diff_cd) > (u32)MAG_COMPASS_JUMP_GATE_CD) {
+        g_mag_filter_stable_count = 0U;
+        return 0U;
+    }
+
+    if (MAG_COMPASS_IIR_DIV > 1L) {
+        g_mag_heading_iir_cd += heading_diff_cd / (int32)MAG_COMPASS_IIR_DIV;
+    } else {
+        g_mag_heading_iir_cd = (int32)raw_heading_cd;
+    }
+    g_mag_heading_iir_cd = (int32)MAG_WrapDeg100(g_mag_heading_iir_cd);
+
+    if (g_mag_filter_stable_count < 255U) {
+        g_mag_filter_stable_count++;
+    }
+    if (g_mag_filter_stable_count >= (u8)MAG_COMPASS_READY_COUNT) {
+        g_mag_heading_ready_snapshot = 1U;
+        g_mag_heading_deg100_snapshot = (u16)g_mag_heading_iir_cd;
+        *heading_out = g_mag_heading_deg100_snapshot;
+        return 1U;
+    }
+
+    return 0U;
+}
+
+#if ENABLE_MAG_STANDALONE_POLL
 static void MAG_StandalonePoll(void)
 {
     static u8 timing_started = 0;
@@ -47,6 +282,8 @@ static void MAG_StandalonePoll(void)
     static u8 error_latched = 0;
     u32 now_ms;
     u32 norm1;
+    u32 horiz_sum;
+    u16 compass_cd;
     int16 mx, my, mz;
 
     now_ms = Task_GetTickMs();
@@ -68,9 +305,26 @@ static void MAG_StandalonePoll(void)
     }
 
     error_latched = 0;
-    norm1 = MAG_Abs16ToU32(mx) + MAG_Abs16ToU32(my) + MAG_Abs16ToU32(mz);
-    LOGI("MAG", "test raw=%d %d %d norm1=%lu", mx, my, mz, norm1);
+    if (MAG_CompassHeadingDeg100(mx, my, mz, &compass_cd, &norm1, &horiz_sum) != 0U) {
+        LOGI("MAG", "test raw=%d %d %d norm1=%lu compass=%u.%02u stable=%u",
+             mx,
+             my,
+             mz,
+             norm1,
+             (u16)(compass_cd / 100U),
+             (u16)(compass_cd % 100U),
+             (u16)g_mag_heading_ready_snapshot);
+    } else {
+        norm1 = MAG_Abs16ToU32(mx) + MAG_Abs16ToU32(my) + MAG_Abs16ToU32(mz);
+        LOGI("MAG", "test raw=%d %d %d norm1=%lu stable=%u",
+             mx,
+             my,
+             mz,
+             norm1,
+             (u16)g_mag_heading_ready_snapshot);
+    }
 }
+#endif
 #endif
 
 #if ENABLE_IMU_MODULE
@@ -309,6 +563,7 @@ static void IMU_AhrsPoll(void)
     int16 ax, ay, az;
     int16 gx, gy, gz;
     int16 mx, my, mz;
+    u16 stable_mag_heading_cd;
     int16 yaw_rel_cd;
     int16 yaw_gyro_rel_cd;
     int16 yaw_mag_rel_cd;
@@ -322,7 +577,7 @@ static void IMU_AhrsPoll(void)
     int32 heading_pred_cd;
     int32 heading_fused_cd;
     int32 heading_mag_dbg_cd;
-    u8 raw_mag_valid;
+    u8 stable_mag_valid;
     u8 heading_static_flag;
     u8 self_stabilize_flag;
     float heading_seed_deg;
@@ -366,10 +621,14 @@ static void IMU_AhrsPoll(void)
         return;
     }
 
+    stable_mag_heading_cd = g_mag_heading_deg100_snapshot;
+    stable_mag_valid = 0U;
     if ((now_ms - last_mag_ms) >= AHRS_MAG_PERIOD_MS) {
         last_mag_ms = now_ms;
         if (QMC6309_ReadXYZFiltered(&mx, &my, &mz) == 0) {
-            (void)AHRS_UpdateRawMag(mx, my, mz);
+            if (MAG_UpdateCompassFilter(mx, my, mz, &stable_mag_heading_cd) != 0U) {
+                stable_mag_valid = 1U;
+            }
             last_mag_x = mx;
             last_mag_y = my;
             last_mag_z = mz;
@@ -387,17 +646,18 @@ static void IMU_AhrsPoll(void)
         g_heading_ready_snapshot = 0U;
         Heading_Init(&g_heading);
     } else {
-        raw_mag_valid = ((att->flags & AHRS_FLAG_MAG_VALID) != 0U) ? 1U : 0U;
         heading_static_flag = AHRS_IsHeadingStatic(att);
         self_stabilize_flag = AHRS_HasSelfStabilize(att);
         heading_dt_s = (float)dt_ms * 0.001f;
 
         if (!heading_seeded) {
-            if (raw_mag_valid) {
-                heading_seed_deg = (float)att->yaw_mag_deg100 * 0.01f;
-            } else {
-                heading_seed_deg = (float)att->yaw_deg100 * 0.01f;
+            if (g_mag_heading_ready_snapshot == 0U) {
+                yaw_zero_valid = 0U;
+                g_heading_rel_cd_snapshot = 0;
+                g_heading_ready_snapshot = 0U;
+                return;
             }
+            heading_seed_deg = (float)g_mag_heading_deg100_snapshot * 0.01f;
             Heading_SetHeadingDeg(&g_heading, heading_seed_deg);
             Heading_ResetZero(&g_heading);
             heading_seeded = 1U;
@@ -410,8 +670,8 @@ static void IMU_AhrsPoll(void)
 
         Heading_Update(&g_heading,
                        (float)att->gyro_z_dps100 * 0.01f,
-                       (float)att->yaw_mag_deg100 * 0.01f,
-                       raw_mag_valid,
+                       (float)stable_mag_heading_cd * 0.01f,
+                       stable_mag_valid,
                        heading_static_flag,
                        heading_dt_s);
         g_gyro_z_dps100_snapshot = att->gyro_z_dps100;
@@ -594,10 +854,11 @@ void MainLoop_Bootstrap(void)
 u8 MainLoop_IsHeadingReady(void)
 {
 #if ENABLE_IMU_MODULE && ENABLE_IMU_AHRS_POLL
-    return g_heading_ready_snapshot;
-#else
-    return 0U;
+    if (g_heading_ready_snapshot != 0U) {
+        return 1U;
+    }
 #endif
+    return 0U;
 }
 
 u16 MainLoop_GetHeadingDeg100(void)
@@ -605,17 +866,30 @@ u16 MainLoop_GetHeadingDeg100(void)
 #if ENABLE_IMU_MODULE && ENABLE_IMU_AHRS_POLL
     int32 heading_cd;
 
-    heading_cd = Heading_GetDeg100(&g_heading);
-    while (heading_cd >= 36000L) {
-        heading_cd -= 36000L;
+    if (g_heading_ready_snapshot != 0U) {
+        heading_cd = Heading_GetDeg100(&g_heading);
+        while (heading_cd >= 36000L) {
+            heading_cd -= 36000L;
+        }
+        while (heading_cd < 0L) {
+            heading_cd += 36000L;
+        }
+        return (u16)heading_cd;
     }
-    while (heading_cd < 0L) {
-        heading_cd += 36000L;
+#endif
+    return 0U;
+}
+
+u8 MainLoop_IsMagHeadingFallback(void)
+{
+#if ENABLE_MAG_MODULE && ENABLE_MAG_STANDALONE_POLL
+    if (g_mag_heading_ready_snapshot != 0U) {
+        return 1U;
     }
-    return (u16)heading_cd;
 #else
     return 0U;
 #endif
+    return 0U;
 }
 
 int16 MainLoop_GetHeadingRelativeDeg100(void)

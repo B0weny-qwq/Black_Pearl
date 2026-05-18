@@ -190,15 +190,14 @@ void Heading_Update(HeadingEstimator_t *h,
             static_err = value - h->static_mag_ref_deg;
             HEADING_WRAP180_INPLACE(static_err);
             if ((HEADING_FLOAT_ABS(static_err) <= HEADING_STATIC_MAG_STABLE_DEG) &&
-                (HEADING_FLOAT_ABS(err) <= HEADING_STATIC_MAG_ERR_GATE_DEG) &&
+                (HEADING_FLOAT_ABS(err) <= HEADING_MAG_ERR_GATE_DEG) &&
                 !HEADING_DBG_FORCE_MAG_OFF) {
                 kmag = HEADING_KMAG_STATIC;
                 h->heading_deg = heading_pred + (kmag * err);
                 HEADING_WRAP360_INPLACE(h->heading_deg);
                 mag_used = 1U;
             }
-        } else if ((HEADING_FLOAT_ABS(gz_corr) >= HEADING_MAG_FUSE_MIN_GZ_DPS) &&
-                   !HEADING_DBG_FORCE_MAG_OFF) {
+        } else if (!HEADING_DBG_FORCE_MAG_OFF) {
             err = value - heading_pred;
             HEADING_WRAP180_INPLACE(err);
             if (HEADING_FLOAT_ABS(err) <= HEADING_MAG_ERR_GATE_DEG) {

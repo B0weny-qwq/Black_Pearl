@@ -193,6 +193,108 @@
       line-height: 1.2;
     }
 
+    .compass-card {
+      position: relative;
+      overflow: hidden;
+      min-height: 180px;
+    }
+
+    .compass-wrap {
+      display: grid;
+      grid-template-columns: 128px 1fr;
+      gap: 12px;
+      align-items: center;
+      margin-top: 8px;
+    }
+
+    .compass-dial {
+      position: relative;
+      width: 128px;
+      height: 128px;
+      border-radius: 50%;
+      border: 2px solid rgba(109, 64, 23, 0.55);
+      background:
+        radial-gradient(circle at 50% 50%, #fffdf8 0 45%, transparent 46%),
+        conic-gradient(from 0deg, rgba(155, 95, 37, 0.16), rgba(47, 123, 76, 0.18), rgba(155, 95, 37, 0.16), rgba(178, 58, 48, 0.12), rgba(155, 95, 37, 0.16));
+      box-shadow: inset 0 0 0 8px rgba(255,255,255,0.7);
+    }
+
+    .compass-mark {
+      position: absolute;
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--accent-deep);
+      transform: translate(-50%, -50%);
+    }
+
+    .compass-mark.n { left: 50%; top: 12px; color: var(--bad); }
+    .compass-mark.e { left: calc(100% - 13px); top: 50%; }
+    .compass-mark.s { left: 50%; top: calc(100% - 12px); }
+    .compass-mark.w { left: 13px; top: 50%; }
+
+    .compass-needle {
+      position: absolute;
+      inset: 16px;
+      transform: rotate(0deg);
+      transform-origin: 50% 50%;
+      transition: transform 120ms linear;
+    }
+
+    .compass-needle::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 3px;
+      width: 0;
+      height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-bottom: 48px solid var(--bad);
+      transform: translateX(-50%);
+      filter: drop-shadow(0 4px 5px rgba(44, 36, 24, 0.24));
+    }
+
+    .compass-needle::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: 3px;
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-top: 40px solid rgba(109, 64, 23, 0.55);
+      transform: translateX(-50%);
+    }
+
+    .compass-center {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent-deep);
+      border: 3px solid #fffdf8;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 1px 4px rgba(44, 36, 24, 0.26);
+    }
+
+    .compass-degree {
+      font-size: 28px;
+      line-height: 1.05;
+      font-weight: 950;
+      color: var(--accent-deep);
+    }
+
+    .compass-source {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-line;
+    }
+
     .state-pill {
       width: 100%;
       border: 0;
@@ -273,6 +375,7 @@
 
     @media (max-width: 640px) {
       .cards, .gps-grid { grid-template-columns: 1fr; }
+      .compass-wrap { grid-template-columns: 1fr; justify-items: center; text-align: center; }
       h1 { font-size: 23px; }
     }
   </style>
@@ -375,6 +478,23 @@
             <div id="hdgValue" class="value value-compact">--</div>
             <div id="hdgMeta" class="meta">waiting [HDG]</div>
           </div>
+          <div class="card compass-card">
+            <div class="label">船头朝向</div>
+            <div class="compass-wrap">
+              <div class="compass-dial" aria-label="boat heading compass">
+                <span class="compass-mark n">N</span>
+                <span class="compass-mark e">E</span>
+                <span class="compass-mark s">S</span>
+                <span class="compass-mark w">W</span>
+                <div id="compassNeedle" class="compass-needle"></div>
+                <div class="compass-center"></div>
+              </div>
+              <div>
+                <div id="compassDegree" class="compass-degree">--</div>
+                <div id="compassMeta" class="compass-source">等待 HDG / MAG</div>
+              </div>
+            </div>
+          </div>
           <div class="card">
             <div class="label">配对状态</div>
             <div id="pairValue" class="value">未配对</div>
@@ -430,6 +550,7 @@
           <tbody>
             <tr><td>AHRS 状态</td><td id="ahrsInfo">等待 AHRS 日志</td></tr>
             <tr><td>HDG Debug</td><td id="hdgInfo">waiting [HDG]</td></tr>
+            <tr><td>船头朝向</td><td id="compassInfo">等待 HDG / MAG</td></tr>
             <tr><td>串口状态</td><td id="portInfo">未选择</td></tr>
             <tr><td>遥控在线状态</td><td id="remoteInfo">离线</td></tr>
             <tr><td>最近收到命令</td><td id="lastRxCmd">--</td></tr>
@@ -557,6 +678,12 @@
         hdgValue: "--",
         hdgMeta: "waiting [HDG]",
         hdgInfo: "waiting [HDG]",
+        compassHeadingDeg: null,
+        compassNeedleDeg: null,
+        compassHeadingText: "--",
+        compassMeta: "等待 HDG / MAG",
+        compassSource: "--",
+        compassInfo: "等待 HDG / MAG",
         pair: "未配对",
         pairMeta: "等待串口数据",
         rcValue: "离线",
@@ -625,6 +752,10 @@
       ahrsFlagMeta: document.getElementById("ahrsFlagMeta"),
       hdgValue: document.getElementById("hdgValue"),
       hdgMeta: document.getElementById("hdgMeta"),
+      compassNeedle: document.getElementById("compassNeedle"),
+      compassDegree: document.getElementById("compassDegree"),
+      compassMeta: document.getElementById("compassMeta"),
+      compassInfo: document.getElementById("compassInfo"),
       pairValue: document.getElementById("pairValue"),
       pairMeta: document.getElementById("pairMeta"),
       rcValue: document.getElementById("rcValue"),
@@ -774,6 +905,12 @@
       el.hdgValue.textContent = state.last.hdgValue;
       el.hdgMeta.textContent = state.last.hdgMeta;
       el.hdgInfo.textContent = state.last.hdgInfo;
+      el.compassDegree.textContent = state.last.compassHeadingText;
+      el.compassMeta.textContent = state.last.compassMeta;
+      if (state.last.compassNeedleDeg !== null) {
+        el.compassNeedle.style.transform = `rotate(${state.last.compassNeedleDeg}deg)`;
+      }
+      el.compassInfo.textContent = state.last.compassInfo;
       el.pairValue.textContent = state.last.pair;
       el.pairMeta.textContent = state.last.pairMeta;
       el.rcValue.textContent = state.last.rcValue;
@@ -909,6 +1046,52 @@
     function formatSignedPercent(value) {
       const pct = clampPercent(value);
       return `${pct > 0 ? "+" : ""}${pct}%`;
+    }
+
+    function parseSignedFloat(value) {
+      const num = Number.parseFloat(value);
+      return Number.isFinite(num) ? num : null;
+    }
+
+    function normalizeHeadingDeg(value) {
+      const num = parseSignedFloat(value);
+      if (num === null) {
+        return null;
+      }
+      return ((num % 360) + 360) % 360;
+    }
+
+    function headingCardinal(deg) {
+      const names = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+      return names[Math.floor(((deg + 22.5) % 360) / 45)];
+    }
+
+    function shortestHeadingDeltaDeg(fromDeg, toDeg) {
+      let diff = toDeg - fromDeg;
+      while (diff > 180) diff -= 360;
+      while (diff <= -180) diff += 360;
+      return diff;
+    }
+
+    function updateCompassHeading(value, source, meta) {
+      const deg = normalizeHeadingDeg(value);
+      if (deg === null) {
+        return;
+      }
+      const prevNeedle = state.last.compassNeedleDeg;
+      const prevShown = state.last.compassHeadingDeg;
+      const baseDeg = prevShown === null ? deg : prevShown;
+      const needleDeg = prevNeedle === null
+        ? deg
+        : prevNeedle + shortestHeadingDeltaDeg(baseDeg, deg);
+      const text = `${deg.toFixed(1)}° ${headingCardinal(deg)}`;
+      state.last.compassHeadingDeg = deg;
+      state.last.compassNeedleDeg = needleDeg;
+      state.last.compassHeadingText = text;
+      state.last.compassSource = source;
+      state.last.compassMeta = `${source}\n${meta}`;
+      state.last.compassInfo = `${text} / ${source} / ${meta}`;
+      markDirty("cards");
     }
 
     function formatOutputPercent(left, right) {
@@ -1089,6 +1272,11 @@
           + (hdgLock[12] ? ` hd=${hdgLock[12]}` : "")
           + (hdgLock[13] ? ` hm=${hdgLock[13]}` : "")
           + ` f=0x${flagHex} ${magState}`;
+        updateCompassHeading(
+          hdgLock[1],
+          "HDG fused",
+          `y=${hdgLock[1]} / ym=${hdgLock[3]} / mu=${hdgLock[8] || "--"} / err=${hdgLock[10] || "--"} / f=0x${flagHex}`
+        );
         important = true;
       }
 
@@ -1458,11 +1646,25 @@
         important = true;
       }
 
-      const mag = line.match(/\[MAG\] I: test raw=([-\d]+) ([-\d]+) ([-\d]+) norm1=(\d+)/);
+      const mag = line.match(/\[MAG\] I: test raw=([-\d]+) ([-\d]+) ([-\d]+) norm1=(\d+)(?: compass=([+\-\d.]+))?(?: stable=(\d+))?/);
       if (mag) {
         state.last.magValue = `${mag[1]}, ${mag[2]}, ${mag[3]}`;
-        state.last.magMeta = `norm1=${mag[4]}`;
-        pushTimeline(`磁力计：X=${mag[1]} Y=${mag[2]} Z=${mag[3]} norm=${mag[4]}`);
+        state.last.magMeta =
+          `norm1=${mag[4]}`
+          + (mag[5] ? ` / compass=${mag[5]}` : "")
+          + (mag[6] ? ` / stable=${mag[6]}` : "");
+        if (mag[5] && state.last.compassSource !== "HDG fused") {
+          updateCompassHeading(
+            mag[5],
+            "MAG compass",
+            `debug only / stable=${mag[6] || "--"} / norm1=${mag[4]}`
+          );
+        }
+        pushTimeline(
+          `磁力计：X=${mag[1]} Y=${mag[2]} Z=${mag[3]} norm=${mag[4]}`
+          + (mag[5] ? ` compass=${mag[5]}` : "")
+          + (mag[6] ? ` stable=${mag[6]}` : "")
+        );
         important = true;
       }
 
@@ -1470,6 +1672,13 @@
       if (magRaw) {
         state.last.magValue = `${magRaw[1]}, ${magRaw[2]}, ${magRaw[3]}`;
         state.last.magMeta = `norm=${magRaw[4]} yaw=${magRaw[5]} self=${magRaw[6]}`;
+        if (state.last.compassSource !== "HDG fused") {
+          updateCompassHeading(
+            magRaw[5],
+            "MAG raw yaw",
+            `debug only / self=${magRaw[6]} / norm=${magRaw[4]}`
+          );
+        }
         pushTimeline(`MAG：raw=${magRaw[1]} ${magRaw[2]} ${magRaw[3]} yaw=${magRaw[5]} self=${magRaw[6]}`);
         important = true;
       }
@@ -1639,6 +1848,12 @@
         hdgValue: "--",
         hdgMeta: "waiting [HDG]",
         hdgInfo: "waiting [HDG]",
+        compassHeadingDeg: null,
+        compassNeedleDeg: null,
+        compassHeadingText: "--",
+        compassMeta: "等待 HDG / MAG",
+        compassSource: "--",
+        compassInfo: "等待 HDG / MAG",
         pair: "未配对",
         pairMeta: "等待串口数据",
         rcValue: "离线",

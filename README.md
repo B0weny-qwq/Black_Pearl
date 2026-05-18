@@ -105,7 +105,12 @@
 - 保存与加载
 - Flash/EEPROM 配置口径
 
-具体行为看 `.h` 注释，不在这里重复抄。
+关键行为：
+
+- `0x13/0x14/0x15` 只负责写入返航点、钓点或自动返航配置，不直接下发固定航向角。
+- 进入返航/钓点巡航后，`AutoDrive_Poll()` 在 GPS `update_sequence` 变化时用“当前 GPS 点 -> 目标点”重新计算 `target_heading_cd`，并持续调用 `ShipProtocol_ApplyYawHoldTarget()`。
+- GPS 没有新点的 10ms 控制周期内，yaw-hold PID 会继续使用上一次 GPS 计算出的目标航向；一旦 GPS 更新，目标航向立即重算。
+- 当前船头角来自 `MainLoop_GetHeadingDeg100()` 的融合绝对航向，GPS 定点巡航禁止退回定时左/右转逻辑。
 
 ### 4.3 船控协议 / 遥控器协议
 
