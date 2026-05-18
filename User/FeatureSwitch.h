@@ -550,6 +550,15 @@
 #define SHIP_PROTOCOL_DIAG_ENABLE      0
 
 /**
+ * @brief  上位机必要状态日志开关
+ * @details
+ * - 1：保留上位机卡片依赖的轻量日志，如 throttle_raw、MOT、0x12、ADC
+ * - 0：关闭这些状态日志，仅保留协议功能本身
+ * - 不等同于 SHIP_PROTOCOL_DIAG_ENABLE；后者会打开大量收发包诊断，容易增加 HCONST 压力
+ */
+#define SHIP_PROTOCOL_VIEWER_LOG_ENABLE 1
+
+/**
  * @brief  无线协议错误日志开关
  */
 #define SHIP_PROTOCOL_ERROR_LOG_ENABLE 0
@@ -671,10 +680,10 @@
  * - 0 表示不限制，1 以上表示最小打印间隔
  * - 这些宏只限制日志输出，不参与手动控制目标刷新或 PWM 硬件输出
  */
-#define SHIP_RX_LOG_PERIOD_MS          100U
+#define SHIP_RX_LOG_PERIOD_MS          500U
 #define SHIP_RX_CRC_LOG_THRESHOLD      10U
-#define SHIP_MOT_LOG_PERIOD_MS         10U
-#define SHIP_RC_INPUT_LOG_PERIOD_MS    100U
+#define SHIP_MOT_LOG_PERIOD_MS         200U
+#define SHIP_RC_INPUT_LOG_PERIOD_MS    500U
 #define SHIP_POWER_LOG_PERIOD_MS       10000U
 #define SHIP_MAG_LOG_PERIOD_MS         1000U
 #define SHIP_IMU_LOG_PERIOD_MS         1000U

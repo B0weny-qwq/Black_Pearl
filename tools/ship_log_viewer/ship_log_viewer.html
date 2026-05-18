@@ -512,7 +512,7 @@
           <div class="card">
             <div class="label">实际输出油门</div>
             <div id="throttleOutputValue" class="value">--</div>
-            <div id="throttleOutputMeta" class="meta">等待 MOT 输出日志</div>
+            <div id="throttleOutputMeta" class="meta">等待 MOT 短日志</div>
           </div>
           <div class="card">
             <div class="label">动作判定</div>
@@ -691,7 +691,7 @@
         throttleInputValue: "--",
         throttleInputMeta: "等待 throttle_raw 日志",
         throttleOutputValue: "--",
-        throttleOutputMeta: "等待 MOT 输出日志",
+        throttleOutputMeta: "等待 MOT 短日志",
         motionValue: "--",
         motionMeta: "等待 AA...BB 头尾包",
         selfStabilizeValue: "OFF",
@@ -1031,6 +1031,17 @@
       return map[mode] || `mode ${mode}`;
     }
 
+    function motionText(mode) {
+      const map = {
+        0: "stop",
+        1: "forward",
+        2: "backward",
+        3: "left",
+        4: "right"
+      };
+      return map[mode] || `motion ${mode}`;
+    }
+
     function clampPercent(value) {
       const num = Number(value);
       if (!Number.isFinite(num)) {
@@ -1327,6 +1338,11 @@
           markRemoteOnline(`在线，WL RX AA...BB cnt=${wlRx[1]} len=${wlRx[2]}`);
           state.last.lastRxCmd = `WL rx cnt=${wlRx[1]} len=${wlRx[2]}`;
         }
+        const wlRxShort = wlLog[2].match(/rx c=(\d+) l=(\d+) h=([0-9A-Fa-f]{2}) t=([0-9A-Fa-f]{2})$/);
+        if (wlRxShort && wlRxShort[3].toUpperCase() === "AA" && wlRxShort[4].toUpperCase() === "BB") {
+          markRemoteOnline(`在线，WL RX AA...BB cnt=${wlRxShort[1]} len=${wlRxShort[2]}`);
+          state.last.lastRxCmd = `WL rx cnt=${wlRxShort[1]} len=${wlRxShort[2]}`;
+        }
         if (wlLog[1] !== "I") {
           state.last.warnInfo = `[WL] ${wlLog[2]}`;
         } else if (/pair|signal|scan|work|init|test/i.test(wlLog[2])) {
@@ -1395,6 +1411,17 @@
         important = true;
       }
 
+      const pairShort = line.match(/\[SHIP\] I: pair c=([0-9A-Fa-f]{2}) ch=(\d+) k=(\d+)\/(\d+)/);
+      if (pairShort) {
+        const pairCmd = `0x${pairShort[1].toUpperCase()}`;
+        state.last.pair = "已配对";
+        state.last.pairMeta = `${cmdName(pairCmd)} ch=${pairShort[2]} key=${pairShort[3]}/${pairShort[4]}`;
+        state.last.channelInfo = `工作信道 ${pairShort[2]} / key ${pairShort[3]}/${pairShort[4]}`;
+        markRemoteOnline(`在线，${pairCmd}`);
+        pushTimeline(`配对成功：cmd=${pairCmd} ch=${pairShort[2]}`);
+        important = true;
+      }
+
       const pairOkByFrame = line.match(/\[SHIP\] I: pair ok by ([a-zA-Z0-9-]+) cmd=(0x[0-9A-Fa-f]{2}) work_rx=(\d+) key=(\d+)\/(\d+)/);
       if (pairOkByFrame) {
         state.last.pair = "已配对";
@@ -1454,6 +1481,22 @@
         important = true;
       }
 
+      const remoteOnlineShort = line.match(/\[SHIP\] I: rl c=([0-9A-Fa-f]{2})/);
+      if (remoteOnlineShort) {
+        const remoteCmd = `0x${remoteOnlineShort[1].toUpperCase()}`;
+        markRemoteOnline(`在线，AA...BB ${remoteCmd}`);
+        state.last.remoteInfo = `AA...BB 在线，cmd=${cmdName(remoteCmd)}`;
+        pushTimeline(`遥控链路上线：${remoteCmd}`);
+        important = true;
+      }
+
+      const manualOnlineShort = line.match(/\[SHIP\] I: rc11 on/);
+      if (manualOnlineShort) {
+        markRemoteOnline("在线，收到 0x11");
+        pushTimeline("手动控制上线，收到 0x11");
+        important = true;
+      }
+
       const timeout = line.match(/\[SHIP\] W: remote link timeout by (?:aa-bb-frame|valid frame), dt=(\d+)ms/);
       if (timeout) {
         state.last.rcMeta = `超时 ${timeout[1]}ms`;
@@ -1475,6 +1518,8 @@
       if (rc) {
         state.manualCount += 1;
         markRemoteOnline("在线，收到有效 0x11 控制帧");
+        state.last.throttleInputValue = `${rc[3]}`;
+        state.last.throttleInputMeta = `raw_ud=${rc[1]} raw_lr=${rc[2]} steering=${rc[4]} key=${rc[6]}`;
         state.last.rcMeta = `raw_ud=${rc[1]} raw_lr=${rc[2]} throttle=${rc[3]} steering=${rc[4]} key=${rc[5]}(${rc[6]})`;
         updateSelfStabilizeFromSteering(Number(rc[4]));
         updateKeyFromFrame(rc[5], rc[6], "0x11");
@@ -1492,6 +1537,33 @@
         important = true;
       }
 
+      const motorOutShort = line.match(/^\[MOT\] I: m=(\d+) t=([-\d]+) l=([-\d]+) r=([-\d]+)$/);
+      if (motorOutShort) {
+        const motorMode = Number(motorOutShort[1]);
+        const motorModeText = motionText(motorMode);
+        state.last.throttleOutputValue = formatMotorOutputPercent(motorOutShort[3], motorOutShort[4]);
+        state.last.throttleOutputMeta = `mode=${motorModeText} base=${motorOutShort[2]}\nleft=${motorOutShort[3]} right=${motorOutShort[4]}`;
+        updateMotionDecision(
+          motorModeText,
+          `base=${motorOutShort[2]}\nleft=${motorOutShort[3]} right=${motorOutShort[4]}`,
+          `MOT ${motorModeText}: left=${motorOutShort[3]} right=${motorOutShort[4]}`
+        );
+        pushTimeline(`MOT ${motorModeText}: base=${motorOutShort[2]} left=${motorOutShort[3]} right=${motorOutShort[4]}`);
+        important = true;
+      }
+
+      const rcShort = line.match(/\[SHIP\] I: rc11 u=(\d+) l=(\d+) tv=([-\d]+) sv=([-\d]+) k=([0-9A-Fa-f]{2})/);
+      if (rcShort) {
+        state.manualCount += 1;
+        markRemoteOnline("在线，收到 0x11 短日志");
+        state.last.throttleInputValue = `${rcShort[3]}`;
+        state.last.throttleInputMeta = `u=${rcShort[1]} l=${rcShort[2]} sv=${rcShort[4]} k=0x${rcShort[5]}`;
+        state.last.rcMeta = `u=${rcShort[1]} l=${rcShort[2]} throttle=${rcShort[3]} steering=${rcShort[4]} key=0x${rcShort[5]}`;
+        updateSelfStabilizeFromSteering(Number(rcShort[4]));
+        updateKeyFromFrame(`0x${rcShort[5]}`, `0x${rcShort[5]}`, "0x11");
+        important = true;
+      }
+
       const motorOut = line.match(/^\[MOT\] I: m=(\d+) y=([-\d]+)(?: t=([-\d]+))? o=([-\d]+) l=([-\d]+) r=([-\d]+)$/);
       if (motorOut) {
         const motorMode = Number(motorOut[1]);
@@ -1503,11 +1575,36 @@
         important = true;
       }
 
+      const motorOutFull = line.match(/^\[MOT\] I: m=(\d+) y=([-\d]+) tgt=([-\d]+) err=([-\d]+) in=([-\d]+) pid=([-\d]+) diff=([-\d]+) t=([-\d]+) l=([-\d]+) r=([-\d]+)$/);
+      if (motorOutFull) {
+        const motorMode = Number(motorOutFull[1]);
+        const motorModeText = throttleModeText(motorMode);
+        state.last.throttleOutputValue = formatMotorOutputPercent(motorOutFull[9], motorOutFull[10]);
+        state.last.throttleOutputMeta =
+          `mode=${motorModeText} yaw=${motorOutFull[2]} tgt=${motorOutFull[3]} err=${motorOutFull[4]}\n`
+          + `in=${motorOutFull[5]} pid=${motorOutFull[6]} diff=${motorOutFull[7]} base=${motorOutFull[8]}\n`
+          + `left=${motorOutFull[9]} right=${motorOutFull[10]}`;
+        pushTimeline(`MOT ${motorModeText}: tgt=${motorOutFull[3]} err=${motorOutFull[4]} pid=${motorOutFull[6]} left=${motorOutFull[9]} right=${motorOutFull[10]}`);
+        important = true;
+      }
+
       const motorYawHold = line.match(/\[SHIP\] I: yaw hold tgt=([-\d]+) yr=([-\d]+) out=([-\d]+) throttle=([-\d]+) steer=([-\d]+) gate=(\d+) left=([-\d]+) right=([-\d]+)/);
       if (motorYawHold) {
         state.last.throttleOutputValue = formatMotorOutputPercent(motorYawHold[7], motorYawHold[8]);
         state.last.throttleOutputMeta = `yaw-hold tgt=${motorYawHold[1]} yr=${motorYawHold[2]} out=${motorYawHold[3]}\nleft=${motorYawHold[7]} right=${motorYawHold[8]}`;
         pushTimeline(`yaw hold：yr=${motorYawHold[2]} out=${motorYawHold[3]} left=${motorYawHold[7]} right=${motorYawHold[8]}`);
+        important = true;
+      }
+
+      const manualShort = line.match(/\[SHIP\] I: man u=(\d+) l=(\d+) tv=([-\d]+) sv=([-\d]+) k=([0-9A-Fa-f]{2}) m=(\d+) sp=([-\d]+)/);
+      if (manualShort) {
+        const manualMotionText = motionText(Number(manualShort[6]));
+        updateMotionDecision(
+          manualMotionText,
+          `speed=${manualShort[7]}\nthrottle=${manualShort[3]}\nsteering=${manualShort[4]}`,
+          `manual ${manualMotionText}: speed=${manualShort[7]}`
+        );
+        updateKeyFromFrame(`0x${manualShort[5]}`, `0x${manualShort[5]}`, "manual");
         important = true;
       }
 
@@ -1665,6 +1762,39 @@
           + (mag[5] ? ` compass=${mag[5]}` : "")
           + (mag[6] ? ` stable=${mag[6]}` : "")
         );
+        important = true;
+      }
+
+      const motionShort = line.match(/\[SHIP\] I: mo m=(\d+) l=([-\d]+) r=([-\d]+)/);
+      if (motionShort) {
+        updateMotionDecision(
+          motionText(Number(motionShort[1])),
+          `left=${motionShort[2]}\nright=${motionShort[3]}`,
+          `motor left=${motionShort[2]} right=${motionShort[3]}`
+        );
+        important = true;
+      }
+
+      const gpsShort = line.match(/\[SHIP\] I: gps12 ch=(\d+) len=(\d+) sat=(\d+) ang=(\d+) p=([0-9A-Fa-f]{2}) auto=([0-9A-Fa-f]{2}) fix=(\d+) lon=([EW])(\d+) lat=([NS])(\d+) seq=(\d+)/);
+      if (gpsShort) {
+        const powerHex = `0x${gpsShort[5].toUpperCase()}`;
+        const autoHex = `0x${gpsShort[6].toUpperCase()}`;
+        const fixText = gpsShort[7] === "1" ? "有效" : "无效";
+        state.gpsTxCount += 1;
+        state.last.lastTxCmd = `GPS 回包 ch=${gpsShort[1]}`;
+        state.last.txValue = `0x12 / ch ${gpsShort[1]}`;
+        state.last.txMeta = `sat=${gpsShort[3]} angle=${gpsShort[4]} power=${powerHex} auto=${autoHex}`;
+        state.last.gpsTxInfo = `ch=${gpsShort[1]} len=${gpsShort[2]} sat=${gpsShort[3]} angle=${gpsShort[4]} power=${powerHex}`;
+        state.last.gpsFix = fixText;
+        state.last.gpsFixMeta = `fix=${gpsShort[7]} power=${powerHex}`;
+        state.last.gpsSat = gpsShort[3];
+        state.last.gpsSatMeta = `seq=${gpsShort[12]}`;
+        state.last.gpsLon = formatDeg1e7(gpsShort[8], gpsShort[9]);
+        state.last.gpsLonMeta = `${gpsShort[8]} / raw=${gpsShort[9]}`;
+        state.last.gpsLat = formatDeg1e7(gpsShort[10], gpsShort[11]);
+        state.last.gpsLatMeta = `${gpsShort[10]} / raw=${gpsShort[11]}`;
+        state.last.gpsAngle = `${gpsShort[4]} deg`;
+        state.last.gpsRawInfo = `fix=${gpsShort[7]} sat=${gpsShort[3]} lon=${gpsShort[8]}${gpsShort[9]} lat=${gpsShort[10]}${gpsShort[11]} angle=${gpsShort[4]} seq=${gpsShort[12]}`;
         important = true;
       }
 
@@ -1861,7 +1991,7 @@
         throttleInputValue: "--",
         throttleInputMeta: "等待 throttle_raw 日志",
         throttleOutputValue: "--",
-        throttleOutputMeta: "等待 MOT 输出日志",
+        throttleOutputMeta: "等待 MOT 短日志",
         motionValue: "--",
         motionMeta: "等待 AA...BB 头尾包",
         selfStabilizeValue: "OFF",

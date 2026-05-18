@@ -433,17 +433,11 @@ s8 Wireless_Poll(void)
             ((now_ms - rx_brief_last_log_ms) >= SHIP_RX_LOG_PERIOD_MS)) {
             rx_brief_last_log_ms = now_ms;
             LOGI(WIRELESS_TAG,
-                 "rx pkt cnt=%u len=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
+                 "rx c=%u l=%u h=%02X t=%02X",
                  (u16)g_wireless_state.rx_ok_count,
                  (u16)packet_len,
                  (u16)((packet_len > 0U) ? packet_buf[0] : 0U),
-                 (u16)((packet_len > 1U) ? packet_buf[1] : 0U),
-                 (u16)((packet_len > 2U) ? packet_buf[2] : 0U),
-                 (u16)((packet_len > 3U) ? packet_buf[3] : 0U),
-                 (u16)((packet_len > 4U) ? packet_buf[4] : 0U),
-                 (u16)((packet_len > 5U) ? packet_buf[5] : 0U),
-                 (u16)((packet_len > 6U) ? packet_buf[6] : 0U),
-                 (u16)((packet_len > 7U) ? packet_buf[7] : 0U));
+                 (u16)((packet_len > 0U) ? packet_buf[packet_len - 1U] : 0U));
         }
 #if WIRELESS_RX_TRACE_ENABLE
         LOGI(WIRELESS_TAG,
