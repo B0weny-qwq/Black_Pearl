@@ -110,10 +110,11 @@
 /**
  * @brief  yaw 自稳最大差速比例（permille）
  * @details
- * - 200 表示 PID 满输出时，差速修正最多为当前基础油门的 20%
+ * - 250 表示 PID 满输出时，差速修正最多为当前基础油门的 25%
  * - 可防止自稳态把单侧电机直接压死或拉满
  */
-#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 200
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 250
+/* Current cap: yaw_output <= 25% of current base speed before headroom clamp. */
 
 /* raw LR must stay within center +/- this value; otherwise yaw-hold exits immediately. */
 #define SHIP_YAW_HOLD_RAW_STEER_GATE 10U
@@ -134,13 +135,15 @@
 #define SHIP_YAW_HOLD_DERATE_FULL_CD 1000
 
 /* motor speed cap used at full derate; unit is speed, not PWM duty. */
-#define SHIP_YAW_HOLD_DERATE_MIN_BASE 800
+#define SHIP_YAW_HOLD_DERATE_MIN_BASE 500
+/* Large heading error can pull cruise base speed down to 500 for tighter turns. */
 
 /* yaw-hold gyro damping, Q10 output units per deg/s. */
 #define SHIP_YAW_HOLD_GYRO_DAMP_Q10    3072
 
 /* max final differential speed change per 10 ms manual-control step. */
-#define SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP 20
+#define SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP 30
+/* Higher slew makes PID feel firmer without removing the anti-jerk ramp. */
 
 /* wait N stable centered-steering frames before locking yaw target. */
 #define SHIP_YAW_HOLD_STEER_STABLE_FRAMES 2U
@@ -160,7 +163,8 @@
  * - Q10 定点
  * - 当前值偏保守，先保证不明显过冲
  */
-#define SHIP_YAW_HOLD_KP_Q10           512
+#define SHIP_YAW_HOLD_KP_Q10           768
+/* Q10 768 = 0.75, firmer than the previous 512 = 0.50. */
 
 /**
  * @brief  yaw 自稳误差死区（centi-degree）

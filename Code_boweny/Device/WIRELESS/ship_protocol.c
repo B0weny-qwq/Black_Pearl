@@ -97,8 +97,6 @@
 #define SHIP_THROTTLE_MIN_COMMAND      180
 #define SHIP_THROTTLE_MAX_COMMAND      850
 #define SHIP_STEERING_MAX_COMMAND      700
-#define SHIP_PULSE_DURATION_MS         150U
-#define SHIP_PULSE_SPEED               700
 #define SHIP_THROTTLE_RECOVER_MS       3000UL
 #ifndef SHIP_MANUAL_CONTROL_PERIOD_MS
 #define SHIP_MANUAL_CONTROL_PERIOD_MS  10UL
@@ -127,7 +125,7 @@
 #define SHIP_YAW_HOLD_FULL_ERROR_CD    1000
 #endif
 #ifndef SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE
-#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 500
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 250
 #endif
 #ifndef SHIP_YAW_HOLD_RAW_STEER_GATE
 #define SHIP_YAW_HOLD_RAW_STEER_GATE 10U
@@ -148,13 +146,13 @@
 #define SHIP_YAW_HOLD_DERATE_FULL_CD 1000
 #endif
 #ifndef SHIP_YAW_HOLD_DERATE_MIN_BASE
-#define SHIP_YAW_HOLD_DERATE_MIN_BASE 800
+#define SHIP_YAW_HOLD_DERATE_MIN_BASE 500
 #endif
 #ifndef SHIP_YAW_HOLD_GYRO_DAMP_Q10
 #define SHIP_YAW_HOLD_GYRO_DAMP_Q10    3072
 #endif
 #ifndef SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP
-#define SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP 20
+#define SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP 30
 #endif
 #ifndef SHIP_YAW_HOLD_STEER_STABLE_FRAMES
 #define SHIP_YAW_HOLD_STEER_STABLE_FRAMES 2U
@@ -185,8 +183,8 @@
 #define SHIP_KEY_E_RESERVED            0xA1U
 #define SHIP_KEY_A_TOGGLE_LIGHT        0xA3U
 #define SHIP_KEY_B_UNUSED              0xA5U
-#define SHIP_KEY_C_PULSE_FORWARD       0xA7U
-#define SHIP_KEY_D_PULSE_BACKWARD      0xA9U
+#define SHIP_KEY_C_UNUSED              0xA7U
+#define SHIP_KEY_D_UNUSED              0xA9U
 #define SHIP_KEY_NULL                  0xA0U
 
 typedef enum
@@ -257,9 +255,6 @@ typedef struct
     ShipMotion_t manual_log_motion;
     u8 manual_log_yaw_hold;
     ShipMotion_t motion;
-    ShipMotion_t pulse_motion;
-    u32 pulse_expire_ms;
-    u8 pulse_active;
     u8 center_stop_count;
 } ShipRuntime_t;
 
@@ -1143,33 +1138,8 @@ static void ShipProtocol_StopMotionImpl(u8 force_log)
 #endif
     }
     g_ship_rt.motion = SHIP_MOTION_STOP;
-    g_ship_rt.pulse_active = 0U;
-    g_ship_rt.pulse_motion = SHIP_MOTION_STOP;
-    g_ship_rt.pulse_expire_ms = 0UL;
     if ((prev_motion != SHIP_MOTION_STOP) || (force_log != 0U)) {
         ShipProtocol_LogPwmSnapshot(1U);
-    }
-}
-
-static void ShipProtocol_StartPulse(ShipMotion_t motion)
-{
-    ShipProtocol_ResetYawHold(SHIP_REASON_C("pulse"), 1U);
-    g_ship_rt.pulse_active = 1U;
-    g_ship_rt.pulse_motion = motion;
-    g_ship_rt.pulse_expire_ms = Task_GetTickMs() + SHIP_PULSE_DURATION_MS;
-    ShipProtocol_ApplyMotion(motion, SHIP_PULSE_SPEED, 1U);
-    LOGI(SHIP_TAG, "key pulse motion=%s dur=%ums",
-         ShipProtocol_MotionName(motion),
-         (u16)SHIP_PULSE_DURATION_MS);
-}
-
-static void ShipProtocol_ServicePulse(u32 now_ms)
-{
-    if ((g_ship_rt.pulse_active != 0U) && ((int32)(now_ms - g_ship_rt.pulse_expire_ms) >= 0)) {
-        g_ship_rt.pulse_active = 0U;
-        g_ship_rt.pulse_motion = SHIP_MOTION_STOP;
-        g_ship_rt.pulse_expire_ms = 0UL;
-        ShipProtocol_StopMotion(SHIP_REASON_U8("pulse done"), 1U);
     }
 }
 
@@ -1356,7 +1326,7 @@ static void ShipProtocol_ServiceManualControl(u32 now_ms)
     if ((g_ship_rt.throttle_online == 0U) || (g_ship_rt.valid == 0U)) {
         return;
     }
-    if ((g_ship_rt.pulse_active != 0U) || (AutoDrive_IsBusy() != 0U)) {
+    if (AutoDrive_IsBusy() != 0U) {
         return;
     }
     if ((now_ms - g_ship_rt.manual_last_apply_ms) < SHIP_MANUAL_CONTROL_PERIOD_MS) {
@@ -1438,13 +1408,11 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
     case SHIP_KEY_B_UNUSED:
         LOGI(SHIP_TAG, "key action=B noop");
         break;
-    case SHIP_KEY_C_PULSE_FORWARD:
-        LOGI(SHIP_TAG, "key action=C pulse-forward %ums", (u16)SHIP_PULSE_DURATION_MS);
-        ShipProtocol_StartPulse(SHIP_MOTION_FORWARD);
+    case SHIP_KEY_C_UNUSED:
+        LOGI(SHIP_TAG, "key action=C noop");
         break;
-    case SHIP_KEY_D_PULSE_BACKWARD:
-        LOGI(SHIP_TAG, "key action=D pulse-backward %ums", (u16)SHIP_PULSE_DURATION_MS);
-        ShipProtocol_StartPulse(SHIP_MOTION_BACKWARD);
+    case SHIP_KEY_D_UNUSED:
+        LOGI(SHIP_TAG, "key action=D noop");
         break;
     case SHIP_KEY_E_RESERVED:
         if (front_back > 150U) {
@@ -2738,9 +2706,6 @@ static void ShipProtocol_InitRuntime(void)
     g_ship_rt.manual_log_motion = SHIP_MOTION_STOP;
     g_ship_rt.manual_log_yaw_hold = 0U;
     g_ship_rt.motion = SHIP_MOTION_STOP;
-    g_ship_rt.pulse_motion = SHIP_MOTION_STOP;
-    g_ship_rt.pulse_expire_ms = 0UL;
-    g_ship_rt.pulse_active = 0U;
     g_ship_rt.center_stop_count = 0U;
     g_ship_power_sample_times = 0U;
     g_lowpower_check_times = 0U;
@@ -2865,7 +2830,6 @@ void ShipProtocol_RunScheduler(void)
     }
 
     now_ms = Task_GetTickMs();
-    ShipProtocol_ServicePulse(now_ms);
 
     if ((now_ms - last_tick_ms) < 10U) {
         ShipProtocol_PollRxFrames();

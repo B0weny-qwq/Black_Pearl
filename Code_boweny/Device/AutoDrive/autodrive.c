@@ -14,6 +14,10 @@
 #define AUTODRIVE_MANUAL_TIMEOUT_TICKS     (30U * 100U)
 #define AUTODRIVE_MANUAL_CLOSE_TICKS       300U
 #define AUTODRIVE_CRUISE_BASE_SPEED        850
+#define AUTODRIVE_APPROACH_DISTANCE_M      20U
+#define AUTODRIVE_CRAWL_DISTANCE_M         8U
+#define AUTODRIVE_APPROACH_BASE_SPEED      700
+#define AUTODRIVE_CRAWL_BASE_SPEED         500
 #define AUTODRIVE_MINUTE_SCALE             10000UL
 #define AUTODRIVE_MINUTES_PER_DEG          60UL
 #define AUTODRIVE_METERS_PER_MINUTE        1850UL
@@ -40,6 +44,7 @@ static u16 g_nowrun_angle = 0U;
 static u16 g_destination_angle = 0U;
 static u16 g_autodrive_target_heading_cd = 0U;
 static u8 g_autodrive_target_heading_valid = 0U;
+static u16 g_autodrive_base_speed = AUTODRIVE_CRUISE_BASE_SPEED;
 
 static u16 g_link_alive_ticks = 0U;
 static u16 g_link_close_ticks = 0U;
@@ -214,6 +219,64 @@ static void AutoDrive_SetDiagReason(u8 reason)
     g_last_diag_reason = reason;
 }
 
+static void AutoDrive_ResetApproachTracker(void)
+{
+    g_autodrive_base_speed = AUTODRIVE_CRUISE_BASE_SPEED;
+}
+
+static u16 AutoDrive_InterpolateSpeed(u16 distance_m,
+                                      u16 near_distance_m,
+                                      u16 far_distance_m,
+                                      u16 near_speed,
+                                      u16 far_speed)
+{
+    u32 distance_span;
+    u32 speed_span;
+    u32 distance_offset;
+
+    if (distance_m <= near_distance_m) {
+        return near_speed;
+    }
+    if (distance_m >= far_distance_m) {
+        return far_speed;
+    }
+    if (far_distance_m <= near_distance_m) {
+        return near_speed;
+    }
+
+    distance_span = (u32)far_distance_m - (u32)near_distance_m;
+    speed_span = (u32)far_speed - (u32)near_speed;
+    distance_offset = (u32)distance_m - (u32)near_distance_m;
+    return (u16)((u32)near_speed +
+                 ((distance_offset * speed_span) / distance_span));
+}
+
+static u16 AutoDrive_CalcBaseSpeed(u16 distance_m)
+{
+    if (distance_m >= AUTODRIVE_APPROACH_DISTANCE_M) {
+        return AUTODRIVE_CRUISE_BASE_SPEED;
+    }
+
+    if (distance_m >= AUTODRIVE_CRAWL_DISTANCE_M) {
+        return AutoDrive_InterpolateSpeed(distance_m,
+                                          AUTODRIVE_CRAWL_DISTANCE_M,
+                                          AUTODRIVE_APPROACH_DISTANCE_M,
+                                          AUTODRIVE_APPROACH_BASE_SPEED,
+                                          AUTODRIVE_CRUISE_BASE_SPEED);
+    }
+
+    return AutoDrive_InterpolateSpeed(distance_m,
+                                      AUTODRIVE_ARRIVE_DISTANCE_M,
+                                      AUTODRIVE_CRAWL_DISTANCE_M,
+                                      AUTODRIVE_CRAWL_BASE_SPEED,
+                                      AUTODRIVE_APPROACH_BASE_SPEED);
+}
+
+static void AutoDrive_UpdateApproachSpeed(u16 distance_m)
+{
+    g_autodrive_base_speed = AutoDrive_CalcBaseSpeed(distance_m);
+}
+
 static u8 AutoDrive_GetTargetPoint(const AutoDrive_PointRaw_t **target)
 {
     if (target == 0) {
@@ -279,6 +342,7 @@ void AutoDrive_StopMotion(void)
 {
     Motor_StopAll();
     g_autodrive_target_heading_valid = 0U;
+    AutoDrive_ResetApproachTracker();
     ShipProtocol_ResetYawHoldController();
 }
 
@@ -815,6 +879,7 @@ void AutoDrive_Init(void)
     g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
     g_autodrive_target_heading_cd = 0U;
     g_autodrive_target_heading_valid = 0U;
+    AutoDrive_ResetApproachTracker();
 
     if (g_motor_ready == 0U) {
         Motor_Init();
@@ -892,10 +957,23 @@ void AutoDrive_Poll(void)
             break;
         }
 
+        AutoDrive_ResetApproachTracker();
+        destination_distance =
+            AutoDrive_GetDistanceNowToDestination((const u8 *)&g_last_position,
+                                                  (const u8 *)target_point);
+        AutoDrive_UpdateApproachSpeed(destination_distance);
+        if (destination_distance <= AUTODRIVE_ARRIVE_DISTANCE_M) {
+            AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_ARRIVE);
+            g_autoDrive_state = AUTO_DRIVE_IDLE;
+            AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
+            AutoDrive_StopMotion();
+            break;
+        }
+
         ShipProtocol_ResetYawHoldController();
         g_last_run_update_seq = gps->update_sequence;
         g_autoDrive_state = AUTO_DRIVE_RUNING;
-        AutoDrive_ApplyHeadingHold(AUTODRIVE_CRUISE_BASE_SPEED);
+        AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
         break;
 
     case AUTO_DRIVE_GET_DIRECTION:
@@ -922,7 +1000,8 @@ void AutoDrive_Poll(void)
             destination_distance =
                 AutoDrive_GetDistanceNowToDestination((const u8 *)&g_now_position,
                                                       (const u8 *)target_point);
-            if (destination_distance < AUTODRIVE_ARRIVE_DISTANCE_M) {
+            AutoDrive_UpdateApproachSpeed(destination_distance);
+            if (destination_distance <= AUTODRIVE_ARRIVE_DISTANCE_M) {
                 AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_ARRIVE);
                 g_autoDrive_state = AUTO_DRIVE_IDLE;
                 AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
@@ -941,7 +1020,7 @@ void AutoDrive_Poll(void)
             g_last_run_update_seq = gps->update_sequence;
         }
 
-        AutoDrive_ApplyHeadingHold(AUTODRIVE_CRUISE_BASE_SPEED);
+        AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
         break;
 
     default:
