@@ -125,7 +125,7 @@
 #define SHIP_YAW_HOLD_FULL_ERROR_CD    1000
 #endif
 #ifndef SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE
-#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 250
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 400
 #endif
 #ifndef SHIP_YAW_HOLD_RAW_STEER_GATE
 #define SHIP_YAW_HOLD_RAW_STEER_GATE 10U
@@ -530,7 +530,7 @@ u8 ShipProtocol_ApplyYawHoldTarget(u16 target_heading_cd, int16 base_speed)
     int16 left_speed;
     int16 right_speed;
 
-    if ((MainLoop_IsHeadingReady() == 0U) || (base_speed == 0)) {
+    if (MainLoop_IsHeadingReady() == 0U) {
         return 0U;
     }
 
@@ -584,7 +584,17 @@ u8 ShipProtocol_ApplyYawHoldTarget(u16 target_heading_cd, int16 base_speed)
 #if SHIP_THROTTLE_PWM_ENABLE
     Motor_SetBothSpeed(left_speed, right_speed);
 #endif
-    g_ship_rt.motion = (yaw_base_speed >= 0) ? SHIP_MOTION_FORWARD : SHIP_MOTION_BACKWARD;
+    if (yaw_base_speed > 0) {
+        g_ship_rt.motion = SHIP_MOTION_FORWARD;
+    } else if (yaw_base_speed < 0) {
+        g_ship_rt.motion = SHIP_MOTION_BACKWARD;
+    } else if (yaw_output > 0) {
+        g_ship_rt.motion = SHIP_MOTION_RIGHT;
+    } else if (yaw_output < 0) {
+        g_ship_rt.motion = SHIP_MOTION_LEFT;
+    } else {
+        g_ship_rt.motion = SHIP_MOTION_STOP;
+    }
     ShipProtocol_UpdateManualLogSnapshot(g_ship_rt.motion,
                                          current_yaw_cd,
                                          base_speed,
