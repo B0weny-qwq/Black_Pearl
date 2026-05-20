@@ -387,7 +387,7 @@ adc_raw = Get_ADCResult(ADC_CH8);
 ```text
 power_level == 0
 AutoDrive_GetMode() == AUTO_DRIVE_CLOSE
-g_now_pwm_accelerator < 10
+|g_now_throttle_speed| < 10
 ```
 
 满足条件后调用 `AutoDrive_TriggerReturn()`。是否真正进入返航，还要看已保存返航点是否合法、当前 GPS 是否可用、距离是否满足 AutoDrive 激活条件。
@@ -515,7 +515,7 @@ GPS 回传：
 - `0x13/0x14` 载荷必须至少 10 字节。
 - `0x15` 正常完整载荷为 11 字节。
 - 自动返航配置能保存到 `0x0001F800`。
-- 低电返航只在电量等级为 0、自动驾驶关闭、油门低于 10 时触发入口。
+- 低电返航只在电量等级为 0、自动驾驶关闭、当前电机速度量程 `|g_now_throttle_speed| < 10` 时触发入口。
 
 ## 16. 禁止修改项
 

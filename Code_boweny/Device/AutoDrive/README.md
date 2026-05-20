@@ -158,7 +158,7 @@ IDLE
 ```text
 power_level == 0
 AutoDrive_GetMode() == AUTO_DRIVE_CLOSE
-g_now_pwm_accelerator < 10
+|g_now_throttle_speed| < 10
 ```
 
 ## 当前协议格式
