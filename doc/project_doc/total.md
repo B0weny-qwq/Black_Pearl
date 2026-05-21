@@ -16,10 +16,10 @@
 - 当前运行档为 `Wireless + GPS + MAG + IMU + AHRS`，无线旧遥控器协议、GPS 回传和 AHRS 航向链同时启用。
 - 旧遥控器空口数据格式已按 `ship_Gps_V2.1_20260406-115200` 复核：命令号、帧格式、`0x12` 15 字节 GPS 回传、`0x13/0x14/0x15` 点位格式保持旧版 wire 兼容。
 - `0x12` 半球字段继续固定为 `E/W`，这是旧版 `nmea41_Get_EW()='E'`、`nmea41_Get_NS()='W'` 的兼容行为，不是新协议格式。
-- 当前工作区 `0x11` wire payload 仍是旧版 `lr/ud/key`；遥控输入值只由 `0x11` 油门帧更新，手动控制目标则由 `ShipProtocol_ServiceManualControl()` 每 `SHIP_MANUAL_CONTROL_PERIOD_MS=10ms` 使用最新输入连续刷新，底层 PWM 仍按硬件定时器频率输出；`SHIP_RC_INPUT_LOG_PERIOD_MS`、`SHIP_MOT_LOG_PERIOD_MS` 和 `SHIP_YAW_HOLD_LOG_PERIOD_MS` 只限制日志打印，不能影响控制更新。手动控制应用层已开启 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，并以 `SHIP_YAW_HOLD_STEER_GATE=15U` 作为直线自稳门限；当前无遥控油门时不会启动空闲 yaw-hold 驱动电机。yaw 误差先按 `SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 归一化到 `±1000` 控制量，再按当前基础油门和电机满量程余量换算成左右差速，避免小角度偏航直接打满或高油门单侧锁死。
-- 工程硬约束：所有“自稳模式/航向修正/返航循迹/钓点巡航”都必须走 `ShipProtocol_ApplyYawHoldTarget()` / yaw-hold PID 路线，复用当前已验证的左右极性、差速限幅、陀螺阻尼和输出斜坡；禁止在 `AutoDrive` 或其他模块里另写定时左/右转、另写左右电机极性、另写第二套 yaw PID。
+- 当前工作区 `0x11` wire payload 仍是旧版 `lr/ud/key`；遥控输入值只由 `0x11` 油门帧更新，手动控制目标则由 `ShipControl_Tick()` 每 `SHIP_MANUAL_CONTROL_PERIOD_MS=10ms` 使用最新输入连续刷新，底层 PWM 仍按硬件定时器频率输出；`SHIP_RC_INPUT_LOG_PERIOD_MS`、`SHIP_MOT_LOG_PERIOD_MS` 和 `SHIP_YAW_HOLD_LOG_PERIOD_MS` 只限制日志打印，不能影响控制更新。手动控制应用层已开启 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，并以 `SHIP_YAW_HOLD_STEER_GATE=15U` 作为直线自稳门限；当前无遥控油门时不会启动空闲 yaw-hold 驱动电机。yaw 误差先按 `SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 归一化到 `±1000` 控制量，再按当前基础油门和电机满量程余量换算成左右差速，避免小角度偏航直接打满或高油门单侧锁死。
+- 工程硬约束：所有“手动自稳/定速巡航/返航循迹/钓点巡航”的最终电机输出都必须走 `ShipControl` / yaw-hold PID 路线，复用当前已验证的左右极性、差速限幅、陀螺阻尼和输出斜坡；禁止在 `AutoDrive` 或 `wireless` 里另写定时左/右转、另写左右电机极性、另写第二套 yaw PID。
 - `AutoDrive` 并非独立主循环入口，而是隐藏在 `ShipProtocol_RunScheduler()` 内初始化与轮询；`0x13/0x14/0x15`、低电返航和链路超时都会走到这条链。当前 `AutoDrive` 只负责 GPS 点位规划、目标航向和到点判断，电机自稳输出必须交给 yaw-hold PID 公共链路。
-- 返航/钓点巡航的 `target_heading_cd` 不是启动时固定一次的角度；`AUTO_DRIVE_RUNING` 状态下每当 `gps->update_sequence` 变化，都会用最新当前 GPS 点和目标点重新计算目标航向，随后继续调用 `ShipProtocol_ApplyYawHoldTarget(target_heading_cd, AUTODRIVE_CRUISE_BASE_SPEED)`。GPS 未更新的 10ms 控制周期内只沿用上一帧目标航向。
+- 返航/钓点巡航的 `target_heading_cd` 不是启动时固定一次的角度；`AUTO_DRIVE_RUNING` 状态下每当 `gps->update_sequence` 变化，都会用最新当前 GPS 点和目标点重新计算目标航向，随后继续提交给 `ShipControl_RequestGpsNav(target_heading_cd, base_speed)`。GPS 未更新的 10ms 控制周期内只沿用上一帧目标航向。
 - 当前 GPS 定点巡航的当前船头角必须来自 `MainLoop_GetHeadingDeg100()` 的融合绝对航向；磁力计已按实测 `MAG_COMPASS_DIRECTION_SIGN=-1`、`MAG_COMPASS_INSTALL_OFFSET_CD=21930` 修正正北零点与旋转方向，上位机“船头朝向”应显示 `HDG fused` 才能证明航向链已 ready。
 
 ## 2. 当前开关
@@ -49,24 +49,24 @@
 #define SHIP_YAW_HOLD_LOG_PERIOD_MS    1000UL
 #define SHIP_YAW_HOLD_OUTPUT_LIMIT     1000
 #define SHIP_YAW_HOLD_FULL_ERROR_CD    1000
-#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 200
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 400
 #define SHIP_YAW_HOLD_OUTPUT_SIGN      1
 #define SHIP_YAW_HOLD_STEER_GATE       15U
-#define SHIP_YAW_HOLD_KP_Q10           512
+#define SHIP_YAW_HOLD_KP_Q10           768
 #define SHIP_YAW_HOLD_DEADBAND_CD      50
 #define SHIP_YAW_HOLD_KI_Q10           0
 #define SHIP_YAW_HOLD_KD_Q10           0
-#define SHIP_MOT_LOG_PERIOD_MS         100U
-#define SHIP_RC_INPUT_LOG_PERIOD_MS    100U
+#define SHIP_MOT_LOG_PERIOD_MS         200U
+#define SHIP_RC_INPUT_LOG_PERIOD_MS    500U
 ```
 
 - `ENABLE_GPS_MODULE=1` 表示 GPS 初始化、轮询和 `0x12` 状态回传均进入当前固件。
 - `SHIP_PROTOCOL_COMPAT_ENABLE=0` 表示当前使用调度器链路 `ShipProtocol_RunScheduler()`，不是额外兼容轮询入口。
 - `SHIP_MANUAL_CONTROL_PERIOD_MS=10UL` 是内部手动控制目标刷新周期；`SHIP_MOT_LOG_PERIOD_MS` 和 `SHIP_RC_INPUT_LOG_PERIOD_MS` 是独立日志周期，二者不能作为控制节拍。
 - `SHIP_YAW_HOLD_MANUAL_ENABLE=1` 是当前应用行为与旧版纯开环手动控制的主要差异点；当前直线自稳触发条件是 `|steering| <= 15` 且油门为前进。
-- `SHIP_YAW_HOLD_OUTPUT_LIMIT=1000` 与 `Motor_SetSpeed()` 满量程统一；`SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 表示 10.00° 偏航才达到满控制输入；`SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=200` 表示满输出时差速最多为当前基础油门的 20%，并继续受电机上限余量限制。
+- `SHIP_YAW_HOLD_OUTPUT_LIMIT=1000` 与 `Motor_SetSpeed()` 满量程统一；`SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 表示 10.00° 偏航才达到满控制输入；`SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=400` 表示满输出时差速最多为当前基础油门的 40%，并继续受电机上限余量限制。
 - `SHIP_YAW_HOLD_OUTPUT_SIGN=1` 是当前实船已验证的左右极性方向；后续返航、钓点巡航和任何自稳输出都必须复用这个公共参数，不允许在其他模块单独翻转。
-- `SHIP_YAW_HOLD_KP_Q10=512` 为 P-only 的 0.5 倍控制量增益，`SHIP_YAW_HOLD_DEADBAND_CD=50` 用于压住 0.50° 内的小抖动，`SHIP_YAW_HOLD_LOG_PERIOD_MS=1000UL` 用于限制 `[MOT]` 诊断输出频率。
+- `SHIP_YAW_HOLD_KP_Q10=768` 为 P-only 的 0.75 倍控制量增益，`SHIP_YAW_HOLD_DEADBAND_CD=50` 用于压住 0.50° 内的小抖动，`SHIP_YAW_HOLD_LOG_PERIOD_MS=1000UL` 用于限制控制层 yaw-hold 诊断输出频率。
 
 ## 3. 启动顺序
 
@@ -97,7 +97,7 @@ MainLoop_RunOnce()
 
 - `IMU_AhrsPoll()` 持续更新 AHRS 与 `HeadingEstimator`，为 yaw-hold 提供相对航向。
 - `ShipProtocol_RunScheduler()` 负责旧遥控器配对、收帧、分发命令和合法帧后立即回发 `0x12`，同时内部执行 `AutoDrive_Init()`、`AutoDrive_LinkAliveTick()` 与 `AutoDrive_Poll()`。
-- `AutoDrive_Poll()` 进入返航/钓点巡航后根据 GPS 新点更新目标航向与距离，到点阈值由 `AUTODRIVE_ARRIVE_DISTANCE_M=3` 判定；实际电机差速必须通过 `ShipProtocol_ApplyYawHoldTarget()` 输出，保持和手动自稳完全同一条 PID 路线。
+- `AutoDrive_Poll()` 进入返航/钓点巡航后根据 GPS 新点更新目标航向与距离，到点阈值由 `AUTODRIVE_ARRIVE_DISTANCE_M=3` 判定；实际电机差速必须通过 `ShipControl_RequestGpsNav()` 输出，保持和手动自稳完全同一条 PID 路线。
 - `MAG_StandalonePoll()` 当前关闭，磁力计由 AHRS 低频读取。
 
 ## 5. 旧遥控器协议核对
@@ -110,7 +110,7 @@ MainLoop_RunOnce()
 | `0x12` GPS 回传 | 固定 15 字节：`sat, angle, E, lon1, lon2, W, lat1, lat2, power_level, autodrive_status` |
 | `0x13/0x14` 点位 | 10 字节旧格式：`lon_dir, lon1, lon2, lat_dir, lat1, lat2` |
 | `0x15` 自动返航配置 | 正常 11 字节帧为 `switch + 10 字节点位`，写入当前 MCU flash 配置区 |
-| 返航/钓点巡航自稳 | `AutoDrive` 在 GPS `update_sequence` 变化时用最新当前点和目标点重算 `target_heading_cd` 与距离；电机修正统一调用 `ShipProtocol_ApplyYawHoldTarget()`，必须复用 yaw-hold PID，不允许定时左/右转 |
+| 返航/钓点巡航自稳 | `AutoDrive` 在 GPS `update_sequence` 变化时用最新当前点和目标点重算 `target_heading_cd` 与距离；电机修正统一提交给 `ShipControl_RequestGpsNav()`，必须复用 yaw-hold PID，不允许定时左/右转 |
 | 电量回传 | 使用当前工程检测电压 ADC 通道 `ADC_CH8`，按旧版电量等级 `0..4` 回传 |
 | 低电返航 | 电量等级 `0`、600 tick、自动驾驶关闭、当前油门小于 10 时触发返航入口 |
 
@@ -118,7 +118,7 @@ MainLoop_RunOnce()
 
 - 当前无外置 EEPROM；自动返航配置通过 `AutoDriveCfg_Save()` 写入 STC flash/EEPROM 区，地址为 `0x0001F800`。
 - `0x15` 短包行为比旧版更防御：短包只保存开关，只有完整 `1 + 10` 字节时才更新返航点；正常旧遥控器完整帧不受影响。
-- 自稳路径是工程级公共能力，不是手动遥控专用能力；手动直线自稳、GPS 返航、GPS 钓点巡航都必须共用 `ShipProtocol_ApplyYawHoldTarget()` / yaw-hold PID 输出链。
+- 自稳路径是工程级公共能力，不是手动遥控专用能力；手动直线自稳、定速巡航、GPS 返航、GPS 钓点巡航都必须共用 `ShipControl` / yaw-hold PID 输出链。
 - 当前文档按工作区真实状态记录；如果后续要发布“严格旧版应用行为”，需要先关闭 `SHIP_YAW_HOLD_MANUAL_ENABLE` 或移除手动自稳门控，再更新本文档。
 
 ## 7. 最近变更

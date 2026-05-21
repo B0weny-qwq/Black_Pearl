@@ -24,6 +24,20 @@
 
 ---
 
+## [2026-05-21] - v1.7.66 控制层最小收口
+
+### 新增功能
+- **[统一控制层]** 新增 `Code_boweny/Device/Control/ShipControl.c/.h`，统一仲裁手动开环、手动 yaw 自稳、E 键定速巡航和 GPS 航向保持，最终电机目标只从控制层写入 `Motor_SetBothSpeed()`。
+
+### Bug 修复
+- **[多处抢电机]** 原 `ship_protocol.c` 同时处理协议、手动控制、yaw PID、定速巡航和电机输出，`AutoDrive` 又通过兼容入口提交航向保持，控制权边界不清。修复：`ship_protocol.c` 只解析 `0x11/0x13/0x14/0x15` 和按键请求；`AutoDrive` 只算目标航向、距离和到点状态；`ShipControl` 统一拥有 yaw-hold PID 和电机输出。
+- **[AutoDrive 跨层停电机]** `AutoDrive_StopMotion()` 不再直接 `Motor_StopAll()`，改为只停止 GPS 航向保持模式，避免关闭自动驾驶时误杀手动/定速控制权。
+
+### 优化改进
+- **[控制节拍]** `ShipControl_Tick()` 以 `SHIP_MANUAL_CONTROL_PERIOD_MS=10ms` 刷新手动控制和定速巡航输出；`SHIP_YAW_HOLD_PERIOD_MS=50ms` 仍只决定 yaw PID 更新周期。
+- **[定速余量]** E 键定速巡航基础速度限制到手动最大前进速度 `850`，避免满量程 `1000` 时 yaw-hold 因电机上限余量为 0 而无法差速修正。
+- **[文档口径]** README、AutoDrive/WIRELESS/PID README 和 `total.md` 同步改为 `ShipControl` 口径；旧 `ShipProtocol_ApplyYawHoldTarget()` 仅保留为兼容转发入口。
+
 ## 日志格式规范
 
 ```
@@ -1355,4 +1369,3 @@
 - I2C总线异常时调用 `QMC6309_BusRecover()` 恢复
 
 ---
-

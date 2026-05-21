@@ -115,6 +115,7 @@ MainLoop_RunOnce()
   -> GPS_Poll()
   -> Wireless_Poll()
   -> ShipProtocol_RunScheduler()
+     -> ShipControl_Tick()
   -> Wireless_SearchSignalPoll()
   -> MAG_StandalonePoll()        // 当前 ENABLE_MAG_STANDALONE_POLL=0，不进入
   -> IMU_ServicePoll()
@@ -126,6 +127,7 @@ MainLoop_RunOnce()
 
 - `Wireless_Poll()` 负责把 LT8920 收到的射频载荷推入软件队列。
 - `ShipProtocol_RunScheduler()` 负责从无线队列取 payload，并按旧协议找帧、分发、回 `0x12`；同时它也会内部执行 `AutoDrive_Init()`、`AutoDrive_LinkAliveTick()` 和 `AutoDrive_Poll()`。
+- 手动开环、手动 yaw 自稳、E 键定速巡航和 GPS 航向保持的最终电机目标统一由 `ShipControl` 仲裁输出。
 - 同一主循环不要同时开启 `ShipProtocol_RunScheduler()` 和 `ShipProtocol_Poll()`，否则会重复消费无线队列。
 
 ## 5. LT8920 管理层行为
@@ -285,20 +287,20 @@ payload[2] = key  // 按键码
 | 按键 | 值 | 当前行为 |
 |------|----|----------|
 | 无按键 | `0xA0` | 不动作 |
-| E | `0xA1` | 油门大于 150 时进入高速巡航入口；油门小于 110 时退出巡航；同时关闭自动驾驶模式 |
+| E | `0xA1` | 油门大于 150 时进入定速巡航入口；油门小于 110 时退出巡航；同时关闭自动驾驶模式 |
 | A | `0xA3` | 保留船灯入口，但当前未绑定真实灯控 GPIO，只记录 `light-unbound` |
 | B | `0xA5` | 不处理 |
-| C | `0xA7` | 150ms 前冲脉冲 |
-| D | `0xA9` | 150ms 后退脉冲 |
+| C | `0xA7` | 不处理 |
+| D | `0xA9` | 不处理 |
 
 当前控制路径：
 
 - 收到 `0x11` 后刷新 `last_throttle_rx_ms` 和 `last_proto_rx_ms`。
 - 上位机“遥控链路显示在线”按 `AA ... BB` 包活动刷新；这里的 `0x11` 只负责控制输入和电机安全保活。
 - 若 AutoDrive 正忙，只处理按键和链路保活，不接管手动电机。
-- 若短脉冲未激活，进入 `ShipProtocol_ApplyManualControl()`。
-- 当前工作区的手动控制不是旧版纯开环：它会做轴滤波、死区曲线、油门/转向混合，并在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、`|steering| <= SHIP_YAW_HOLD_STEER_GATE` 且前进油门成立时叠加手动航向保持。
-- 如果要求应用层行为严格等同旧版 `WirelessProtoca_Motor_Control()`，需要关闭 `SHIP_YAW_HOLD_MANUAL_ENABLE` 或恢复旧版开环分支。
+- 非 AutoDrive 状态下，`0x11` 只把 `lr/ud/key` 提交给 `ShipControl_UpdateManualInput()`。
+- 当前工作区的手动控制不是旧版纯开环：`ShipControl` 会做轴滤波、死区曲线、油门/转向混合，并在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、`|steering| <= SHIP_YAW_HOLD_STEER_GATE` 且前进油门成立时叠加手动航向保持。
+- 如果要求应用层行为严格等同旧版 `WirelessProtoca_Motor_Control()`，需要关闭 `SHIP_YAW_HOLD_MANUAL_ENABLE`。
 
 安全保护：
 
@@ -387,7 +389,7 @@ adc_raw = Get_ADCResult(ADC_CH8);
 ```text
 power_level == 0
 AutoDrive_GetMode() == AUTO_DRIVE_CLOSE
-|g_now_throttle_speed| < 10
+ShipControl_GetManualAccelerator() < 10
 ```
 
 满足条件后调用 `AutoDrive_TriggerReturn()`。是否真正进入返航，还要看已保存返航点是否合法、当前 GPS 是否可用、距离是否满足 AutoDrive 激活条件。
@@ -515,7 +517,7 @@ GPS 回传：
 - `0x13/0x14` 载荷必须至少 10 字节。
 - `0x15` 正常完整载荷为 11 字节。
 - 自动返航配置能保存到 `0x0001F800`。
-- 低电返航只在电量等级为 0、自动驾驶关闭、当前电机速度量程 `|g_now_throttle_speed| < 10` 时触发入口。
+- 低电返航只在电量等级为 0、自动驾驶关闭、油门低于 10 时触发入口。
 
 ## 16. 禁止修改项
 

@@ -87,9 +87,8 @@ s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len);
  * @details
  * 用于执行固定 seed 配对、配对响应窗口、工作信道监听和旧版协议流式解析。
  * 每收到一帧合法协议数据都会按旧版业务回发一次 `SHIP_CMD_GPS_REPORT(0x12)`；
- * 收到 `SHIP_CMD_THROTTLE(0x11)` 时恢复老版开环前进、后退、左转、右转、停止判定。
- * 当 `SHIP_THROTTLE_PWM_ENABLE=1` 时，本层会驱动 `Motor` 模块输出真实 PWM；
- * 若该宏为 0，则只保留日志，不输出电机 PWM。
+ * 收到 `SHIP_CMD_THROTTLE(0x11)` 时更新遥控输入，并交给 `ShipControl`
+ * 统一仲裁手动开环、手动自稳、定速巡航和 GPS 航向保持。
  *
  * @warning
  * 当前工程保留 `0x13/0x14/0x15` 的旧版点位格式，并实际调用
@@ -106,19 +105,19 @@ void ShipProtocol_RunScheduler(void);
 u8 ShipProtocol_IsPaired(void);
 
 /**
- * @brief      使用已验证的 yaw-hold 自稳链路按目标航向巡航。
+ * @brief      兼容入口：把 GPS 航向保持请求转交给 ShipControl。
  * @param[in]  target_heading_cd  目标航向，单位 0.01 度，范围按 0..35999 归一化。
  * @param[in]  base_speed         基础前进速度。
- * @return     1=已输出自稳电机控制，0=航向不可用或 yaw-hold 未启用。
+ * @return     1=请求已提交。
  *
  * @note
- * 本接口复用遥控自稳模式的 PID、左右极性、差速限幅、陀螺阻尼和输出斜坡。
- * AutoDrive 不应另起一套左右电机极性判断。
+ * 新代码应直接调用 `ShipControl_RequestGpsNav()`；保留本接口只是避免旧引用
+ * 立即失效。
  */
 u8 ShipProtocol_ApplyYawHoldTarget(u16 target_heading_cd, int16 base_speed);
 
 /**
- * @brief   复位 yaw-hold 自稳状态。
+ * @brief   兼容入口：复位 ShipControl yaw-hold 状态。
  */
 void ShipProtocol_ResetYawHoldController(void);
 

@@ -244,7 +244,7 @@ byte10  lat_frac_L
 - `AutoDrive_IsCanActive()` 进入返航/去钓点前使用当前有效 GPS 点计算距离，并同步刷新 `g_idle_position`。
 - `AutoDrive_Poll()` 现在用 GPS 当前点和目标点持续计算目标航向、距离；到目标点 `< 3m` 判定到达。
 - 航向修正已经改为 PID 自稳定设置角度：目标航向来自 GPS 点位规划，电机差速复用遥控自稳模式的 yaw-hold 链路。
-- 左右电机极性、差速限幅、陀螺阻尼和输出斜坡都在 `ShipProtocol_ApplyYawHoldTarget()` 中沿用自稳模式，不在 AutoDrive 内单独判断。
+- 左右电机极性、差速限幅、陀螺阻尼和输出斜坡都在 `ShipControl_RequestGpsNav()` / `ShipControl` yaw-hold 链路中沿用自稳模式，不在 AutoDrive 内单独判断。
 - 自稳航向不可用时停止电机，不再开环直行兜底。
 - 老工程风格的“定时左/右转修正”已经去掉，不再用 `turn_times` 倒计时转弯。
 

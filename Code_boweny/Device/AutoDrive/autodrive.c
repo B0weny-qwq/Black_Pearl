@@ -2,8 +2,7 @@
 
 #include "autodrive_cfg.h"
 #include "..\GPS\GPS.h"
-#include "..\Motor\Motor.h"
-#include "..\WIRELESS\ship_protocol.h"
+#include "..\Control\ShipControl.h"
 #include "..\..\..\User\MainLoop.h"
 #include "..\..\..\User\Task.h"
 
@@ -31,7 +30,6 @@ static u8 g_autoDrive_state = AUTO_DRIVE_IDLE;
 static u8 g_autoDrive_mode = AUTO_DRIVE_CLOSE;
 static u16 g_autodrive_work_overtime = 0U;
 static u8 g_autoDrive_fail_flag = 0U;
-static u8 g_motor_ready = 0U;
 
 static AutoDrive_PointRaw_t g_idle_position;
 static AutoDrive_PointRaw_t g_now_position;
@@ -369,20 +367,22 @@ static void AutoDrive_ApplyHeadingHold(u16 base_speed)
         AutoDrive_StopMotion();
         return;
     }
-
-    if (ShipProtocol_ApplyYawHoldTarget(g_autodrive_target_heading_cd,
-                                        (int16)base_speed) == 0U) {
+    if (MainLoop_IsHeadingReady() == 0U) {
+        AutoDrive_Stop();
         AutoDrive_StopMotion();
+        return;
     }
+
+    ShipControl_RequestGpsNav(g_autodrive_target_heading_cd,
+                              (int16)base_speed);
 }
 
 void AutoDrive_StopMotion(void)
 {
-    Motor_StopAll();
     g_autodrive_target_heading_valid = 0U;
     AutoDrive_ResetApproachTracker();
     g_autodrive_align_active = 0U;
-    ShipProtocol_ResetYawHoldController();
+    ShipControl_StopGpsNav();
 }
 
 void AutoDrive_Stop(void)
@@ -921,10 +921,6 @@ void AutoDrive_Init(void)
     AutoDrive_ResetApproachTracker();
     g_autodrive_align_active = 0U;
 
-    if (g_motor_ready == 0U) {
-        Motor_Init();
-        g_motor_ready = 1U;
-    }
     AutoDrive_StopMotion();
 }
 
@@ -1011,7 +1007,7 @@ void AutoDrive_Poll(void)
             break;
         }
 
-        ShipProtocol_ResetYawHoldController();
+        ShipControl_ResetYawHoldController();
         g_last_run_update_seq = gps->update_sequence;
         g_autodrive_align_active =
             (AutoDrive_GetHeadingErrorAbsCd() > AUTODRIVE_ALIGN_ENTER_ERROR_CD) ? 1U : 0U;
@@ -1061,7 +1057,7 @@ void AutoDrive_Poll(void)
 
         if (AutoDrive_GetHeadingErrorAbsCd() <= AUTODRIVE_ALIGN_EXIT_ERROR_CD) {
             g_autodrive_align_active = 0U;
-            ShipProtocol_ResetYawHoldController();
+            ShipControl_ResetYawHoldController();
             g_autoDrive_state = AUTO_DRIVE_RUNING;
             AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
         } else {

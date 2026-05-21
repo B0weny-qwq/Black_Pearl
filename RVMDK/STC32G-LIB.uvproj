@@ -272,7 +272,7 @@
               <MiscControls></MiscControls>
               <Define></Define>
               <Undefine></Undefine>
-              <IncludePath>..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR</IncludePath>
+              <IncludePath>..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR;..\Code_boweny\Device\Control</IncludePath>
             </VariousControls>
           </C251>
           <Ax51>
@@ -581,6 +581,21 @@
               <FileName>Motor.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\Code_boweny\Device\MOTOR\Motor.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Control</GroupName>
+          <Files>
+            <File>
+              <FileName>ShipControl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Code_boweny\Device\Control\ShipControl.c</FilePath>
+            </File>
+            <File>
+              <FileName>ShipControl.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Code_boweny\Device\Control\ShipControl.h</FilePath>
             </File>
           </Files>
         </Group>

@@ -75,12 +75,13 @@ void AutoDrive_LinkAliveKick(void);
 ```text
 IDLE
   -> START
+  -> GET_DIRECTION  // 大角度偏差时先用 ShipControl 原地对准
   -> RUNING
   -> 到点 / 超时 / 失败
   -> CLOSE + STOP
 ```
 
-说明：`AUTO_DRIVE_GET_DIRECTION` 只保留为兼容旧状态值，当前进入后会回到 `START`，不再执行老工程那种“定时左/右转修正”。
+说明：`AUTO_DRIVE_GET_DIRECTION` 不再执行老工程那种“定时左/右转修正”；它只在目标航向误差较大时用 `ShipControl_RequestGpsNav(target, 0)` 走统一 yaw-hold 链路原地对准，对准后进入 `RUNING`。
 
 ## 当前激活条件
 
@@ -103,7 +104,7 @@ IDLE
 
 ## 当前航向来源
 
-`AutoDrive` 不再自己实现 yaw PID 和左右电机极性，而是调用 `ShipProtocol_ApplyYawHoldTarget()`，复用遥控自稳模式已经验证过的 yaw-hold 链路。
+`AutoDrive` 不再自己实现 yaw PID 和左右电机极性，而是调用 `ShipControl_RequestGpsNav()`，复用统一控制层已经验证过的 yaw-hold 链路。
 
 当前航向来源：
 
@@ -114,12 +115,12 @@ IDLE
 说明：
 
 - GPS 用来给目标点算目标航向和到点距离。
-- yaw-hold 自稳链路负责 PID、左右极性、差速限幅、陀螺阻尼和输出斜坡。
+- `ShipControl` 的 yaw-hold 自稳链路负责 PID、左右极性、差速限幅、陀螺阻尼和输出斜坡。
 - 当前已经去掉老工程“定时左/右转修正”，不再用 `turn_times` 这种倒计时转向。
 
 ## 当前电机输出
 
-`AutoDrive` 不直接输出左右差速；正常巡航由 `ShipProtocol_ApplyYawHoldTarget()` 输出双电机差速，航向自稳不可用时停止电机。
+`AutoDrive` 不直接输出左右差速；正常巡航由 `ShipControl_RequestGpsNav()` 进入统一控制层，航向自稳不可用时停止电机。
 
 当前关键常量：
 
@@ -158,7 +159,7 @@ IDLE
 ```text
 power_level == 0
 AutoDrive_GetMode() == AUTO_DRIVE_CLOSE
-|g_now_throttle_speed| < 10
+ShipControl_GetManualAccelerator() < 10
 ```
 
 ## 当前协议格式

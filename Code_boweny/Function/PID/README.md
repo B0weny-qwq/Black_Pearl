@@ -95,14 +95,14 @@ output     = clamp(output)
 
 ## 航向自稳定流程：手动油门 + PID 差速
 
-本项目的手动航向自稳定在 `Code_boweny/Device/WIRELESS/ship_protocol.c` 中实现，PID 本身只负责输出航向误差修正量，不直接接管油门。
+本项目的手动航向自稳定在 `Code_boweny/Device/Control/ShipControl.c` 中实现，PID 本身只负责输出航向误差修正量，不直接接管油门。
 
 ### 1. 更新频率
 
 - 遥控器油门输入只由 `SHIP_CMD_THROTTLE(0x11)` 更新，`lr/ud/key` 的来源频率与遥控器油门帧一致。
-- 手动控制目标由 `ShipProtocol_ServiceManualControl()` 按 `SHIP_MANUAL_CONTROL_PERIOD_MS=10ms` 使用最新 `lr/ud/key` 连续刷新，避免遥控帧率低或偶发丢帧时电机目标一顿一顿。
+- 手动控制目标由 `ShipControl_Tick()` 按 `SHIP_MANUAL_CONTROL_PERIOD_MS=10ms` 使用最新 `lr/ud/key` 连续刷新，避免遥控帧率低或偶发丢帧时电机目标一顿一顿。
 - `Motor` 模块只接收最新目标 speed；底层 PWM 波形仍按硬件 PWM 定时器频率连续输出。
-- 日志由独立限频控制：`SHIP_RC_INPUT_LOG_PERIOD_MS` 只限制 `0x11` 输入日志，`SHIP_MOT_LOG_PERIOD_MS` 只限制手动控制/电机诊断日志，`SHIP_YAW_HOLD_LOG_PERIOD_MS` 只限制 `[MOT]` 诊断日志。日志打印不触发、不跳过、不延后内部控制计算。
+- 日志由独立限频控制：`SHIP_RC_INPUT_LOG_PERIOD_MS` 只限制 `0x11` 输入日志，`SHIP_YAW_HOLD_LOG_PERIOD_MS` 限制控制层 yaw-hold 诊断日志。日志打印不触发、不跳过、不延后内部控制计算。
 - 无遥控油门时不会启动空闲 yaw-hold 驱动电机，避免上电后 AHRS ready 触发电机自转。
 
 ### 2. 遥控输入转为左右输入油门
@@ -195,7 +195,7 @@ yaw_output = pid_output * yaw_limit / SHIP_YAW_HOLD_OUTPUT_LIMIT
 yaw_output = clamp(yaw_output, -yaw_limit, +yaw_limit)
 ```
 
-当前 `SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=500`，所以 PID 满输出时差速修正最多是当前基础油门的 50%，同时还会受电机满量程余量限制。例如 `base=600` 时最大 `yaw_output=300`，最终左右最多变成 `900/300`；`base=850` 时电机上限余量只有 150，最大 `yaw_output=150`，最终最多是 `1000/700`，不会让 `base + PID` 长时间被独立夹死在满量程。
+当前 `SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=400`，所以 PID 满输出时差速修正最多是当前基础油门的 40%，同时还会受电机满量程余量限制。例如 `base=600` 时最大 `yaw_output=240`，最终左右最多变成 `840/360`；`base=850` 时电机上限余量只有 150，最大 `yaw_output=150`，最终最多是 `1000/700`，不会让 `base + PID` 长时间被独立夹死在满量程。
 
 最终输出：
 
