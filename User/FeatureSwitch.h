@@ -116,11 +116,8 @@
 #define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 400
 /* Current cap: yaw_output <= 40% of current base speed before headroom clamp. */
 
-/* raw LR must stay within center +/- this value; otherwise yaw-hold exits immediately. */
-#define SHIP_YAW_HOLD_RAW_STEER_GATE 10U
-
-/* forbid yaw-hold at very low throttle where differential correction is ineffective. */
-#define SHIP_YAW_HOLD_MIN_THROTTLE_SPEED 250
+/* manual yaw-hold enters when abs(left-right) < max(abs(left),abs(right)) * this percent. */
+#define SHIP_MANUAL_YAW_HOLD_DIFF_PERCENT 20U
 
 /* 1 keeps current sign; -1 flips yaw correction if field test shows positive feedback. */
 #define SHIP_YAW_HOLD_OUTPUT_SIGN 1
@@ -147,15 +144,6 @@
 
 /* wait N stable centered-steering frames before locking yaw target. */
 #define SHIP_YAW_HOLD_STEER_STABLE_FRAMES 2U
-
-/**
- * @brief  手动自稳的转向门限
- * @details
- * - 单位为遥控器轴心偏差值，100 表示满量程中心偏差
- * - 当左右摇杆偏差不超过该值时，认为用户想直线前进，允许进入 yaw 自稳
- * - 当前建议值为 10，等价于大约 10% 的转向输入
- */
-#define SHIP_YAW_HOLD_STEER_GATE       15U
 
 /**
  * @brief  yaw 自稳比例增益

@@ -60,7 +60,7 @@
 - 无线、GPS、磁力计、IMU/AHRS 当前都启用。
 - 磁力计单独刷屏入口关闭，磁力计由 AHRS 路径使用。
 - 主路径使用 `ShipProtocol_RunScheduler()`，不使用兼容轮询 `ShipProtocol_Poll()`。
-- `0x11` 的空口载荷仍是旧版 `lr/ud/key`，但当前应用层打开了手动航向保持；只有在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、`|steering| <= SHIP_YAW_HOLD_STEER_GATE` 且前进油门成立时，才会叠加 yaw-hold，因此控制手感不是旧版纯开环。
+- `0x11` 的空口载荷仍是旧版 `lr/ud/key`，但当前应用层打开了手动航向保持；只有在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、前进油门成立且左右输出差小于 20% 时，才会叠加 yaw-hold，因此控制手感不是旧版纯开环。
 - 当前强制使用天线 1；即使初始化会扫描 RSSI，最终也被 `WIRELESS_FORCE_ANT_1` 固定。
 
 ## 3. 硬件连接
@@ -287,7 +287,7 @@ payload[2] = key  // 按键码
 | 按键 | 值 | 当前行为 |
 |------|----|----------|
 | 无按键 | `0xA0` | 不动作 |
-| E | `0xA1` | 油门大于 150 时进入定速巡航入口；油门小于 110 时退出巡航；同时关闭自动驾驶模式 |
+| E | `0xA1` | 带符号油门 `raw_ud-100 >= +150` 时进入定速巡航；巡航中再按一次 E 退出；巡航中带符号油门 `raw_ud-100 < -100` 退出；按 E 且 `raw_ud-100 < -100` 时也会停巡航/停机；同时关闭自动驾驶模式 |
 | A | `0xA3` | 保留船灯入口，但当前未绑定真实灯控 GPIO，只记录 `light-unbound` |
 | B | `0xA5` | 不处理 |
 | C | `0xA7` | 不处理 |
@@ -299,7 +299,7 @@ payload[2] = key  // 按键码
 - 上位机“遥控链路显示在线”按 `AA ... BB` 包活动刷新；这里的 `0x11` 只负责控制输入和电机安全保活。
 - 若 AutoDrive 正忙，只处理按键和链路保活，不接管手动电机。
 - 非 AutoDrive 状态下，`0x11` 只把 `lr/ud/key` 提交给 `ShipControl_UpdateManualInput()`。
-- 当前工作区的手动控制不是旧版纯开环：`ShipControl` 会做轴滤波、死区曲线、油门/转向混合，并在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、`|steering| <= SHIP_YAW_HOLD_STEER_GATE` 且前进油门成立时叠加手动航向保持。
+- 当前工作区的手动控制不是旧版纯开环：`ShipControl` 会做轴滤波、死区曲线、油门/转向混合，并在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、前进油门成立且左右输出差小于 20% 时叠加手动航向保持。
 - 如果要求应用层行为严格等同旧版 `WirelessProtoca_Motor_Control()`，需要关闭 `SHIP_YAW_HOLD_MANUAL_ENABLE`。
 
 安全保护：
@@ -539,7 +539,7 @@ GPS 回传：
 
 | 差异 | 当前处理 | 影响 |
 |------|----------|------|
-| `0x11` 应用层不是旧版纯开环 | 当前打开 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，且仅在小转向和前进油门下叠加 yaw-hold | 空口兼容，但手感不完全等同旧版 |
+| `0x11` 应用层不是旧版纯开环 | 当前打开 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`，且仅在前进油门、左右输出差小于最大单侧输出 20% 时叠加 yaw-hold | 空口兼容，但手感不完全等同旧版 |
 | `AutoDrive` 入口隐藏在协议调度器内 | `ShipProtocol_RunScheduler()` 会初始化并轮询 `AutoDrive` | 阅读主循环时容易误以为 AutoDrive 未接入 |
 | A 键灯控引脚未确认 | 只记录 `light-unbound`，不绑定 GPIO | 遥控器能下发，船灯不动作 |
 | `0x0F` 配对响应不再触发旧版罗盘校准 | 当前只置 `paired=1` 并进入工作信道 | 配对协议兼容，但旧版 `Compass_calib_start()` 副作用未恢复 |

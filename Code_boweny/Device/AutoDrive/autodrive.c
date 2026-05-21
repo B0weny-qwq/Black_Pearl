@@ -1009,15 +1009,9 @@ void AutoDrive_Poll(void)
 
         ShipControl_ResetYawHoldController();
         g_last_run_update_seq = gps->update_sequence;
-        g_autodrive_align_active =
-            (AutoDrive_GetHeadingErrorAbsCd() > AUTODRIVE_ALIGN_ENTER_ERROR_CD) ? 1U : 0U;
-        if (g_autodrive_align_active != 0U) {
-            g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
-            AutoDrive_ApplyHeadingHold(0U);
-        } else {
-            g_autoDrive_state = AUTO_DRIVE_RUNING;
-            AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
-        }
+        g_autodrive_align_active = 1U;
+        g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
+        AutoDrive_ApplyHeadingHold(0U);
         break;
 
     case AUTO_DRIVE_GET_DIRECTION:

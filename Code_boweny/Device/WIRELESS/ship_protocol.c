@@ -74,7 +74,9 @@
 
 #define SHIP_LEGACY_PROTO_MAX_LEN      30U
 #define SHIP_AXIS_CENTER               100U
-#define SHIP_LEGACY_PWM_SCALE          10
+#define SHIP_CRUISE_KEY_START_INPUT    150
+#define SHIP_CRUISE_KEY_STOP_INPUT     (-100)
+#define SHIP_CRUISE_KEY_SPEED          850
 #define SHIP_POWER_LEVEL_0             0U
 #define SHIP_POWER_LEVEL_1             1U
 #define SHIP_POWER_LEVEL_2             2U
@@ -188,7 +190,7 @@ static void ShipProtocol_MarkPairedByFrame(u8 cmd);
 static void ShipProtocol_ReadPowerSample(ShipPowerSample_t *sample);
 static void ShipProtocol_ServicePowerSample(void);
 static u8 ShipProtocol_AdcRawToPowerLevel(u16 adc_raw);
-static int16 ShipProtocol_LegacyPwmToSpeed(u8 pwm);
+static int16 ShipProtocol_RawUdToInput(u8 front_back);
 static u8 ShipProtocol_IsLowPower(void);
 static void ShipProtocol_LowPowerCheck(void);
 #if SHIP_PROTOCOL_DIAG_ENABLE
@@ -250,12 +252,9 @@ u8 ShipProtocol_ApplyYawHoldTarget(u16 target_heading_cd, int16 base_speed)
     return 1U;
 }
 
-static int16 ShipProtocol_LegacyPwmToSpeed(u8 pwm)
+static int16 ShipProtocol_RawUdToInput(u8 front_back)
 {
-    if (pwm > 100U) {
-        pwm = 100U;
-    }
-    return (int16)((int16)pwm * SHIP_LEGACY_PWM_SCALE);
+    return (int16)((int16)front_back - (int16)SHIP_AXIS_CENTER);
 }
 
 static u8 ShipProtocol_IsLowPower(void)
@@ -333,36 +332,45 @@ static void ShipProtocol_LogLightPending(void)
 
 static void ShipProtocol_HandleKey(u8 front_back, u8 key)
 {
+    u8 cruise_active;
+    int16 throttle_input;
+
     if (key == g_ship_rt.last_key) {
         return;
     }
     g_ship_rt.last_key = key;
+    throttle_input = ShipProtocol_RawUdToInput(front_back);
+    cruise_active =
+        (ShipControl_GetMode() == SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD) ? 1U : 0U;
 
     switch (key) {
     case SHIP_KEY_A_TOGGLE_LIGHT:
         ShipProtocol_LogLightPending();
         break;
     case SHIP_KEY_B_UNUSED:
-        LOGI(SHIP_TAG, "key action=B noop");
+        SHIP_VIEWER_LOG0(SHIP_TAG, "key action=B noop");
         break;
     case SHIP_KEY_C_UNUSED:
-        LOGI(SHIP_TAG, "key action=C noop");
+        SHIP_VIEWER_LOG0(SHIP_TAG, "key action=C noop");
         break;
     case SHIP_KEY_D_UNUSED:
-        LOGI(SHIP_TAG, "key action=D noop");
+        SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D noop");
         break;
     case SHIP_KEY_E_RESERVED:
-        if (front_back > 150U) {
+        if (cruise_active != 0U) {
+            ShipControl_Stop(SHIP_CONTROL_STOP_REASON_CRUISE_KEY);
+            SHIP_VIEWER_LOG0(SHIP_TAG, "key action=E cruise-toggle-stop");
+        } else if (throttle_input >= SHIP_CRUISE_KEY_START_INPUT) {
             if (MainLoop_IsHeadingReady() != 0U) {
                 ShipControl_RequestCruise(MainLoop_GetHeadingDeg100(),
-                                          ShipProtocol_LegacyPwmToSpeed(100U));
+                                          SHIP_CRUISE_KEY_SPEED);
             } else {
                 ShipControl_Stop(SHIP_CONTROL_STOP_REASON_HEADING_LOST);
             }
-            LOGI(SHIP_TAG, "key action=E cruise-high");
-        } else if (front_back < 110U) {
+            SHIP_VIEWER_LOG0(SHIP_TAG, "key action=E cruise-high");
+        } else if (throttle_input < SHIP_CRUISE_KEY_STOP_INPUT) {
             ShipControl_Stop(SHIP_CONTROL_STOP_REASON_CRUISE_KEY);
-            LOGI(SHIP_TAG, "key action=E cruise-stop");
+            SHIP_VIEWER_LOG0(SHIP_TAG, "key action=E cruise-stop");
         }
         AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
         break;
@@ -1331,6 +1339,17 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
     }
     if (AutoDrive_IsBusy() != 0U) {
         ShipProtocol_HandleKey(g_ship_rt.ud, g_ship_rt.key);
+        AutoDrive_LinkAliveKick();
+        return log_this_sample;
+    }
+    if ((ShipControl_GetMode() == SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD) &&
+        (ShipProtocol_RawUdToInput(g_ship_rt.ud) < SHIP_CRUISE_KEY_STOP_INPUT)) {
+        ShipControl_Stop(SHIP_CONTROL_STOP_REASON_CRUISE_KEY);
+        SHIP_VIEWER_LOGI(SHIP_TAG,
+                         "key action=E cruise-reverse-stop input=%d raw_ud=%u",
+                         ShipProtocol_RawUdToInput(g_ship_rt.ud),
+                         (u16)g_ship_rt.ud);
+        AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
         AutoDrive_LinkAliveKick();
         return log_this_sample;
     }

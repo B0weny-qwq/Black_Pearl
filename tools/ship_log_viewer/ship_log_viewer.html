@@ -453,31 +453,6 @@
       <section class="panel panel-body">
         <div class="subhead"><h2>联调摘要</h2></div>
         <div class="cards">
-          <div class="card">
-            <div class="label">AHRS R/P/Y</div>
-            <div id="ahrsPoseValue" class="value value-compact">--</div>
-            <div id="ahrsPoseMeta" class="meta">等待 AHRS 日志</div>
-          </div>
-          <div class="card">
-            <div class="label">陀螺仪数据</div>
-            <div id="ahrsGyroValue" class="value">--</div>
-            <div id="ahrsGyroMeta" class="meta">gX / gY / gZ</div>
-          </div>
-          <div class="card">
-            <div class="label">Yaw 状态</div>
-            <div id="ahrsYawValue" class="value">--</div>
-            <div id="ahrsYawMeta" class="meta">等待 ys / yr</div>
-          </div>
-          <div class="card">
-            <div class="label">AHRS Flags</div>
-            <div id="ahrsFlagValue" class="value">--</div>
-            <div id="ahrsFlagMeta" class="meta">flags / mag</div>
-          </div>
-          <div class="card">
-            <div class="label">HDG Debug</div>
-            <div id="hdgValue" class="value value-compact">--</div>
-            <div id="hdgMeta" class="meta">waiting [HDG]</div>
-          </div>
           <div class="card compass-card">
             <div class="label">船头朝向</div>
             <div class="compass-wrap">
@@ -507,22 +482,32 @@
           <div class="card">
             <div class="label">遥控输入油门</div>
             <div id="throttleInputValue" class="value">--</div>
-            <div id="throttleInputMeta" class="meta">等待 throttle_raw 日志</div>
+            <div id="throttleInputMeta" class="meta">等待 rc11 / throttle_raw 日志</div>
           </div>
           <div class="card">
             <div class="label">实际输出油门</div>
             <div id="throttleOutputValue" class="value">--</div>
-            <div id="throttleOutputMeta" class="meta">等待 MOT 短日志</div>
+            <div id="throttleOutputMeta" class="meta">等待 rc11 推算 / MOT 短日志</div>
           </div>
           <div class="card">
             <div class="label">动作判定</div>
             <div id="motionValue" class="value">--</div>
-            <div id="motionMeta" class="meta">等待 AA...BB 头尾包</div>
+            <div id="motionMeta" class="meta">等待 rc11 tv/sv</div>
+          </div>
+          <div class="card">
+            <div class="label">控制模式</div>
+            <div id="controlModeValue" class="value">--</div>
+            <div id="controlModeMeta" class="meta">等待 rc11 / key action / CTRL</div>
+          </div>
+          <div class="card">
+            <div class="label">自动驾驶</div>
+            <div id="autoDriveValue" class="value">--</div>
+            <div id="autoDriveMeta" class="meta">等待 gps12 auto / 0x16 诊断</div>
           </div>
           <div class="card">
             <div class="label">自稳定状态</div>
             <button id="selfStabilizeValue" class="value state-pill off" disabled>OFF</button>
-            <div id="selfStabilizeMeta" class="meta">等待 |steering| < 15</div>
+            <div id="selfStabilizeMeta" class="meta">等待左右差 < 20%</div>
           </div>
           <div class="card">
             <div class="label">按键状态</div>
@@ -544,12 +529,37 @@
             <div id="magValue" class="value">--</div>
             <div id="magMeta" class="meta">X / Y / Z / norm</div>
           </div>
+          <div class="card">
+            <div class="label">AHRS R/P/Y</div>
+            <div id="ahrsPoseValue" class="value value-compact">--</div>
+            <div id="ahrsPoseMeta" class="meta">当前日志未输出 [AHRS]</div>
+          </div>
+          <div class="card">
+            <div class="label">陀螺仪数据</div>
+            <div id="ahrsGyroValue" class="value">--</div>
+            <div id="ahrsGyroMeta" class="meta">当前日志未输出 gyro</div>
+          </div>
+          <div class="card">
+            <div class="label">Yaw 状态</div>
+            <div id="ahrsYawValue" class="value">--</div>
+            <div id="ahrsYawMeta" class="meta">当前日志未输出 ys / yr</div>
+          </div>
+          <div class="card">
+            <div class="label">AHRS Flags</div>
+            <div id="ahrsFlagValue" class="value">--</div>
+            <div id="ahrsFlagMeta" class="meta">当前日志未输出 flags</div>
+          </div>
+          <div class="card">
+            <div class="label">HDG Debug</div>
+            <div id="hdgValue" class="value value-compact">--</div>
+            <div id="hdgMeta" class="meta">当前日志未输出 [HDG]</div>
+          </div>
         </div>
 
         <table class="table">
           <tbody>
-            <tr><td>AHRS 状态</td><td id="ahrsInfo">等待 AHRS 日志</td></tr>
-            <tr><td>HDG Debug</td><td id="hdgInfo">waiting [HDG]</td></tr>
+            <tr><td>AHRS 状态</td><td id="ahrsInfo">当前日志未输出 [AHRS]</td></tr>
+            <tr><td>HDG Debug</td><td id="hdgInfo">当前日志未输出 [HDG]</td></tr>
             <tr><td>船头朝向</td><td id="compassInfo">等待 HDG / MAG</td></tr>
             <tr><td>串口状态</td><td id="portInfo">未选择</td></tr>
             <tr><td>遥控在线状态</td><td id="remoteInfo">离线</td></tr>
@@ -642,6 +652,12 @@
 
   <script>
     const RENDER_INTERVAL_MS = 120;
+    const RC_DEAD_LOW = 90;
+    const RC_DEAD_HIGH = 110;
+    const MANUAL_SELF_STEER_GATE = 20;
+    const CRUISE_START_THROTTLE = 150;
+    const CRUISE_EXIT_THROTTLE = -100;
+    const CRUISE_PWM = 850;
 
     const state = {
       port: null,
@@ -667,17 +683,17 @@
       },
       last: {
         ahrsPoseValue: "--",
-        ahrsPoseMeta: "等待 AHRS 日志",
+        ahrsPoseMeta: "当前日志未输出 [AHRS]",
         ahrsGyroValue: "--",
-        ahrsGyroMeta: "gX / gY / gZ",
+        ahrsGyroMeta: "当前日志未输出 gyro",
         ahrsYawValue: "--",
-        ahrsYawMeta: "等待 ys / yr",
+        ahrsYawMeta: "当前日志未输出 ys / yr",
         ahrsFlagValue: "--",
-        ahrsFlagMeta: "flags / mag",
-        ahrsInfo: "等待 AHRS 日志",
+        ahrsFlagMeta: "当前日志未输出 flags",
+        ahrsInfo: "当前串口日志没有 [AHRS]，先看 rc11 / gps12 / MAG",
         hdgValue: "--",
-        hdgMeta: "waiting [HDG]",
-        hdgInfo: "waiting [HDG]",
+        hdgMeta: "当前日志未输出 [HDG]",
+        hdgInfo: "当前串口日志没有 [HDG]，船头朝向先用 MAG compass 参考",
         compassHeadingDeg: null,
         compassNeedleDeg: null,
         compassHeadingText: "--",
@@ -689,13 +705,17 @@
         rcValue: "离线",
         rcMeta: "等待 AA...BB 头尾包",
         throttleInputValue: "--",
-        throttleInputMeta: "等待 throttle_raw 日志",
+        throttleInputMeta: "等待 rc11 / throttle_raw 日志",
         throttleOutputValue: "--",
-        throttleOutputMeta: "等待 MOT 短日志",
+        throttleOutputMeta: "等待 rc11 推算 / MOT 短日志",
         motionValue: "--",
-        motionMeta: "等待 AA...BB 头尾包",
+        motionMeta: "等待 rc11 tv/sv",
+        controlModeValue: "--",
+        controlModeMeta: "等待 rc11 / key action / CTRL",
+        autoDriveValue: "--",
+        autoDriveMeta: "等待 gps12 auto / 0x16 诊断",
         selfStabilizeValue: "OFF",
-        selfStabilizeMeta: "等待 |steering| < 15",
+        selfStabilizeMeta: "等待左右差 < 20%",
         keyValue: "--",
         keyMeta: "等待 key 日志",
         txValue: "--",
@@ -765,6 +785,10 @@
       throttleOutputMeta: document.getElementById("throttleOutputMeta"),
       motionValue: document.getElementById("motionValue"),
       motionMeta: document.getElementById("motionMeta"),
+      controlModeValue: document.getElementById("controlModeValue"),
+      controlModeMeta: document.getElementById("controlModeMeta"),
+      autoDriveValue: document.getElementById("autoDriveValue"),
+      autoDriveMeta: document.getElementById("autoDriveMeta"),
       selfStabilizeValue: document.getElementById("selfStabilizeValue"),
       selfStabilizeMeta: document.getElementById("selfStabilizeMeta"),
       keyValue: document.getElementById("keyValue"),
@@ -920,6 +944,10 @@
       el.throttleOutputMeta.textContent = state.last.throttleOutputMeta;
       el.motionValue.textContent = state.last.motionValue;
       el.motionMeta.textContent = state.last.motionMeta;
+      el.controlModeValue.textContent = state.last.controlModeValue;
+      el.controlModeMeta.textContent = state.last.controlModeMeta;
+      el.autoDriveValue.textContent = state.last.autoDriveValue;
+      el.autoDriveMeta.textContent = state.last.autoDriveMeta;
       el.selfStabilizeValue.textContent = state.last.selfStabilizeValue;
       el.selfStabilizeMeta.textContent = state.last.selfStabilizeMeta;
       el.selfStabilizeValue.classList.remove("on", "off");
@@ -1007,7 +1035,17 @@
       if (!code) {
         return "--";
       }
-      return `${name || "UNKNOWN"} (${code})`;
+      const normalized = String(code).toUpperCase();
+      const keyMap = {
+        "0XA0": "无按键",
+        "0XA1": "E",
+        "0XA3": "A",
+        "0XA5": "B",
+        "0XA7": "C",
+        "0XA9": "D"
+      };
+      const label = name && !/^0x/i.test(String(name)) ? name : (keyMap[normalized] || "UNKNOWN");
+      return `${label} (${code})`;
     }
 
     function keyActionText(action, extra) {
@@ -1015,11 +1053,62 @@
         "light-unbound": "A 兼容入口：灯引脚未绑定",
         "light-unbound repeat": "A 重复：灯引脚仍未绑定",
         "noop": "B 无动作",
+        "cruise-high": "E 定速巡航：锁当前航向",
+        "cruise-stop": "E 停止巡航/停机",
+        "cruise-toggle-stop": "E 再按一次：退出定速巡航",
+        "cruise-reverse-stop": "摇杆反向阈值：退出定速巡航",
         "pulse-forward": "C 前冲脉冲",
         "pulse-backward": "D 后退脉冲",
         "reserved": "E 保留，不触发自动驾驶"
       };
       return `${map[action] || action}${extra ? ` / ${extra}` : ""}`;
+    }
+
+    function shipControlModeText(mode) {
+      const map = {
+        0: "STOP",
+        1: "MANUAL_OPEN_LOOP",
+        2: "MANUAL_YAW_HOLD",
+        3: "CRUISE_HEADING_HOLD",
+        4: "GPS_NAV_HEADING_HOLD",
+        5: "FAILSAFE_STOP"
+      };
+      return map[mode] || `mode ${mode}`;
+    }
+
+    function autoDriveStateText(stateValue) {
+      const map = {
+        0: "IDLE",
+        1: "START",
+        2: "GET_DIRECTION",
+        3: "RUNING"
+      };
+      return map[stateValue] || `state ${stateValue}`;
+    }
+
+    function autoDriveModeText(mode) {
+      const map = {
+        0: "CLOSE",
+        1: "GOTO_POINT",
+        2: "RETURN_HOME"
+      };
+      return map[mode] || `mode ${mode}`;
+    }
+
+    function autoDriveReasonText(reason) {
+      const map = {
+        0: "none",
+        1: "0x13 return-home",
+        2: "0x14 goto-point",
+        3: "0x15 return-switch",
+        4: "link timeout",
+        5: "low power",
+        6: "generic trigger",
+        7: "arrive",
+        8: "overtime",
+        9: "stop"
+      };
+      return map[reason] || `reason ${reason}`;
     }
 
     function throttleModeText(mode) {
@@ -1123,14 +1212,24 @@
       return formatOutputPercent(left, right);
     }
 
-    function updateSelfStabilizeFromSteering(steeringValue) {
-      const steering = Number(steeringValue);
-      const absSteering = Number.isFinite(steering) ? Math.abs(steering) : NaN;
-      const isOn = Number.isFinite(absSteering) && absSteering < 15;
+    function manualOutputDiffInfo(throttle, steering) {
+      const left = throttle + steering;
+      const right = throttle - steering;
+      const absLeft = Math.abs(left);
+      const absRight = Math.abs(right);
+      const maxOutput = Math.max(absLeft, absRight);
+      const diff = Math.abs(left - right);
+      const percent = maxOutput > 0 ? (diff * 100) / maxOutput : 0;
+      return { left, right, diff, maxOutput, percent };
+    }
+
+    function updateSelfStabilizeFromDiff(diffInfo, contextText = "手动输入") {
+      const isOn = diffInfo.maxOutput > 0 && diffInfo.percent < MANUAL_SELF_STEER_GATE;
       state.last.selfStabilizeValue = isOn ? "ON" : "OFF";
-      state.last.selfStabilizeMeta = Number.isFinite(absSteering)
-        ? `|steering|=${absSteering} < 15`
-        : "steering value invalid";
+      state.last.selfStabilizeMeta =
+        `${contextText} / left=${diffInfo.left} right=${diffInfo.right}\n`
+        + `diff=${diffInfo.diff.toFixed(0)} / max=${diffInfo.maxOutput.toFixed(0)} = ${diffInfo.percent.toFixed(1)}% `
+        + `${isOn ? "<" : ">="} ${MANUAL_SELF_STEER_GATE}%`;
     }
 
     function updateKeyFromFrame(code, name, source) {
@@ -1155,6 +1254,121 @@
       markDirty("cards");
     }
 
+    function isRcAxisCentered(rawValue) {
+      const value = Number(rawValue);
+      return Number.isFinite(value) && value >= RC_DEAD_LOW && value <= RC_DEAD_HIGH;
+    }
+
+    function inputMotionText(throttle, steering) {
+      const absThrottle = Math.abs(throttle);
+      const absSteering = Math.abs(steering);
+      if (absThrottle === 0 && absSteering === 0) {
+        return "center";
+      }
+      if (absThrottle >= absSteering) {
+        return throttle >= 0 ? "forward input" : "backward input";
+      }
+      return steering >= 0 ? "right input" : "left input";
+    }
+
+    function isClosedLoopMode(modeValue) {
+      return modeValue === "MANUAL_YAW_HOLD" ||
+             modeValue === "CRUISE_HEADING_HOLD" ||
+             modeValue === "GPS_NAV_HEADING_HOLD";
+    }
+
+    function updateRcInputIntent(rawUd, rawLr, throttleValue, steeringValue, keyCode, source) {
+      const throttle = Number(throttleValue);
+      const steering = Number(steeringValue);
+      const absThrottle = Number.isFinite(throttle) ? Math.abs(throttle) : 0;
+      const absSteering = Number.isFinite(steering) ? Math.abs(steering) : 0;
+      const rawCentered = isRcAxisCentered(rawUd) && isRcAxisCentered(rawLr);
+      const key = String(keyCode || "").toUpperCase();
+      const diffInfo = manualOutputDiffInfo(throttle, steering);
+      const straightSelf = !rawCentered &&
+        absThrottle > 0 &&
+        diffInfo.maxOutput > 0 &&
+        diffInfo.percent < MANUAL_SELF_STEER_GATE;
+      const pureManualTurn = diffInfo.maxOutput > 0 && diffInfo.percent >= MANUAL_SELF_STEER_GATE;
+      const closedLoopMode = isClosedLoopMode(state.last.controlModeValue);
+      const inputText = inputMotionText(throttle, steering);
+      const outputMeta =
+        `${source} tv=${throttleValue} sv=${steeringValue}\n`
+        + `u=${rawUd} l=${rawLr} / left=${diffInfo.left} right=${diffInfo.right}\n`
+        + `左右输出差=${diffInfo.percent.toFixed(1)}%`;
+
+      updateSelfStabilizeFromDiff(diffInfo, closedLoopMode ? state.last.controlModeValue : "直推门限");
+
+      if (closedLoopMode) {
+        if (state.last.controlModeValue === "CRUISE_HEADING_HOLD" &&
+            Number.isFinite(throttle) &&
+            throttle < CRUISE_EXIT_THROTTLE) {
+          state.last.throttleOutputValue = "等待\nSTOP";
+          state.last.throttleOutputMeta = `带符号油门 ${throttle}% < ${CRUISE_EXIT_THROTTLE}%，触发定速巡航退出条件`;
+          state.last.controlModeValue = "STOP_PENDING";
+          state.last.controlModeMeta = "油门反向退出定速巡航，等待 key action=E cruise-reverse-stop / CTRL STOP";
+          state.last.selfStabilizeValue = "OFF";
+          state.last.selfStabilizeMeta = "定速巡航反向退出中";
+          updateMotionDecision("定速退出条件", `${outputMeta}\n等待固件 stop 日志`, `${source} 触发定速巡航反向退出`);
+          return;
+        }
+        state.last.throttleOutputValue = "等待\nCTRL/MOT";
+        state.last.throttleOutputMeta =
+          `${state.last.controlModeValue} 闭环中，rc11 只作输入/退出参考\n等待 CTRL/MOT 实际输出日志`;
+        updateMotionDecision(
+          state.last.controlModeValue === "GPS_NAV_HEADING_HOLD" ? "gps-nav闭环" : "定速闭环",
+          `${outputMeta}\n闭环动作以 CTRL/MOT 为准`,
+          `${source} 输入刷新，保持 ${state.last.controlModeValue}`
+        );
+        return;
+      }
+
+      if (key === "0XA1" && Number.isFinite(throttle) && throttle >= CRUISE_START_THROTTLE) {
+        state.last.controlModeValue = "CRUISE_ARM";
+        state.last.controlModeMeta = `E + tv>=+${CRUISE_START_THROTTLE}，等待 key action=E cruise-high`;
+        updateMotionDecision("准备定速", `${outputMeta}\n目标 PWM=${CRUISE_PWM}，等待巡航确认`, `${source} E键准备定速巡航`);
+        return;
+      }
+
+      if (rawCentered || (absThrottle === 0 && absSteering === 0)) {
+        state.last.throttleOutputValue = "左 0%\n右 0%";
+        state.last.throttleOutputMeta = `${source} 回中，等待 MOT 实际停机日志`;
+        state.last.controlModeValue = "STOP";
+        state.last.controlModeMeta = "遥杆回中，非闭环模式按停机显示";
+        updateMotionDecision("stop", `${outputMeta}\nraw centered ${RC_DEAD_LOW}..${RC_DEAD_HIGH}`, `${source} 回中`);
+        return;
+      }
+
+      state.last.throttleOutputValue = "等待\nMOT";
+      state.last.throttleOutputMeta = `${pureManualTurn ? "纯手动转向" : "直推自稳候选"}，实际左右输出以 MOT/CTRL 为准\n${outputMeta}`;
+      state.last.controlModeValue = straightSelf ? "MANUAL_YAW_HOLD?" : "MANUAL_OPEN_LOOP";
+      state.last.controlModeMeta = straightSelf
+        ? `直推且左右差<${MANUAL_SELF_STEER_GATE}%，应进入自稳；等待 CTRL/MOT 确认`
+        : `左右差>=${MANUAL_SELF_STEER_GATE}%，纯手动正常左右转向`;
+      updateMotionDecision(
+        straightSelf ? "直推自稳候选" : "纯手动转向",
+        `${outputMeta}\ninput=${inputText}`,
+        `${source} 输入：${straightSelf ? "直推自稳候选" : "纯手动转向"} tv=${throttleValue} sv=${steeringValue}`
+      );
+    }
+
+    function autoReturnSwitchText(autoHex) {
+      const value = Number.parseInt(autoHex, 16);
+      if (!Number.isFinite(value)) {
+        return "unknown";
+      }
+      if (value === 0x30) {
+        return "返航开关关";
+      }
+      if (value === 0x31) {
+        return "返航开关开";
+      }
+      if (value === 0x00) {
+        return "未启用/空";
+      }
+      return `auto=0x${autoHex.toUpperCase()}`;
+    }
+
     function cmdName(cmd) {
       const map = {
         "0x0F": "0x0F 配对响应",
@@ -1163,7 +1377,8 @@
         "0x12": "0x12 状态/GPS 回传",
         "0x13": "0x13 返航点",
         "0x14": "0x14 目标点",
-        "0x15": "0x15 返航开关"
+        "0x15": "0x15 返航开关",
+        "0x16": "0x16 自动驾驶诊断"
       };
       return map[cmd] || cmd;
     }
@@ -1449,12 +1664,26 @@
       const dispatch = line.match(/\[SHIP\] I: dispatch cmd=(0x[0-9A-Fa-f]{2})\(([^)]+)\) payload_len=(\d+)/);
       if (dispatch) {
         state.last.lastRxCmd = `${cmdName(dispatch[1])} payload=${dispatch[3]}`;
+        pushTimeline(`收到 ${cmdName(dispatch[1])}，payload=${dispatch[3]}`);
+        important = true;
         if (dispatch[1] === "0x13") {
           state.coordTarget = "return-home";
+          state.last.autoDriveValue = "RETURN_HOME";
+          state.last.autoDriveMeta = "收到返回指令：先原地对准方向，再角度闭环前往 GPS 点";
+          state.last.controlModeValue = "GPS_NAV_ARM";
+          state.last.controlModeMeta = "等待 0x16/CTRL 确认原地对准方向";
+          updateMotionDecision("GPS待对准", state.last.autoDriveMeta, "GPS 返回：等待原地对准方向");
         } else if (dispatch[1] === "0x14") {
           state.coordTarget = "goto-point";
+          state.last.autoDriveValue = "GOTO_POINT";
+          state.last.autoDriveMeta = "收到前往指定地点：先原地对准方向，再角度闭环前往 GPS 点";
+          state.last.controlModeValue = "GPS_NAV_ARM";
+          state.last.controlModeMeta = "等待 0x16/CTRL 确认原地对准方向";
+          updateMotionDecision("GPS待对准", state.last.autoDriveMeta, "GPS 去点：等待原地对准方向");
         } else if (dispatch[1] === "0x15") {
           state.coordTarget = "return-switch";
+          state.last.autoDriveValue = "RETURN_SWITCH";
+          state.last.autoDriveMeta = "收到 0x15，等待保存/返航诊断";
         } else {
           state.coordTarget = "";
         }
@@ -1521,8 +1750,8 @@
         state.last.throttleInputValue = `${rc[3]}`;
         state.last.throttleInputMeta = `raw_ud=${rc[1]} raw_lr=${rc[2]} steering=${rc[4]} key=${rc[6]}`;
         state.last.rcMeta = `raw_ud=${rc[1]} raw_lr=${rc[2]} throttle=${rc[3]} steering=${rc[4]} key=${rc[5]}(${rc[6]})`;
-        updateSelfStabilizeFromSteering(Number(rc[4]));
         updateKeyFromFrame(rc[5], rc[6], "0x11");
+        updateRcInputIntent(rc[1], rc[2], rc[3], rc[4], rc[5], "0x11");
         pushTimeline(`收到 0x11：raw_ud=${rc[1]} raw_lr=${rc[2]} key=${rc[6]}`);
         important = true;
       }
@@ -1532,8 +1761,8 @@
         state.last.throttleInputValue = `${throttle[3]}`;
         state.last.throttleInputMeta = `raw_ud=${throttle[1]} raw_lr=${throttle[2]} steering=${throttle[4]} key=${throttle[6]}`;
         state.last.rcMeta = `throttle=${throttle[3]} steering=${throttle[4]} key=${throttle[5]}(${throttle[6]})`;
-        updateSelfStabilizeFromSteering(throttle[4]);
         updateKeyFromFrame(throttle[5], throttle[6], "throttle");
+        updateRcInputIntent(throttle[1], throttle[2], throttle[3], throttle[4], throttle[5], "throttle_raw");
         important = true;
       }
 
@@ -1559,8 +1788,8 @@
         state.last.throttleInputValue = `${rcShort[3]}`;
         state.last.throttleInputMeta = `u=${rcShort[1]} l=${rcShort[2]} sv=${rcShort[4]} k=0x${rcShort[5]}`;
         state.last.rcMeta = `u=${rcShort[1]} l=${rcShort[2]} throttle=${rcShort[3]} steering=${rcShort[4]} key=0x${rcShort[5]}`;
-        updateSelfStabilizeFromSteering(Number(rcShort[4]));
         updateKeyFromFrame(`0x${rcShort[5]}`, `0x${rcShort[5]}`, "0x11");
+        updateRcInputIntent(rcShort[1], rcShort[2], rcShort[3], rcShort[4], `0x${rcShort[5]}`, "rc11");
         important = true;
       }
 
@@ -1596,6 +1825,52 @@
         important = true;
       }
 
+      const cruiseReverseStop = line.match(/\[SHIP\] I: key action=E cruise-reverse-stop (?:input=([-\d]+)(?: raw_ud=(\d+))?|ud=(\d+))/);
+      if (cruiseReverseStop) {
+        const inputText = cruiseReverseStop[1] || "";
+        const rawUdText = cruiseReverseStop[2] || cruiseReverseStop[3] || "";
+        const extra = inputText
+          ? `input=${inputText}${rawUdText ? ` raw_ud=${rawUdText}` : ""}`
+          : `ud=${rawUdText}`;
+        state.last.keyValue = "E";
+        state.last.keyMeta = keyActionText("cruise-reverse-stop", extra);
+        state.last.controlModeValue = "STOP";
+        state.last.controlModeMeta = `带符号油门 < ${CRUISE_EXIT_THROTTLE}，退出定速巡航`;
+        state.last.autoDriveValue = "未运行";
+        state.last.autoDriveMeta = "定速巡航退出；GPS 自动驾驶未见 0x16 busy";
+        updateMotionDecision("stop", state.last.controlModeMeta, `定速巡航退出：${extra}`);
+        important = true;
+      }
+
+      const ctrlFull = line.match(/^\[CTRL\] I: mode=(\d+) tgt=(\d+) err=([-\d]+) in=([-\d]+) pid=([-\d]+) diff=([-\d]+) throttle=([-\d]+) base=([-\d]+) steer=([-\d]+) left=([-\d]+) right=([-\d]+)$/);
+      if (ctrlFull) {
+        const mode = Number(ctrlFull[1]);
+        const modeText = shipControlModeText(mode);
+        state.last.controlModeValue = modeText;
+        state.last.controlModeMeta =
+          `tgt=${ctrlFull[2]} err=${ctrlFull[3]} in=${ctrlFull[4]} pid=${ctrlFull[5]}\n`
+          + `diff=${ctrlFull[6]} throttle=${ctrlFull[7]} base=${ctrlFull[8]} steer=${ctrlFull[9]}`;
+        state.last.throttleOutputValue = formatMotorOutputPercent(ctrlFull[10], ctrlFull[11]);
+        state.last.throttleOutputMeta =
+          `CTRL ${modeText}\nleft=${ctrlFull[10]} right=${ctrlFull[11]}\n`
+          + `base=${ctrlFull[8]} diff=${ctrlFull[6]} err=${ctrlFull[3]}`;
+        const motionLabel = mode === 2 ? "直推自稳" :
+                            mode === 3 ? "定速巡航" :
+                            mode === 4 ? "GPS角度闭环" :
+                            modeText;
+        updateMotionDecision(
+          motionLabel,
+          `left=${ctrlFull[10]} right=${ctrlFull[11]}\nbase=${ctrlFull[8]} diff=${ctrlFull[6]}`,
+          `CTRL ${modeText}: tgt=${ctrlFull[2]} err=${ctrlFull[3]} left=${ctrlFull[10]} right=${ctrlFull[11]}`
+        );
+        const isYawMode = mode === 2 || mode === 3 || mode === 4;
+        state.last.selfStabilizeValue = isYawMode ? "ON" : "OFF";
+        state.last.selfStabilizeMeta = isYawMode
+          ? `角度闭环 ${modeText} / err=${ctrlFull[3]} diff=${ctrlFull[6]}`
+          : `CTRL ${modeText}`;
+        important = true;
+      }
+
       const manualShort = line.match(/\[SHIP\] I: man u=(\d+) l=(\d+) tv=([-\d]+) sv=([-\d]+) k=([0-9A-Fa-f]{2}) m=(\d+) sp=([-\d]+)/);
       if (manualShort) {
         const manualMotionText = motionText(Number(manualShort[6]));
@@ -1625,6 +1900,28 @@
         const extra = keyAction[3] ? `${keyAction[3]}ms` : "";
         state.last.keyValue = keyAction[1];
         state.last.keyMeta = keyActionText(action, extra);
+        if (keyAction[1] === "E" && keyAction[2] === "cruise-high") {
+          state.last.controlModeValue = "CRUISE_HEADING_HOLD";
+          state.last.controlModeMeta = `E + tv>=+${CRUISE_START_THROTTLE} 进入定速巡航，目标 PWM=${CRUISE_PWM}，角度闭环自稳`;
+          state.last.autoDriveValue = "巡航键";
+          state.last.autoDriveMeta = "E cruise-high = 定速航向保持；不是 GPS 定点巡航";
+          state.last.selfStabilizeValue = "ON";
+          state.last.selfStabilizeMeta = `定速巡航角度闭环 / PWM=${CRUISE_PWM}`;
+          state.last.throttleOutputValue = `PWM\n${CRUISE_PWM}`;
+          state.last.throttleOutputMeta = "定速巡航目标输出，实际左右修正以 CTRL/MOT 为准";
+          updateMotionDecision("定速巡航", state.last.controlModeMeta, "E 键进入定速巡航");
+        } else if (keyAction[1] === "E" &&
+                   (keyAction[2] === "cruise-stop" ||
+                    keyAction[2] === "cruise-toggle-stop" ||
+                    keyAction[2] === "cruise-reverse-stop")) {
+          state.last.controlModeValue = "STOP";
+          state.last.controlModeMeta = keyActionText(action, extra);
+          state.last.autoDriveValue = "未运行";
+          state.last.autoDriveMeta = "E 键退出巡航；GPS 自动驾驶未见 0x16 busy";
+          state.last.selfStabilizeValue = "OFF";
+          state.last.selfStabilizeMeta = "定速巡航已退出";
+          updateMotionDecision("stop", state.last.controlModeMeta, `定速巡航退出：${state.last.controlModeMeta}`);
+        }
         pushTimeline(`按键 ${keyAction[1]}：${state.last.keyMeta}`);
         renderCardsNow();
         important = true;
@@ -1726,6 +2023,39 @@
         important = true;
       }
 
+      const autoDiag = line.match(/\[SHIP\] I: tx cmd=0x16 state=(\d+) mode=(\d+) sw=0x([0-9A-Fa-f]{2}) reason=(\d+) gps=(\d+) sat=(\d+) dist=(\d+)/);
+      if (autoDiag) {
+        const autoStateNum = Number(autoDiag[1]);
+        const autoModeNum = Number(autoDiag[2]);
+        const autoState = autoDriveStateText(autoStateNum);
+        const autoMode = autoDriveModeText(autoModeNum);
+        const reason = autoDriveReasonText(Number(autoDiag[4]));
+        const gpsPhase = autoStateNum === 2 ? "原地对准方向" :
+                         autoStateNum === 3 ? "角度闭环前往 GPS 点" :
+                         autoStateNum === 1 ? "准备导航" :
+                         "未运行";
+        state.last.lastTxCmd = "0x16 自动驾驶诊断";
+        state.last.autoDriveValue = `${autoMode} / ${autoState}`;
+        state.last.autoDriveMeta =
+          `${gpsPhase}\nsw=0x${autoDiag[3].toUpperCase()} reason=${reason}\n`
+          + `gps=${autoDiag[5]} sat=${autoDiag[6]} dist=${autoDiag[7]}m`;
+        if (autoModeNum !== 0 && autoStateNum !== 0) {
+          state.last.controlModeValue = "GPS_NAV_HEADING_HOLD";
+          state.last.controlModeMeta = `${gpsPhase}，目标航向由 AutoDrive 计算，CTRL mode=4 为准`;
+          state.last.selfStabilizeValue = "ON";
+          state.last.selfStabilizeMeta = `GPS 定点巡航角度闭环 / ${gpsPhase}`;
+          state.last.throttleOutputValue = "等待\nCTRL/MOT";
+          state.last.throttleOutputMeta = "GPS 定点巡航：实际左右输出以 CTRL/MOT 为准";
+          updateMotionDecision("GPS角度闭环", `${gpsPhase}\ndist=${autoDiag[7]}m sat=${autoDiag[6]}`, `GPS 定点巡航：${gpsPhase}`);
+        } else if (autoModeNum === 0 && autoStateNum === 0) {
+          state.last.controlModeValue = state.last.controlModeValue === "GPS_NAV_HEADING_HOLD" ? "STOP" : state.last.controlModeValue;
+        }
+        state.last.gpsRawInfo =
+          `AutoDrive ${autoMode}/${autoState} ${gpsPhase} gps=${autoDiag[5]} sat=${autoDiag[6]} dist=${autoDiag[7]}m reason=${reason}`;
+        pushTimeline(`自动驾驶诊断：${autoMode}/${autoState} ${gpsPhase} gps=${autoDiag[5]} sat=${autoDiag[6]} dist=${autoDiag[7]}m reason=${reason}`);
+        important = true;
+      }
+
       const gpsBytes = line.match(/\[SHIP\] I: gps payload bytes=((?:[0-9A-Fa-f]{2}\s*){15})/);
       if (gpsBytes) {
         const b = gpsBytes[1].trim().split(/\s+/).map((x) => parseInt(x, 16));
@@ -1740,6 +2070,13 @@
       if (power) {
         state.last.powerValue = `${power[3]} mV`;
         state.last.powerMeta = `raw=${power[1]} adc=${power[2]}mV level=${power[4]}`;
+        important = true;
+      }
+
+      const powerShort = line.match(/\[SHIP\] I: adc raw=(\d+) mv=(\d+) bat=(\d+) p=(\d+)/);
+      if (powerShort) {
+        state.last.powerValue = `${powerShort[3]} mV`;
+        state.last.powerMeta = `raw=${powerShort[1]} adc=${powerShort[2]}mV level=${powerShort[4]}`;
         important = true;
       }
 
@@ -1794,7 +2131,13 @@
         state.last.gpsLat = formatDeg1e7(gpsShort[10], gpsShort[11]);
         state.last.gpsLatMeta = `${gpsShort[10]} / raw=${gpsShort[11]}`;
         state.last.gpsAngle = `${gpsShort[4]} deg`;
-        state.last.gpsRawInfo = `fix=${gpsShort[7]} sat=${gpsShort[3]} lon=${gpsShort[8]}${gpsShort[9]} lat=${gpsShort[10]}${gpsShort[11]} angle=${gpsShort[4]} seq=${gpsShort[12]}`;
+        state.last.gpsRawInfo = `fix=${gpsShort[7]} sat=${gpsShort[3]} lon=${gpsShort[8]}${gpsShort[9]} lat=${gpsShort[10]}${gpsShort[11]} angle=${gpsShort[4]} auto=${autoHex} seq=${gpsShort[12]}`;
+        if (!state.last.autoDriveValue.includes("/")) {
+          state.last.autoDriveValue = autoHex === "0x00" ? "未运行" : autoReturnSwitchText(gpsShort[6]);
+          state.last.autoDriveMeta =
+            `gps12 auto=${autoHex} / ${autoReturnSwitchText(gpsShort[6])}\n`
+            + `fix=${gpsShort[7]} sat=${gpsShort[3]} angle=${gpsShort[4]} seq=${gpsShort[12]}`;
+        }
         important = true;
       }
 
@@ -1967,17 +2310,17 @@
       });
       Object.assign(state.last, {
         ahrsPoseValue: "--",
-        ahrsPoseMeta: "等待 AHRS 日志",
+        ahrsPoseMeta: "当前日志未输出 [AHRS]",
         ahrsGyroValue: "--",
-        ahrsGyroMeta: "gX / gY / gZ",
+        ahrsGyroMeta: "当前日志未输出 gyro",
         ahrsYawValue: "--",
-        ahrsYawMeta: "等待 ys / yr",
+        ahrsYawMeta: "当前日志未输出 ys / yr",
         ahrsFlagValue: "--",
-        ahrsFlagMeta: "flags / mag",
-        ahrsInfo: "等待 AHRS 日志",
+        ahrsFlagMeta: "当前日志未输出 flags",
+        ahrsInfo: "当前串口日志没有 [AHRS]，先看 rc11 / gps12 / MAG",
         hdgValue: "--",
-        hdgMeta: "waiting [HDG]",
-        hdgInfo: "waiting [HDG]",
+        hdgMeta: "当前日志未输出 [HDG]",
+        hdgInfo: "当前串口日志没有 [HDG]，船头朝向先用 MAG compass 参考",
         compassHeadingDeg: null,
         compassNeedleDeg: null,
         compassHeadingText: "--",
@@ -1989,13 +2332,17 @@
         rcValue: "离线",
         rcMeta: "等待 AA...BB 头尾包",
         throttleInputValue: "--",
-        throttleInputMeta: "等待 throttle_raw 日志",
+        throttleInputMeta: "等待 rc11 / throttle_raw 日志",
         throttleOutputValue: "--",
-        throttleOutputMeta: "等待 MOT 短日志",
+        throttleOutputMeta: "等待 rc11 推算 / MOT 短日志",
         motionValue: "--",
-        motionMeta: "等待 AA...BB 头尾包",
+        motionMeta: "等待 rc11 tv/sv",
+        controlModeValue: "--",
+        controlModeMeta: "等待 rc11 / key action / CTRL",
+        autoDriveValue: "--",
+        autoDriveMeta: "等待 gps12 auto / 0x16 诊断",
         selfStabilizeValue: "OFF",
-        selfStabilizeMeta: "等待 |steering| < 15",
+        selfStabilizeMeta: "等待左右差 < 20%",
         keyValue: "--",
         keyMeta: "等待 key 日志",
         txValue: "--",

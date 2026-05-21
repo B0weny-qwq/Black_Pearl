@@ -32,10 +32,12 @@
 ### Bug 修复
 - **[多处抢电机]** 原 `ship_protocol.c` 同时处理协议、手动控制、yaw PID、定速巡航和电机输出，`AutoDrive` 又通过兼容入口提交航向保持，控制权边界不清。修复：`ship_protocol.c` 只解析 `0x11/0x13/0x14/0x15` 和按键请求；`AutoDrive` 只算目标航向、距离和到点状态；`ShipControl` 统一拥有 yaw-hold PID 和电机输出。
 - **[AutoDrive 跨层停电机]** `AutoDrive_StopMotion()` 不再直接 `Motor_StopAll()`，改为只停止 GPS 航向保持模式，避免关闭自动驾驶时误杀手动/定速控制权。
+- **[巡航退出语义]** 定速巡航补回旧遥控手感：巡航中再按一次 E 立即退出；巡航中把前后摇杆拉到反向底部附近也退出，并停在退出帧，避免同帧直接切成倒车。
 
 ### 优化改进
 - **[控制节拍]** `ShipControl_Tick()` 以 `SHIP_MANUAL_CONTROL_PERIOD_MS=10ms` 刷新手动控制和定速巡航输出；`SHIP_YAW_HOLD_PERIOD_MS=50ms` 仍只决定 yaw PID 更新周期。
 - **[定速余量]** E 键定速巡航基础速度限制到手动最大前进速度 `850`，避免满量程 `1000` 时 yaw-hold 因电机上限余量为 0 而无法差速修正。
+- **[上位机检验]** `key action=E cruise-high/cruise-toggle-stop/cruise-reverse-stop` 走轻量 viewer 日志，默认 `SHIP_PROTOCOL_VIEWER_LOG_ENABLE=1` 时上位机可直接显示进入/退出巡航。
 - **[文档口径]** README、AutoDrive/WIRELESS/PID README 和 `total.md` 同步改为 `ShipControl` 口径；旧 `ShipProtocol_ApplyYawHoldTarget()` 仅保留为兼容转发入口。
 
 ## 日志格式规范
@@ -141,7 +143,7 @@
 ### Bug 修复
 - **[总览文档过期]** `doc/project_doc/total.md` 仍记录 `ENABLE_GPS_MODULE=0`、旧 yaw-hold 参数和旧运行档，已经与当前 `User/FeatureSwitch.h` 不一致。修复：按当前工作区真实开关重写总览，明确 `Wireless/GPS/MAG/IMU/AHRS` 均启用。
 - **[协议核对结论缺失]** 旧文档没有集中记录遥控器串口命令是否逐字节对齐，容易继续误判 `0x12` 半球字段和点位 payload。修复：补齐旧版帧格式、命令号、GPS 15 字节回传、点位 10 字节格式和 `0x15` 保存格式的核对结论。
-- **[手动自稳门控未同步]** 之前文档仍把 `SHIP_YAW_HOLD_MANUAL_ENABLE=1` 描述成“泛泛的小转向叠加 yaw-hold”，但当前代码已经把门限收敛到 `SHIP_YAW_HOLD_STEER_GATE=10U`，并且直接下发左右 PWM。修复：把“直线自稳触发条件”和“PWM 输出口径”同步写入总览与变更日志。
+- **[手动自稳门控未同步]** 当时文档仍把 `SHIP_YAW_HOLD_MANUAL_ENABLE=1` 描述成“泛泛的小转向叠加 yaw-hold”，而当时代码已经把门限收敛到固定小转向阈值，并且直接下发左右 PWM。修复：把“直线自稳触发条件”和“PWM 输出口径”同步写入总览与变更日志；当前新版本已改为左右输出差 20% 门槛。
 
 ### 优化改进
 - **[0x12 兼容口径]** 明确 `0x12` 半球字段固定 `E/W` 是对齐老版 `nmea41_Get_EW()` / `nmea41_Get_NS()` 的兼容行为，不是改成了新协议。
@@ -1369,3 +1371,8 @@
 - I2C总线异常时调用 `QMC6309_BusRecover()` 恢复
 
 ---
+# [2026-05-21] - v1.7.66 遥控油门巡航与 20% 自稳门槛修正
+
+- **[手动自稳门槛]** `ShipControl` 不再用“左右摇杆回中/固定转向门槛”判定手动自稳，而是先计算左右电机目标，`abs(left-right) < max(abs(left),abs(right)) * 20%` 时进入 `MANUAL_YAW_HOLD`；达到或超过 20% 走 `MANUAL_OPEN_LOOP`，保持纯手动左右转向。
+- **[定速巡航语义]** E 键定速改成带符号油门入口：`raw_ud-100 >= +150` 进入 `CRUISE_HEADING_HOLD`；巡航中再按 E 或带符号油门 `raw_ud-100 < -100` 退出；进入后固定 `pwm/base_speed=850` 并走航向自稳。
+- **[GPS 对准]** `AutoDrive` 收到前往目标点/返航指令后统一先进入 `AUTO_DRIVE_GET_DIRECTION`，用 `ShipControl_RequestGpsNav(target, 0)` 原地角度闭环对准，再切到前进巡航。

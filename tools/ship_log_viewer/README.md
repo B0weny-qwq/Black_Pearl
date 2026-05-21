@@ -305,6 +305,7 @@ meta 里还会显示：
 来源：
 
 - `[MOT] I: m=... y=... t=... o=... l=... r=...`
+- `[CTRL] I: mode=... tgt=... err=... pid=... left=... right=...`
 - `[SHIP] I: pwm pins mla=... mlb=... mra=... mrb=... period=...`
 
 用途：
@@ -316,6 +317,41 @@ meta 里还会显示：
 
 这个卡片显示的是“输出”。
 不是遥控器原始输入。
+
+### `控制模式`
+
+来源：
+
+- `[CTRL] I: mode=... tgt=... err=... in=... pid=... diff=... throttle=... base=... steer=... left=... right=...`
+- `key action=E cruise-high / cruise-stop`
+
+用途：
+
+- 看当前最终控制权在 `STOP / MANUAL_OPEN_LOOP / MANUAL_YAW_HOLD / CRUISE_HEADING_HOLD / GPS_NAV_HEADING_HOLD / FAILSAFE_STOP` 哪个模式
+- 看 E 键是否真的进入定速巡航
+- 看定速巡航是否按“再按 E”或“摇杆反向拉到底附近”退出
+- 看 yaw 自稳目标角、误差、PID 输出、左右电机目标是否在变化
+
+现场检验：
+
+- 直推且左右输出差小于 20%，若航向 ready，应看到 `MANUAL_YAW_HOLD`
+- 明显打方向，应回到 `MANUAL_OPEN_LOOP`
+- 带符号油门 `tv >= +150` 时按 E，应看到 `CRUISE_HEADING_HOLD`
+- 定速巡航中再按一次 E，应看到 `STOP`，时间线显示 `cruise-toggle-stop`
+- 定速巡航中带符号油门 `tv < -100`，应看到 `STOP`，时间线显示 `cruise-reverse-stop`
+
+### `自动驾驶`
+
+来源：
+
+- `dispatch cmd=0x13/0x14/0x15`
+- `[SHIP] I: tx cmd=0x16 state=... mode=... sw=... reason=... gps=... sat=... dist=...`
+
+用途：
+
+- 看返航点、目标点、返航开关命令是否被固件收到
+- 看 AutoDrive 当前状态、模式、触发原因、GPS 是否 ready、卫星数和目标距离
+- 判断“收到命令但没有跑起来”是 GPS 不 ready、卫星数不足、距离不满足，还是已经到点/超时
 
 ### `动作判定`
 
