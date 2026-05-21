@@ -655,8 +655,8 @@
     const RC_DEAD_LOW = 90;
     const RC_DEAD_HIGH = 110;
     const MANUAL_SELF_STEER_GATE = 20;
-    const CRUISE_START_THROTTLE = 150;
-    const CRUISE_EXIT_THROTTLE = -100;
+    const CRUISE_START_INPUT = 50;
+    const CRUISE_EXIT_THROTTLE = -80;
     const CRUISE_PWM = 850;
 
     const state = {
@@ -1057,6 +1057,7 @@
         "cruise-stop": "E 停止巡航/停机",
         "cruise-toggle-stop": "E 再按一次：退出定速巡航",
         "cruise-reverse-stop": "摇杆反向阈值：退出定速巡航",
+        "cruise-ignore": "E 已收到：油门未达到定速门槛",
         "pulse-forward": "C 前冲脉冲",
         "pulse-backward": "D 后退脉冲",
         "reserved": "E 保留，不触发自动驾驶"
@@ -1109,6 +1110,20 @@
         9: "stop"
       };
       return map[reason] || `reason ${reason}`;
+    }
+
+    function ctrlGateStateText(stateValue) {
+      const map = {
+        0: "摇杆回中",
+        1: "等待稳定帧",
+        2: "自稳门槛满足",
+        3: "左右差过大",
+        4: "油门方向/力度不满足",
+        5: "航向未就绪",
+        6: "无有效输入",
+        255: "未判定"
+      };
+      return map[stateValue] || `gate ${stateValue}`;
     }
 
     function throttleModeText(mode) {
@@ -1277,6 +1292,15 @@
              modeValue === "GPS_NAV_HEADING_HOLD";
     }
 
+    function closedLoopMotionLabel(modeValue) {
+      const map = {
+        MANUAL_YAW_HOLD: "直线自稳",
+        CRUISE_HEADING_HOLD: "E定速闭环",
+        GPS_NAV_HEADING_HOLD: "GPS角度闭环"
+      };
+      return map[modeValue] || modeValue;
+    }
+
     function updateRcInputIntent(rawUd, rawLr, throttleValue, steeringValue, keyCode, source) {
       const throttle = Number(throttleValue);
       const steering = Number(steeringValue);
@@ -1297,35 +1321,32 @@
         + `u=${rawUd} l=${rawLr} / left=${diffInfo.left} right=${diffInfo.right}\n`
         + `左右输出差=${diffInfo.percent.toFixed(1)}%`;
 
-      updateSelfStabilizeFromDiff(diffInfo, closedLoopMode ? state.last.controlModeValue : "直推门限");
-
       if (closedLoopMode) {
         if (state.last.controlModeValue === "CRUISE_HEADING_HOLD" &&
             Number.isFinite(throttle) &&
-            throttle < CRUISE_EXIT_THROTTLE) {
+            throttle <= CRUISE_EXIT_THROTTLE) {
           state.last.throttleOutputValue = "等待\nSTOP";
-          state.last.throttleOutputMeta = `带符号油门 ${throttle}% < ${CRUISE_EXIT_THROTTLE}%，触发定速巡航退出条件`;
+          state.last.throttleOutputMeta = `带符号油门 ${throttle}% <= ${CRUISE_EXIT_THROTTLE}%，触发定速巡航退出条件`;
           state.last.controlModeValue = "STOP_PENDING";
           state.last.controlModeMeta = "油门反向退出定速巡航，等待 key action=E cruise-reverse-stop / CTRL STOP";
-          state.last.selfStabilizeValue = "OFF";
-          state.last.selfStabilizeMeta = "定速巡航反向退出中";
           updateMotionDecision("定速退出条件", `${outputMeta}\n等待固件 stop 日志`, `${source} 触发定速巡航反向退出`);
           return;
         }
+        const loopLabel = closedLoopMotionLabel(state.last.controlModeValue);
         state.last.throttleOutputValue = "等待\nCTRL/MOT";
         state.last.throttleOutputMeta =
-          `${state.last.controlModeValue} 闭环中，rc11 只作输入/退出参考\n等待 CTRL/MOT 实际输出日志`;
+          `${loopLabel}中，rc11 只作输入/退出参考\n等待 CTRL/MOT 实际输出日志`;
         updateMotionDecision(
-          state.last.controlModeValue === "GPS_NAV_HEADING_HOLD" ? "gps-nav闭环" : "定速闭环",
+          loopLabel,
           `${outputMeta}\n闭环动作以 CTRL/MOT 为准`,
-          `${source} 输入刷新，保持 ${state.last.controlModeValue}`
+          `${source} 输入刷新，保持 ${loopLabel}(${state.last.controlModeValue})`
         );
         return;
       }
 
-      if (key === "0XA1" && Number.isFinite(throttle) && throttle >= CRUISE_START_THROTTLE) {
+      if (key === "0XA1" && Number.isFinite(throttle) && throttle >= CRUISE_START_INPUT) {
         state.last.controlModeValue = "CRUISE_ARM";
-        state.last.controlModeMeta = `E + tv>=+${CRUISE_START_THROTTLE}，等待 key action=E cruise-high`;
+        state.last.controlModeMeta = `E + tv>=+${CRUISE_START_INPUT}，等待 key action=E cruise-high`;
         updateMotionDecision("准备定速", `${outputMeta}\n目标 PWM=${CRUISE_PWM}，等待巡航确认`, `${source} E键准备定速巡航`);
         return;
       }
@@ -1333,18 +1354,22 @@
       if (rawCentered || (absThrottle === 0 && absSteering === 0)) {
         state.last.throttleOutputValue = "左 0%\n右 0%";
         state.last.throttleOutputMeta = `${source} 回中，等待 MOT 实际停机日志`;
-        state.last.controlModeValue = "STOP";
-        state.last.controlModeMeta = "遥杆回中，非闭环模式按停机显示";
+        if (!/^MANUAL_|^CRUISE_|^GPS_NAV_|^STOP/.test(state.last.controlModeValue)) {
+          state.last.controlModeValue = "等待 CTRL";
+          state.last.controlModeMeta = "rc11 已回中，等待 CTRL gate/mode 确认";
+        }
         updateMotionDecision("stop", `${outputMeta}\nraw centered ${RC_DEAD_LOW}..${RC_DEAD_HIGH}`, `${source} 回中`);
         return;
       }
 
       state.last.throttleOutputValue = "等待\nMOT";
       state.last.throttleOutputMeta = `${pureManualTurn ? "纯手动转向" : "直推自稳候选"}，实际左右输出以 MOT/CTRL 为准\n${outputMeta}`;
-      state.last.controlModeValue = straightSelf ? "MANUAL_YAW_HOLD?" : "MANUAL_OPEN_LOOP";
-      state.last.controlModeMeta = straightSelf
-        ? `直推且左右差<${MANUAL_SELF_STEER_GATE}%，应进入自稳；等待 CTRL/MOT 确认`
-        : `左右差>=${MANUAL_SELF_STEER_GATE}%，纯手动正常左右转向`;
+      if (!isClosedLoopMode(state.last.controlModeValue)) {
+        state.last.controlModeValue = "等待 CTRL";
+        state.last.controlModeMeta = straightSelf
+          ? `rc11 像直推自稳输入，但最终以 CTRL gate/mode 为准`
+          : `rc11 像纯手动转向输入，但最终以 CTRL gate/mode 为准`;
+      }
       updateMotionDecision(
         straightSelf ? "直推自稳候选" : "纯手动转向",
         `${outputMeta}\ninput=${inputText}`,
@@ -1835,27 +1860,78 @@
         state.last.keyValue = "E";
         state.last.keyMeta = keyActionText("cruise-reverse-stop", extra);
         state.last.controlModeValue = "STOP";
-        state.last.controlModeMeta = `带符号油门 < ${CRUISE_EXIT_THROTTLE}，退出定速巡航`;
+        state.last.controlModeMeta = `带符号油门 <= ${CRUISE_EXIT_THROTTLE}，退出定速巡航`;
         state.last.autoDriveValue = "未运行";
         state.last.autoDriveMeta = "定速巡航退出；GPS 自动驾驶未见 0x16 busy";
         updateMotionDecision("stop", state.last.controlModeMeta, `定速巡航退出：${extra}`);
         important = true;
       }
 
-      const ctrlFull = line.match(/^\[CTRL\] I: mode=(\d+) tgt=(\d+) err=([-\d]+) in=([-\d]+) pid=([-\d]+) diff=([-\d]+) throttle=([-\d]+) base=([-\d]+) steer=([-\d]+) left=([-\d]+) right=([-\d]+)$/);
+      const ctrlModeEvent = line.match(/\[CTRL\] I: (?:event=mode old=|ev old=)(\d+) new=(\d+) (?:reason|rsn)=(\d+) yaw=(\d+) tgt=(\d+)(?: left=([-\d]+) right=([-\d]+))?/);
+      if (ctrlModeEvent) {
+        const oldMode = shipControlModeText(Number(ctrlModeEvent[1]));
+        const newMode = shipControlModeText(Number(ctrlModeEvent[2]));
+        state.last.controlModeValue = newMode;
+        state.last.controlModeMeta =
+          `mode ${oldMode} -> ${newMode} / reason=${ctrlModeEvent[3]}\n`
+          + `yaw=${ctrlModeEvent[4]} tgt=${ctrlModeEvent[5]}`
+          + (ctrlModeEvent[6] ? ` left=${ctrlModeEvent[6]} right=${ctrlModeEvent[7]}` : "");
+        const yawOn = Number(ctrlModeEvent[4]) !== 0 ||
+                      Number(ctrlModeEvent[2]) === 2 ||
+                      Number(ctrlModeEvent[2]) === 3 ||
+                      Number(ctrlModeEvent[2]) === 4;
+        state.last.selfStabilizeValue = yawOn ? "ON" : "OFF";
+        state.last.selfStabilizeMeta = yawOn ? `${newMode} 已进入角度闭环` : `${newMode} 非自稳`;
+        pushTimeline(`控制模式：${oldMode} -> ${newMode}`);
+        important = true;
+      }
+
+      const ctrlGate = line.match(/\[CTRL\] I: gate (?:state=|st=)(\d+) (?:mode=|m=)(\d+) (?:raw_ud=|u=)(\d+) (?:raw_lr=|l=)(\d+) tv=([-\d]+) sv=([-\d]+)(?: left=([-\d]+) right=([-\d]+))? (?:diff=|df=)([-\d]+) (?:gate=|gt=)([-\d]+) (?:stable=|sb=)(\d+) (?:heading=|hd=)(\d+)/);
+      if (ctrlGate) {
+        const gateState = Number(ctrlGate[1]);
+        const modeNum = Number(ctrlGate[2]);
+        const modeText = shipControlModeText(modeNum);
+        const gateText = ctrlGateStateText(gateState);
+        state.last.controlModeValue = modeNum === 2 ? "MANUAL_YAW_HOLD" : modeText;
+        state.last.controlModeMeta =
+          `${gateText} / raw_ud=${ctrlGate[3]} raw_lr=${ctrlGate[4]}\n`
+          + `tv=${ctrlGate[5]} sv=${ctrlGate[6]} stable=${ctrlGate[11]} heading=${ctrlGate[12]}`
+          + (gateState === 2 && modeNum !== 2 ? "\n门槛已满足，等待 CTRL mode=2 确认" : "");
+        state.last.selfStabilizeValue = modeNum === 2 ? "ON" : "OFF";
+        state.last.selfStabilizeMeta =
+          `${modeNum === 2 ? "已进入直线自稳" : gateText} / diff=${ctrlGate[9]} gate=${ctrlGate[10]}`;
+        state.last.throttleOutputMeta =
+          `CTRL gate ${gateText}\ndiff=${ctrlGate[9]} gate=${ctrlGate[10]}`;
+        const gateMotionLabel = modeNum === 2 ? "直线自稳" :
+                                (gateState === 2 ? "自稳门槛满足" :
+                                (gateState === 3 ? "纯手动转向" : gateText));
+        updateMotionDecision(
+          gateMotionLabel,
+          state.last.selfStabilizeMeta,
+          `CTRL gate：${gateText} diff=${ctrlGate[9]} gate=${ctrlGate[10]}`
+        );
+        important = true;
+      }
+
+      const ctrlFull = line.match(/\[CTRL\] I: mode=(\d+) tgt=(\d+) err=([-\d]+)(?: in=([-\d]+))? pid=([-\d]+) (?:diff=|df=)([-\d]+) (?:throttle=|th=)([-\d]+) base=([-\d]+)(?: steer=([-\d]+))? (?:left=|l=)([-\d]+) (?:right=|r=)([-\d]+)(?: (?:gate_state=|gs=)(\d+) (?:gate_diff=|gd=)([-\d]+) (?:gate_limit=|gl=)([-\d]+))?/);
       if (ctrlFull) {
         const mode = Number(ctrlFull[1]);
         const modeText = shipControlModeText(mode);
+        const gateSuffix = ctrlFull[12]
+          ? `\ngate=${ctrlGateStateText(Number(ctrlFull[12]))} diff=${ctrlFull[13]} limit=${ctrlFull[14]}`
+          : "";
+        const ctrlIn = ctrlFull[4] || "0";
+        const ctrlSteer = ctrlFull[9] || "0";
         state.last.controlModeValue = modeText;
         state.last.controlModeMeta =
-          `tgt=${ctrlFull[2]} err=${ctrlFull[3]} in=${ctrlFull[4]} pid=${ctrlFull[5]}\n`
-          + `diff=${ctrlFull[6]} throttle=${ctrlFull[7]} base=${ctrlFull[8]} steer=${ctrlFull[9]}`;
+          `tgt=${ctrlFull[2]} err=${ctrlFull[3]} in=${ctrlIn} pid=${ctrlFull[5]}\n`
+          + `diff=${ctrlFull[6]} throttle=${ctrlFull[7]} base=${ctrlFull[8]} steer=${ctrlSteer}${gateSuffix}`;
         state.last.throttleOutputValue = formatMotorOutputPercent(ctrlFull[10], ctrlFull[11]);
         state.last.throttleOutputMeta =
           `CTRL ${modeText}\nleft=${ctrlFull[10]} right=${ctrlFull[11]}\n`
           + `base=${ctrlFull[8]} diff=${ctrlFull[6]} err=${ctrlFull[3]}`;
-        const motionLabel = mode === 2 ? "直推自稳" :
-                            mode === 3 ? "定速巡航" :
+        const motionLabel = mode === 2 ? "直线自稳" :
+                            mode === 3 ? "E定速闭环" :
                             mode === 4 ? "GPS角度闭环" :
                             modeText;
         updateMotionDecision(
@@ -1894,15 +1970,17 @@
         important = true;
       }
 
-      const keyAction = line.match(/\[SHIP\] [IW]: key action=([A-E]) ([a-zA-Z-]+)(?: (\d+)ms)?(?: (repeat))?/);
+      const keyAction = line.match(/\[SHIP\] [IW]: key action=([A-E]) ([a-zA-Z-]+)(?: ([^\r\n]*?))?(?:\[|$)/);
       if (keyAction) {
-        const action = keyAction[4] ? `${keyAction[2]} ${keyAction[4]}` : keyAction[2];
-        const extra = keyAction[3] ? `${keyAction[3]}ms` : "";
+        const extraText = (keyAction[3] || "").trim();
+        const repeat = extraText === "repeat";
+        const action = repeat ? `${keyAction[2]} repeat` : keyAction[2];
+        const extra = repeat ? "" : extraText;
         state.last.keyValue = keyAction[1];
         state.last.keyMeta = keyActionText(action, extra);
         if (keyAction[1] === "E" && keyAction[2] === "cruise-high") {
           state.last.controlModeValue = "CRUISE_HEADING_HOLD";
-          state.last.controlModeMeta = `E + tv>=+${CRUISE_START_THROTTLE} 进入定速巡航，目标 PWM=${CRUISE_PWM}，角度闭环自稳`;
+          state.last.controlModeMeta = `E + tv>=+${CRUISE_START_INPUT} 进入定速巡航，目标 PWM=${CRUISE_PWM}，角度闭环自稳`;
           state.last.autoDriveValue = "巡航键";
           state.last.autoDriveMeta = "E cruise-high = 定速航向保持；不是 GPS 定点巡航";
           state.last.selfStabilizeValue = "ON";
@@ -1921,6 +1999,9 @@
           state.last.selfStabilizeValue = "OFF";
           state.last.selfStabilizeMeta = "定速巡航已退出";
           updateMotionDecision("stop", state.last.controlModeMeta, `定速巡航退出：${state.last.controlModeMeta}`);
+        } else if (keyAction[1] === "E" && keyAction[2] === "cruise-ignore") {
+          state.last.controlModeMeta = keyActionText(action, extra);
+          updateMotionDecision("E未进入定速", state.last.controlModeMeta, `E 键未进入定速：${state.last.controlModeMeta}`);
         }
         pushTimeline(`按键 ${keyAction[1]}：${state.last.keyMeta}`);
         renderCardsNow();

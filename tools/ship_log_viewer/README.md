@@ -336,9 +336,9 @@ meta 里还会显示：
 
 - 直推且左右输出差小于 20%，若航向 ready，应看到 `MANUAL_YAW_HOLD`
 - 明显打方向，应回到 `MANUAL_OPEN_LOOP`
-- 带符号油门 `tv >= +150` 时按 E，应看到 `CRUISE_HEADING_HOLD`
+- 带符号油门 `tv >= +50` 时按 E，应看到 `CRUISE_HEADING_HOLD`
 - 定速巡航中再按一次 E，应看到 `STOP`，时间线显示 `cruise-toggle-stop`
-- 定速巡航中带符号油门 `tv < -100`，应看到 `STOP`，时间线显示 `cruise-reverse-stop`
+- 定速巡航中带符号油门 `tv <= -80`，应看到 `STOP`，时间线显示 `cruise-reverse-stop`
 
 ### `自动驾驶`
 
