@@ -22,6 +22,9 @@
 #define AUTODRIVE_METERS_PER_MINUTE        1850UL
 #define AUTODRIVE_METERS_PER_DEG           111130UL
 #define AUTODRIVE_ATAN_Q10                 1024UL
+#define AUTODRIVE_ALIGN_TOLERANCE_CD       1000
+#define AUTODRIVE_ALIGN_STABLE_TICKS       20U
+#define AUTODRIVE_ALIGN_TIMEOUT_TICKS      800U
 
 static u8 g_autoDrive_switch = 0U;
 static u8 g_autoDrive_state = AUTO_DRIVE_IDLE;
@@ -43,6 +46,8 @@ static u16 g_destination_angle = 0U;
 static u16 g_autodrive_target_heading_cd = 0U;
 static u8 g_autodrive_target_heading_valid = 0U;
 static u16 g_autodrive_base_speed = AUTODRIVE_CRUISE_BASE_SPEED;
+static u16 g_autodrive_align_ticks = 0U;
+static u8 g_autodrive_align_stable_ticks = 0U;
 
 static u16 g_link_alive_ticks = 0U;
 static u16 g_link_close_ticks = 0U;
@@ -222,6 +227,86 @@ static void AutoDrive_ResetApproachTracker(void)
     g_autodrive_base_speed = AUTODRIVE_CRUISE_BASE_SPEED;
 }
 
+static void AutoDrive_ResetAlignTracker(void)
+{
+    g_autodrive_align_ticks = 0U;
+    g_autodrive_align_stable_ticks = 0U;
+}
+
+static int16 AutoDrive_Abs16(int16 value)
+{
+    return (value >= 0) ? value : (int16)(-value);
+}
+
+static int16 AutoDrive_WrapSignedCd(int32 angle_cd)
+{
+    while (angle_cd >= 18000L) {
+        angle_cd -= 36000L;
+    }
+    while (angle_cd < -18000L) {
+        angle_cd += 36000L;
+    }
+    return (int16)angle_cd;
+}
+
+static u8 AutoDrive_GetHeadingErrorCd(int16 *error_cd)
+{
+    if (error_cd == 0) {
+        return 0U;
+    }
+    if ((g_autodrive_target_heading_valid == 0U) ||
+        (MainLoop_IsHeadingReady() == 0U)) {
+        return 0U;
+    }
+
+    *error_cd =
+        AutoDrive_WrapSignedCd((int32)g_autodrive_target_heading_cd -
+                               (int32)MainLoop_GetHeadingDeg100());
+    return 1U;
+}
+
+static u8 AutoDrive_AlignTargetReached(void)
+{
+    int16 heading_error_cd;
+
+    if (AutoDrive_GetHeadingErrorCd(&heading_error_cd) == 0U) {
+        g_autodrive_align_stable_ticks = 0U;
+        return 0U;
+    }
+
+    if (g_autodrive_align_ticks < 0xFFFFU) {
+        g_autodrive_align_ticks++;
+    }
+
+    if (AutoDrive_Abs16(heading_error_cd) <= (int16)AUTODRIVE_ALIGN_TOLERANCE_CD) {
+        if (g_autodrive_align_stable_ticks < 255U) {
+            g_autodrive_align_stable_ticks++;
+        }
+    } else {
+        g_autodrive_align_stable_ticks = 0U;
+    }
+
+    if (g_autodrive_align_stable_ticks >= (u8)AUTODRIVE_ALIGN_STABLE_TICKS) {
+        return 1U;
+    }
+    if (g_autodrive_align_ticks >= AUTODRIVE_ALIGN_TIMEOUT_TICKS) {
+        return 1U;
+    }
+    return 0U;
+}
+
+static u8 AutoDrive_TickWorkOvertime(void)
+{
+    if (g_autodrive_work_overtime > 0U) {
+        g_autodrive_work_overtime--;
+        return 1U;
+    }
+
+    AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
+    AutoDrive_WorkOvertimeFail();
+    return 0U;
+}
+
 static u16 AutoDrive_InterpolateSpeed(u16 distance_m,
                                       u16 near_distance_m,
                                       u16 far_distance_m,
@@ -323,26 +408,27 @@ static u8 AutoDrive_UpdateTargetHeading(const AutoDrive_PointRaw_t *current_poin
     return 1U;
 }
 
-static void AutoDrive_ApplyHeadingHold(u16 base_speed)
+static u8 AutoDrive_ApplyHeadingHold(u16 base_speed)
 {
     if (g_autodrive_target_heading_valid == 0U) {
-        AutoDrive_StopMotion();
-        return;
+        ShipControl_StopGpsNav();
+        return 0U;
     }
     if (MainLoop_IsHeadingReady() == 0U) {
-        AutoDrive_Stop();
-        AutoDrive_StopMotion();
-        return;
+        ShipControl_StopGpsNav();
+        return 0U;
     }
 
     ShipControl_RequestGpsNav(g_autodrive_target_heading_cd,
                               (int16)base_speed);
+    return 1U;
 }
 
 void AutoDrive_StopMotion(void)
 {
     g_autodrive_target_heading_valid = 0U;
     AutoDrive_ResetApproachTracker();
+    AutoDrive_ResetAlignTracker();
     ShipControl_StopGpsNav();
 }
 
@@ -862,6 +948,7 @@ void AutoDrive_Init(void)
     g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
     g_autodrive_target_heading_cd = 0U;
     g_autodrive_target_heading_valid = 0U;
+    AutoDrive_ResetAlignTracker();
     AutoDrive_ResetApproachTracker();
 
     AutoDrive_StopMotion();
@@ -923,10 +1010,16 @@ void AutoDrive_Poll(void)
         break;
 
     case AUTO_DRIVE_START:
-        if ((gps == 0) || (AutoDrive_GpsReady() == 0U) ||
-            (MainLoop_IsHeadingReady() == 0U) ||
-            (AutoDrive_GetTargetPoint(&target_point) == 0U)) {
+        if (AutoDrive_TickWorkOvertime() == 0U) {
+            break;
+        }
+        if (AutoDrive_GetTargetPoint(&target_point) == 0U) {
             AutoDrive_Stop();
+            break;
+        }
+        if ((gps == 0) || (AutoDrive_GpsReady() == 0U) ||
+            (MainLoop_IsHeadingReady() == 0U)) {
+            ShipControl_StopGpsNav();
             break;
         }
 
@@ -951,21 +1044,53 @@ void AutoDrive_Poll(void)
         }
 
         ShipControl_ResetYawHoldController();
+        AutoDrive_ResetAlignTracker();
         g_last_run_update_seq = gps->update_sequence;
-        g_autoDrive_state = AUTO_DRIVE_RUNING;
-        AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
+        g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
+        (void)AutoDrive_ApplyHeadingHold(0U);
         break;
 
     case AUTO_DRIVE_GET_DIRECTION:
-        g_autoDrive_state = AUTO_DRIVE_START;
+        if (AutoDrive_TickWorkOvertime() == 0U) {
+            break;
+        }
+        if (AutoDrive_GetTargetPoint(&target_point) == 0U) {
+            AutoDrive_Stop();
+            break;
+        }
+
+        if ((gps != 0) && (AutoDrive_GpsReady() != 0U)) {
+            AutoDrive_PointFromGps(&g_now_position, gps);
+            destination_distance =
+                AutoDrive_GetDistanceNowToDestination((const u8 *)&g_now_position,
+                                                      (const u8 *)target_point);
+            AutoDrive_UpdateApproachSpeed(destination_distance);
+            if (destination_distance <= AUTODRIVE_ARRIVE_DISTANCE_M) {
+                AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_ARRIVE);
+                g_autoDrive_state = AUTO_DRIVE_IDLE;
+                AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
+                AutoDrive_StopMotion();
+                break;
+            }
+            if (AutoDrive_UpdateTargetHeading(&g_now_position, target_point) != 0U) {
+                AutoDrive_CopyPoint(&g_last_position, &g_now_position);
+                g_last_run_update_seq = gps->update_sequence;
+            }
+        }
+
+        if (AutoDrive_ApplyHeadingHold(0U) == 0U) {
+            g_autodrive_align_stable_ticks = 0U;
+            break;
+        }
+        if (AutoDrive_AlignTargetReached() != 0U) {
+            ShipControl_ResetYawHoldController();
+            g_autoDrive_state = AUTO_DRIVE_RUNING;
+            (void)AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
+        }
         break;
 
     case AUTO_DRIVE_RUNING:
-        if (g_autodrive_work_overtime > 0U) {
-            g_autodrive_work_overtime--;
-        } else {
-            AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
-            AutoDrive_WorkOvertimeFail();
+        if (AutoDrive_TickWorkOvertime() == 0U) {
             break;
         }
 
@@ -1000,7 +1125,7 @@ void AutoDrive_Poll(void)
             g_last_run_update_seq = gps->update_sequence;
         }
 
-        AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
+        (void)AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
         break;
 
     default:

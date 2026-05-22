@@ -75,7 +75,7 @@
 #define SHIP_LEGACY_PROTO_MAX_LEN      30U
 #define SHIP_AXIS_CENTER               100U
 #define SHIP_CRUISE_KEY_START_INPUT    50
-#define SHIP_CRUISE_KEY_STOP_INPUT     (-60)
+#define SHIP_CRUISE_KEY_STOP_INPUT     (-30)
 #define SHIP_CRUISE_KEY_SPEED          800
 #define SHIP_POWER_LEVEL_0             0U
 #define SHIP_POWER_LEVEL_1             1U
@@ -363,7 +363,7 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
         if (cruise_active != 0U) {
             ShipControl_Stop(SHIP_CONTROL_STOP_REASON_CRUISE_KEY);
             SHIP_VIEWER_LOG0(SHIP_TAG, "key action=E cruise-toggle-stop");
-        } else if (throttle_input > SHIP_CRUISE_KEY_START_INPUT) {
+        } else if (throttle_input >= SHIP_CRUISE_KEY_START_INPUT) {
             if (MainLoop_IsHeadingReady() != 0U) {
                 ShipControl_RequestCruise(MainLoop_GetHeadingDeg100(),
                                           SHIP_CRUISE_KEY_SPEED);
