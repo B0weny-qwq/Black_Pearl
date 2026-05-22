@@ -76,13 +76,16 @@
 #define SHIP_AXIS_CENTER               100U
 #define SHIP_CRUISE_KEY_START_INPUT    50
 #define SHIP_CRUISE_KEY_STOP_INPUT     (-60)
-#define SHIP_CRUISE_KEY_SPEED          850
+#define SHIP_CRUISE_KEY_SPEED          800
 #define SHIP_POWER_LEVEL_0             0U
 #define SHIP_POWER_LEVEL_1             1U
 #define SHIP_POWER_LEVEL_2             2U
 #define SHIP_POWER_LEVEL_3             3U
 #define SHIP_POWER_LEVEL_4             4U
 #define SHIP_THROTTLE_RECOVER_MS       3000UL
+#ifndef SHIP_RC_INPUT_LOG_ENABLE
+#define SHIP_RC_INPUT_LOG_ENABLE       1U
+#endif
 #ifndef SHIP_RC_INPUT_LOG_PERIOD_MS
 #define SHIP_RC_INPUT_LOG_PERIOD_MS    100UL
 #endif
@@ -360,7 +363,7 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
         if (cruise_active != 0U) {
             ShipControl_Stop(SHIP_CONTROL_STOP_REASON_CRUISE_KEY);
             SHIP_VIEWER_LOG0(SHIP_TAG, "key action=E cruise-toggle-stop");
-        } else if (throttle_input >= SHIP_CRUISE_KEY_START_INPUT) {
+        } else if (throttle_input > SHIP_CRUISE_KEY_START_INPUT) {
             if (MainLoop_IsHeadingReady() != 0U) {
                 ShipControl_RequestCruise(MainLoop_GetHeadingDeg100(),
                                           SHIP_CRUISE_KEY_SPEED);
@@ -1340,6 +1343,7 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
         SHIP_VIEWER_LOG0(SHIP_TAG, "rc11 on");
     }
 
+#if SHIP_RC_INPUT_LOG_ENABLE
     if (log_this_sample != 0U) {
         SHIP_VIEWER_LOGI(SHIP_TAG,
                          "rc11 u=%u l=%u tv=%d sv=%d k=%02X",
@@ -1349,6 +1353,7 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
                          (int16)g_ship_rt.lr - (int16)SHIP_AXIS_CENTER,
                          (u16)g_ship_rt.key);
     }
+#endif
     if (AutoDrive_IsBusy() != 0U) {
         ShipProtocol_HandleKey(g_ship_rt.ud, g_ship_rt.key);
         AutoDrive_LinkAliveKick();

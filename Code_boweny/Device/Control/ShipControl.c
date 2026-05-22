@@ -18,23 +18,47 @@
 #define SHIP_FB_DEAD_LOW                 90U
 #define SHIP_FB_DEAD_HIGH                110U
 #define SHIP_TURN_COMPARE_BIAS           5U
-#define SHIP_THROTTLE_DEADBAND           4
-#define SHIP_STEERING_DEADBAND           8
-#define SHIP_THROTTLE_MIN_COMMAND        180
-#define SHIP_THROTTLE_MAX_COMMAND        850
-#define SHIP_STEERING_MAX_COMMAND        700
 #define SHIP_CENTER_STOP_CONFIRM_FRAMES  2U
 #define SHIP_YAW_HOLD_FORWARD_ONLY       1U
-#define SHIP_CRUISE_BASE_SPEED           SHIP_THROTTLE_MAX_COMMAND
 
 #ifndef SHIP_AXIS_FILTER_SHIFT
 #define SHIP_AXIS_FILTER_SHIFT           1U
+#endif
+#ifndef SHIP_RC_AXIS_MAX_DELTA
+#define SHIP_RC_AXIS_MAX_DELTA           100
+#endif
+#ifndef SHIP_THROTTLE_DEADBAND
+#define SHIP_THROTTLE_DEADBAND           4
+#endif
+#ifndef SHIP_STEERING_DEADBAND
+#define SHIP_STEERING_DEADBAND           8
+#endif
+#ifndef SHIP_THROTTLE_MIN_COMMAND
+#define SHIP_THROTTLE_MIN_COMMAND        180
+#endif
+#ifndef SHIP_THROTTLE_MAX_COMMAND
+#define SHIP_THROTTLE_MAX_COMMAND        850
+#endif
+#ifndef SHIP_MOTOR_OUTPUT_MAX_COMMAND
+#define SHIP_MOTOR_OUTPUT_MAX_COMMAND    SHIP_THROTTLE_MAX_COMMAND
+#endif
+#ifndef SHIP_STEERING_MAX_COMMAND
+#define SHIP_STEERING_MAX_COMMAND        700
+#endif
+#ifndef SHIP_CRUISE_BASE_SPEED
+#define SHIP_CRUISE_BASE_SPEED           SHIP_THROTTLE_MAX_COMMAND
 #endif
 #ifndef SHIP_MANUAL_CONTROL_PERIOD_MS
 #define SHIP_MANUAL_CONTROL_PERIOD_MS    10UL
 #endif
 #ifndef SHIP_YAW_HOLD_LOG_PERIOD_MS
 #define SHIP_YAW_HOLD_LOG_PERIOD_MS      1000UL
+#endif
+#ifndef SHIP_MOT_LOG_PERIOD_MS
+#define SHIP_MOT_LOG_PERIOD_MS           200UL
+#endif
+#ifndef SHIP_MOT_LOG_ENABLE
+#define SHIP_MOT_LOG_ENABLE              1U
 #endif
 #ifndef SHIP_MANUAL_GATE_LOG_PERIOD_MS
 #define SHIP_MANUAL_GATE_LOG_PERIOD_MS   300UL
@@ -148,6 +172,11 @@ typedef struct
     int16 manual_gate_limit;
     u8 manual_gate_state;
     u32 manual_gate_last_log_ms;
+    u32 motor_last_log_ms;
+    int16 motor_last_log_left;
+    int16 motor_last_log_right;
+    u8 motor_last_log_mode;
+    u8 motor_last_log_motion;
     u8 last_logged_mode;
     ShipControl_Motion_t motion;
 } ShipControl_Runtime_t;
@@ -188,6 +217,7 @@ static u8 ShipControl_ApplyYawHoldTarget(u16 target_heading_cd,
                                          u8 mode);
 static void ShipControl_ApplyManualControl(void);
 static void ShipControl_LogSample(u32 now_ms);
+static void ShipControl_LogMotorOutput(u8 force);
 static void ShipControl_LogModeEvent(u8 old_mode, u8 new_mode, u8 reason);
 static void ShipControl_LogManualGate(u8 state,
                                       int16 throttle_speed,
@@ -231,6 +261,11 @@ void ShipControl_Init(void)
     g_ship_ctrl.manual_gate_limit = 0;
     g_ship_ctrl.manual_gate_state = SHIP_CTRL_GATE_INVALID;
     g_ship_ctrl.manual_gate_last_log_ms = 0UL;
+    g_ship_ctrl.motor_last_log_ms = 0UL;
+    g_ship_ctrl.motor_last_log_left = 0;
+    g_ship_ctrl.motor_last_log_right = 0;
+    g_ship_ctrl.motor_last_log_mode = SHIP_CONTROL_MODE_STOP;
+    g_ship_ctrl.motor_last_log_motion = SHIP_CONTROL_MOTION_STOP;
     g_ship_ctrl.last_logged_mode = SHIP_CONTROL_MODE_STOP;
     g_ship_ctrl.motion = SHIP_CONTROL_MOTION_STOP;
 
@@ -346,9 +381,15 @@ void ShipControl_RequestGpsNav(u16 target_heading_cd, int16 base_speed)
 
 void ShipControl_Stop(u8 reason)
 {
+    u8 was_running;
+
     if (g_ship_ctrl.initialized == 0U) {
         ShipControl_Init();
     }
+
+    was_running = ((g_ship_ctrl.mode != SHIP_CONTROL_MODE_STOP) ||
+                   (g_ship_ctrl.left_speed != 0) ||
+                   (g_ship_ctrl.right_speed != 0)) ? 1U : 0U;
 
     ShipControl_ResetYawHoldController();
     ShipControl_ResetAxisFilter();
@@ -371,6 +412,9 @@ void ShipControl_Stop(u8 reason)
 #if SHIP_THROTTLE_PWM_ENABLE
     Motor_StopAll();
 #endif
+    if (was_running != 0U) {
+        ShipControl_LogMotorOutput(1U);
+    }
 }
 
 void ShipControl_StopGpsNav(void)
@@ -537,11 +581,11 @@ static int16 ShipControl_AbsSpeed(int16 speed)
 
 static int16 ShipControl_LimitSpeed(int16 speed)
 {
-    if (speed > MOTOR_SPEED_MAX) {
-        return MOTOR_SPEED_MAX;
+    if (speed > SHIP_MOTOR_OUTPUT_MAX_COMMAND) {
+        return SHIP_MOTOR_OUTPUT_MAX_COMMAND;
     }
-    if (speed < -MOTOR_SPEED_MAX) {
-        return -MOTOR_SPEED_MAX;
+    if (speed < -SHIP_MOTOR_OUTPUT_MAX_COMMAND) {
+        return -SHIP_MOTOR_OUTPUT_MAX_COMMAND;
     }
     return speed;
 }
@@ -667,7 +711,7 @@ static int16 ShipControl_ApplyYawHoldBaseDerate(int16 base_speed, int16 yaw_erro
     min_base = (int32)SHIP_YAW_HOLD_DERATE_MIN_BASE;
 
     if ((start_cd < 0L) || (full_cd <= start_cd) ||
-        (min_base < 0L) || (min_base >= (int32)MOTOR_SPEED_MAX) ||
+        (min_base < 0L) || (min_base >= (int32)SHIP_MOTOR_OUTPUT_MAX_COMMAND) ||
         (abs_error_cd <= start_cd) || (abs_base <= min_base)) {
         return base_speed;
     }
@@ -705,7 +749,7 @@ static int16 ShipControl_YawControlToSpeed(int16 yaw_control, int16 base_speed)
 
     scale = (base_speed >= 0) ? (int32)base_speed : -(int32)base_speed;
     if (scale == 0L) {
-        scale = (int32)MOTOR_SPEED_MAX;
+        scale = (int32)SHIP_MOTOR_OUTPUT_MAX_COMMAND;
     }
 
     diff_limit_permille = (int32)SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE;
@@ -717,7 +761,7 @@ static int16 ShipControl_YawControlToSpeed(int16 yaw_control, int16 base_speed)
 
     yaw_limit = (scale * diff_limit_permille) / 1000L;
     if (base_speed != 0) {
-        speed_headroom = (int32)MOTOR_SPEED_MAX - scale;
+        speed_headroom = (int32)SHIP_MOTOR_OUTPUT_MAX_COMMAND - scale;
         if (speed_headroom < 0L) {
             speed_headroom = 0L;
         }
@@ -781,7 +825,7 @@ static int16 ShipControl_ApplyAxisCurve(int16 value,
         return 0;
     }
 
-    range = (int16)(SHIP_AXIS_CENTER - deadband);
+    range = (int16)(SHIP_RC_AXIS_MAX_DELTA - deadband);
     magnitude = (int16)(magnitude - deadband);
     if (range <= 0) {
         return 0;
@@ -849,6 +893,7 @@ static void ShipControl_SetMotorTargets(int16 left_speed, int16 right_speed)
 #endif
     g_ship_ctrl.left_speed = left_speed;
     g_ship_ctrl.right_speed = right_speed;
+    ShipControl_LogMotorOutput(0U);
 }
 
 static void ShipControl_ApplyOpenLoop(ShipControl_Motion_t motion,
@@ -1160,5 +1205,43 @@ static void ShipControl_LogSample(u32 now_ms)
     }
 #else
     (void)now_ms;
+#endif
+}
+
+static void ShipControl_LogMotorOutput(u8 force)
+{
+#if SHIP_MOT_LOG_ENABLE
+    u32 now_ms;
+    u8 mode_changed;
+    u8 motion_changed;
+
+    now_ms = Task_GetTickMs();
+    mode_changed = (g_ship_ctrl.mode != g_ship_ctrl.motor_last_log_mode) ? 1U : 0U;
+    motion_changed = (g_ship_ctrl.motion != g_ship_ctrl.motor_last_log_motion) ? 1U : 0U;
+    if ((force == 0U) &&
+        (mode_changed == 0U) &&
+        (motion_changed == 0U) &&
+        (SHIP_MOT_LOG_PERIOD_MS != 0U) &&
+        ((now_ms - g_ship_ctrl.motor_last_log_ms) < SHIP_MOT_LOG_PERIOD_MS)) {
+        return;
+    }
+
+    g_ship_ctrl.motor_last_log_ms = now_ms;
+    g_ship_ctrl.motor_last_log_left = g_ship_ctrl.left_speed;
+    g_ship_ctrl.motor_last_log_right = g_ship_ctrl.right_speed;
+    g_ship_ctrl.motor_last_log_mode = g_ship_ctrl.mode;
+    g_ship_ctrl.motor_last_log_motion = g_ship_ctrl.motion;
+    LOGI(SHIP_CONTROL_TAG,
+         "out m=%u mo=%u th=%d base=%d st=%d df=%d l=%d r=%d",
+         (u16)g_ship_ctrl.mode,
+         (u16)g_ship_ctrl.motion,
+         g_ship_ctrl.throttle_speed,
+         g_ship_ctrl.base_speed,
+         g_ship_ctrl.steering_speed,
+         g_ship_ctrl.yaw_diff_speed,
+         g_ship_ctrl.left_speed,
+         g_ship_ctrl.right_speed);
+#else
+    (void)force;
 #endif
 }

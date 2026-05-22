@@ -52,6 +52,10 @@
 /* manual RC axis low-pass: 1 = 50% new sample per 10 ms, 0 = no filter. */
 #define SHIP_AXIS_FILTER_SHIFT         1U
 
+/* Legacy remote axis full throw: payload center is 100, field remotes commonly
+ * report about 40..160, so +/-60 should map to full manual command. */
+#define SHIP_RC_AXIS_MAX_DELTA         60
+
 /**
  * @brief  船体 yaw 自稳总开关
  * @details
@@ -674,7 +678,9 @@
  */
 #define SHIP_RX_LOG_PERIOD_MS          500U
 #define SHIP_RX_CRC_LOG_THRESHOLD      10U
+#define SHIP_MOT_LOG_ENABLE            1U
 #define SHIP_MOT_LOG_PERIOD_MS         200U
+#define SHIP_RC_INPUT_LOG_ENABLE       0U
 #define SHIP_RC_INPUT_LOG_PERIOD_MS    500U
 #define SHIP_POWER_LOG_PERIOD_MS       10000U
 #define SHIP_MAG_LOG_PERIOD_MS         1000U

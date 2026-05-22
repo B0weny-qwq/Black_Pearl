@@ -281,31 +281,16 @@ meta 里还会显示：
 | `[SHIP] I: remote link online by aa-bb-frame cmd=...` | `遥控链路=在线`，显示触发命令 |
 | `[SHIP] I: pair ok by aa-bb-frame cmd=... work_rx=... key=.../...` | `配对状态=已配对`，更新工作信道/key，同时刷新遥控在线 |
 | `[SHIP] I: aa-bb xor ok cmd=... data_len=...` | 更新最近收到命令，并刷新遥控在线 |
-| `[SHIP] I: rc input cmd=0x11 ...` | 更新遥控输入油门、按键、自稳定状态，并刷新遥控在线 |
+| `[SHIP] I: rc input cmd=0x11 ...` | 兼容旧日志：更新按键/动作推断，并刷新遥控在线 |
 | `[SHIP] I: manual control online by cmd=0x11` | 标记手动控制上线，并刷新遥控在线 |
 | `[SHIP] W: remote link timeout by aa-bb-frame, dt=...ms` | `遥控链路=离线` |
 | `[SHIP] W: manual control timeout by cmd=0x11, dt=...ms` | 只提示 `0x11` 控制帧超时停机，不单独把页面遥控链路改离线 |
 
-### `遥控输入油门`
+### `电机输出`
 
 来源：
 
-- `[SHIP] I: throttle_raw=... steering_raw=... throttle_val=... steering_val=...`
-
-用途：
-
-- 看遥控器输入有没有真正进固件
-- 看中心点、正负方向是否正确
-
-这个卡片显示的是“输入”。
-不是最终电机输出。
-
-### `实际输出油门`
-
-来源：
-
-- `[MOT] I: m=... y=... t=... o=... l=... r=...`
-- `[CTRL] I: mode=... tgt=... err=... pid=... left=... right=...`
+- `[CTRL] I: mode=... tgt=... err=... pid=... df=... th=... base=... l=... r=...`
 - `[SHIP] I: pwm pins mla=... mlb=... mra=... mrb=... period=...`
 
 用途：
@@ -315,8 +300,7 @@ meta 里还会显示：
 - 看 yaw hold / manual hold 是否叠加了差速
 - 主数值显示为左右两行百分比：`左 +18%` / `右 +18%`，负数表示反向输出
 
-这个卡片显示的是“输出”。
-不是遥控器原始输入。
+这个卡片显示的是最终输出，不再依赖遥控器连续采样日志。
 
 ### `控制模式`
 
@@ -336,9 +320,9 @@ meta 里还会显示：
 
 - 直推且左右输出差小于 20%，若航向 ready，应看到 `MANUAL_YAW_HOLD`
 - 明显打方向，应回到 `MANUAL_OPEN_LOOP`
-- 带符号油门 `tv >= +50` 时按 E，应看到 `CRUISE_HEADING_HOLD`
+- 带符号油门 `> +50` 时按 E，应看到 `CRUISE_HEADING_HOLD`
 - 定速巡航中再按一次 E，应看到 `STOP`，时间线显示 `cruise-toggle-stop`
-- 定速巡航中带符号油门 `tv <= -80`，应看到 `STOP`，时间线显示 `cruise-reverse-stop`
+- 定速巡航中带符号油门 `<= -60`，应看到 `STOP`，时间线显示 `cruise-reverse-stop`
 
 ### `自动驾驶`
 
@@ -364,7 +348,7 @@ meta 里还会显示：
 用途：
 
 - 看当前被识别成 `forward / backward / left / right / stop`
-- `[MOT]`、`pwm pins`、`yaw hold` 只更新“实际输出油门”，不再覆盖动作判定
+- `[MOT]`、`pwm pins`、`yaw hold` 只更新“电机输出”，不再覆盖动作判定
 - 小字字段按 `speed / throttle / steering` 或 `left / right` 分行显示，避免挤成一行
 - 重复的 `stop/manual center` 会在时间线上做 1 秒限流，避免中位帧持续输入时刷屏
 
@@ -586,8 +570,8 @@ meta 里还会显示：
 
 - AHRS
 - HDG
-- 遥控输入油门
-- 实际输出油门
+- 控制模式
+- 电机输出
 - 电量
 - GPS 数值
 - 地磁
@@ -626,8 +610,7 @@ meta 里还会显示：
 
 ### 9.3 遥控与动作类
 
-- `[SHIP] I: rc cmd=0x11 ...`
-- `[SHIP] I: throttle_raw=...`
+- `[SHIP] I: rc11 on`
 - `[SHIP] I: manual parse ...`
 - `[SHIP] I: manual motion=...`
 - `[SHIP] I: key action=...`
@@ -684,23 +667,23 @@ meta 里还会显示：
 
 如果“遥控在线”但电机停机，再看 `0x11` 是否持续有效；显示在线不等于控制帧保活。
 
-## 10.4 看遥控输入
+## 10.4 看控制模式
 
 看：
 
-- `遥控输入油门`
-- `rc cmd=0x11`
-- `throttle_raw / steering_raw`
+- `控制模式`
+- `按键状态`
+- `动作 / 巡航`
 
-确认摇杆中心、方向、幅度正确。
+确认 E 键、定速巡航和 CTRL 模式切换是否按预期发生。
 
-## 10.5 看实际输出
+## 10.5 看电机输出
 
 看：
 
-- `实际输出油门`
-- `[MOT]`
-- `动作判定`
+- `电机输出`
+- `[CTRL]`
+- `动作 / 巡航`
 
 确认输入和输出是否一致，是否被自动控制叠加。
 
@@ -809,7 +792,7 @@ meta 里还会显示：
 1. 双击 `tools/ship_log_viewer/start_ship_log_viewer.bat`
 2. 选串口后点连接
 3. 先看“配对状态”和“遥控链路”
-4. 再看“遥控输入油门”和“实际输出油门”
+4. 再看“控制模式”和“电机输出”
 5. 按键是否触发直接看“按键状态”
 6. GPS 看右侧摘要区
 7. 出问题时把原始日志导出或直接粘贴回来
