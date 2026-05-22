@@ -19,7 +19,7 @@
 #define HEADING_STATIC_MAG_ERR_GATE_DEG 3.00f
 #define HEADING_MAG_FUSE_MIN_GZ_DPS    0.30f
 #define HEADING_KMAG_STATIC            0.0008f
-#define HEADING_KMAG_MOVE              0.0002f
+#define HEADING_KMAG_MOVE              0.0f
 
 typedef struct
 {

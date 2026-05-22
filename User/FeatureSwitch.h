@@ -114,11 +114,11 @@
 /**
  * @brief  yaw 自稳最大差速比例（permille）
  * @details
- * - 400 表示 PID 满输出时，单边差速修正最多为当前基础油门的 40%
+ * - 250 表示 PID 满输出时，单边差速修正最多为当前基础油门的 25%
  * - 可防止自稳态把单侧电机直接压死或拉满
  */
-#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 400
-/* Current cap: yaw_output <= 40% of current base speed before headroom clamp. */
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 250
+/* Current cap: yaw_output <= 25% of current base speed before headroom clamp. */
 
 /* manual yaw-hold enters when abs(left-right) < max(abs(left),abs(right)) * this percent. */
 #define SHIP_MANUAL_YAW_HOLD_DIFF_PERCENT 20U

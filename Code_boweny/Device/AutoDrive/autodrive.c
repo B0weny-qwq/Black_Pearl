@@ -17,8 +17,6 @@
 #define AUTODRIVE_CRAWL_DISTANCE_M         8U
 #define AUTODRIVE_APPROACH_BASE_SPEED      700
 #define AUTODRIVE_CRAWL_BASE_SPEED         500
-#define AUTODRIVE_ALIGN_ENTER_ERROR_CD     1200
-#define AUTODRIVE_ALIGN_EXIT_ERROR_CD      500
 #define AUTODRIVE_MINUTE_SCALE             10000UL
 #define AUTODRIVE_MINUTES_PER_DEG          60UL
 #define AUTODRIVE_METERS_PER_MINUTE        1850UL
@@ -45,7 +43,6 @@ static u16 g_destination_angle = 0U;
 static u16 g_autodrive_target_heading_cd = 0U;
 static u8 g_autodrive_target_heading_valid = 0U;
 static u16 g_autodrive_base_speed = AUTODRIVE_CRUISE_BASE_SPEED;
-static u8 g_autodrive_align_active = 0U;
 
 static u16 g_link_alive_ticks = 0U;
 static u16 g_link_close_ticks = 0U;
@@ -225,41 +222,6 @@ static void AutoDrive_ResetApproachTracker(void)
     g_autodrive_base_speed = AUTODRIVE_CRUISE_BASE_SPEED;
 }
 
-static int16 AutoDrive_WrapHeadingErrorCd(u16 target_heading_cd,
-                                          u16 current_heading_cd)
-{
-    int32 error_cd;
-
-    error_cd = (int32)target_heading_cd - (int32)current_heading_cd;
-    while (error_cd >= 18000L) {
-        error_cd -= 36000L;
-    }
-    while (error_cd < -18000L) {
-        error_cd += 36000L;
-    }
-    return (int16)error_cd;
-}
-
-static u16 AutoDrive_Abs16ToU16(int16 value)
-{
-    if (value < 0) {
-        return (u16)(-value);
-    }
-    return (u16)value;
-}
-
-static u16 AutoDrive_GetHeadingErrorAbsCd(void)
-{
-    if ((g_autodrive_target_heading_valid == 0U) ||
-        (MainLoop_IsHeadingReady() == 0U)) {
-        return 65535U;
-    }
-
-    return AutoDrive_Abs16ToU16(
-        AutoDrive_WrapHeadingErrorCd(g_autodrive_target_heading_cd,
-                                     MainLoop_GetHeadingDeg100()));
-}
-
 static u16 AutoDrive_InterpolateSpeed(u16 distance_m,
                                       u16 near_distance_m,
                                       u16 far_distance_m,
@@ -381,7 +343,6 @@ void AutoDrive_StopMotion(void)
 {
     g_autodrive_target_heading_valid = 0U;
     AutoDrive_ResetApproachTracker();
-    g_autodrive_align_active = 0U;
     ShipControl_StopGpsNav();
 }
 
@@ -791,16 +752,6 @@ static u16 AutoDrive_GetStartHeadingDeg(void)
         return heading;
     }
 
-    {
-        const GPS_State_t *gps;
-
-        gps = GPS_GetState();
-        if ((gps != 0) && (gps->fix_valid != 0U) &&
-            (gps->course_deg_x100 <= 36000U)) {
-            return (u16)(gps->course_deg_x100 / 100U);
-        }
-    }
-
     return 0U;
 }
 
@@ -808,7 +759,6 @@ static u16 AutoDrive_GetRunHeadingDeg(void)
 {
     u16 heading_cd;
     u16 heading;
-    const GPS_State_t *gps;
 
     if (MainLoop_IsHeadingReady() != 0U) {
         heading_cd = (u16)(MainLoop_GetHeadingDeg100() % 36000U);
@@ -817,12 +767,6 @@ static u16 AutoDrive_GetRunHeadingDeg(void)
             heading = 0U;
         }
         return heading;
-    }
-
-    gps = GPS_GetState();
-    if ((gps != 0) && (gps->fix_valid != 0U) &&
-        (gps->course_deg_x100 <= 36000U)) {
-        return (u16)(gps->course_deg_x100 / 100U);
     }
 
     return 65535U;
@@ -919,7 +863,6 @@ void AutoDrive_Init(void)
     g_autodrive_target_heading_cd = 0U;
     g_autodrive_target_heading_valid = 0U;
     AutoDrive_ResetApproachTracker();
-    g_autodrive_align_active = 0U;
 
     AutoDrive_StopMotion();
 }
@@ -1009,54 +952,12 @@ void AutoDrive_Poll(void)
 
         ShipControl_ResetYawHoldController();
         g_last_run_update_seq = gps->update_sequence;
-        g_autodrive_align_active = 1U;
-        g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
-        AutoDrive_ApplyHeadingHold(0U);
+        g_autoDrive_state = AUTO_DRIVE_RUNING;
+        AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
         break;
 
     case AUTO_DRIVE_GET_DIRECTION:
-        if (g_autodrive_work_overtime > 0U) {
-            g_autodrive_work_overtime--;
-        } else {
-            AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
-            AutoDrive_WorkOvertimeFail();
-            break;
-        }
-
-        if ((gps == 0) || (AutoDrive_GpsReady() == 0U) ||
-            (MainLoop_IsHeadingReady() == 0U) ||
-            (AutoDrive_GetTargetPoint(&target_point) == 0U)) {
-            AutoDrive_Stop();
-            break;
-        }
-
-        if (gps->update_sequence != g_last_run_update_seq) {
-            AutoDrive_UpdateGpsStepPoints();
-            destination_distance =
-                AutoDrive_GetDistanceNowToDestination((const u8 *)&g_now_position,
-                                                      (const u8 *)target_point);
-            AutoDrive_UpdateApproachSpeed(destination_distance);
-            if (destination_distance <= AUTODRIVE_ARRIVE_DISTANCE_M) {
-                AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_ARRIVE);
-                g_autoDrive_state = AUTO_DRIVE_IDLE;
-                AutoDrive_SetMode(AUTO_DRIVE_CLOSE);
-                AutoDrive_StopMotion();
-                break;
-            }
-            if (AutoDrive_UpdateTargetHeading(&g_now_position, target_point) != 0U) {
-                AutoDrive_CopyPoint(&g_last_position, &g_now_position);
-            }
-            g_last_run_update_seq = gps->update_sequence;
-        }
-
-        if (AutoDrive_GetHeadingErrorAbsCd() <= AUTODRIVE_ALIGN_EXIT_ERROR_CD) {
-            g_autodrive_align_active = 0U;
-            ShipControl_ResetYawHoldController();
-            g_autoDrive_state = AUTO_DRIVE_RUNING;
-            AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
-        } else {
-            AutoDrive_ApplyHeadingHold(0U);
-        }
+        g_autoDrive_state = AUTO_DRIVE_START;
         break;
 
     case AUTO_DRIVE_RUNING:

@@ -6,6 +6,7 @@
 #include "..\Code_boweny\Device\QMI8658\QMI8658.h"
 #include "..\Code_boweny\Device\GPS\GPS.h"
 #include "..\Code_boweny\Device\Motor\Motor.h"
+#include "..\Code_boweny\Device\Control\ShipControl.h"
 #include "..\Code_boweny\Device\WIRELESS\wireless.h"
 #include "..\Code_boweny\Device\WIRELESS\ship_protocol.h"
 #include "..\Code_boweny\Function\AHRS\AHRS.h"
@@ -32,6 +33,9 @@ static void Wireless_MinimalTestUnit(void)
 
 #ifndef MAG_COMPASS_READY_COUNT
 #define MAG_COMPASS_READY_COUNT        5U
+#endif
+#ifndef MAG_COMPASS_STATIC_SETTLE_MS
+#define MAG_COMPASS_STATIC_SETTLE_MS   3000UL
 #endif
 #ifndef MAG_COMPASS_IIR_DIV
 #define MAG_COMPASS_IIR_DIV            8L
@@ -274,6 +278,15 @@ static u8 MAG_UpdateCompassFilter(int16 raw_x, int16 raw_y, int16 raw_z,
     return 0U;
 }
 
+static void MAG_ResetCompassFilter(void)
+{
+    g_mag_heading_ready_snapshot = 0U;
+    g_mag_filter_started = 0U;
+    g_mag_filter_stable_count = 0U;
+    g_mag_norm_base = 0UL;
+    g_mag_heading_iir_cd = 0L;
+}
+
 #if ENABLE_MAG_STANDALONE_POLL
 static void MAG_StandalonePoll(void)
 {
@@ -503,7 +516,19 @@ static void AHRS_FormatSignedCd(int32 value, char *buf)
 
 static u8 AHRS_IsHeadingStatic(const AHRS_State_t *att)
 {
+    int16 left_speed;
+    int16 right_speed;
+
     if (att == 0) {
+        return 0U;
+    }
+
+    if (ShipControl_GetMode() != SHIP_CONTROL_MODE_STOP) {
+        return 0U;
+    }
+    left_speed = Motor_GetSpeed(MOTOR_LEFT);
+    right_speed = Motor_GetSpeed(MOTOR_RIGHT);
+    if ((left_speed != 0) || (right_speed != 0)) {
         return 0U;
     }
 
@@ -551,6 +576,8 @@ static void IMU_AhrsPoll(void)
     static u8 read_error_latched = 0;
     static u8 yaw_zero_valid = 0;
     static u8 heading_seeded = 0;
+    static u8 last_heading_static_flag = 0U;
+    static u32 heading_static_start_ms = 0UL;
     static int32 yaw_gyro_zero_cd = 0;
     static int32 yaw_mag_zero_cd = 0;
     static int16 last_mag_x = 0;
@@ -579,12 +606,17 @@ static void IMU_AhrsPoll(void)
     int32 heading_mag_dbg_cd;
     u8 stable_mag_valid;
     u8 heading_static_flag;
+    u8 heading_mag_settled;
     u8 self_stabilize_flag;
     float heading_seed_deg;
     float heading_dt_s;
     char *mag_suffix;
     const AHRS_State_t *att;
     u8 ahrs_log_len;
+
+    heading_static_flag = 0U;
+    heading_mag_settled = 0U;
+    self_stabilize_flag = 0U;
 
     if (!g_qmi8658_ready) {
         return;
@@ -621,12 +653,32 @@ static void IMU_AhrsPoll(void)
         return;
     }
 
+    att = AHRS_GetState();
+    if ((att->flags & AHRS_FLAG_READY) != 0U) {
+        heading_static_flag = AHRS_IsHeadingStatic(att);
+        self_stabilize_flag = AHRS_HasSelfStabilize(att);
+        if ((heading_static_flag != 0U) && (last_heading_static_flag == 0U)) {
+            heading_static_start_ms = now_ms;
+            MAG_ResetCompassFilter();
+        }
+        if (heading_static_flag == 0U) {
+            heading_static_start_ms = 0UL;
+        } else if ((now_ms - heading_static_start_ms) >= MAG_COMPASS_STATIC_SETTLE_MS) {
+            heading_mag_settled = 1U;
+        }
+        last_heading_static_flag = heading_static_flag;
+    } else {
+        last_heading_static_flag = 0U;
+        heading_static_start_ms = 0UL;
+    }
+
     stable_mag_heading_cd = g_mag_heading_deg100_snapshot;
     stable_mag_valid = 0U;
     if ((now_ms - last_mag_ms) >= AHRS_MAG_PERIOD_MS) {
         last_mag_ms = now_ms;
         if (QMC6309_ReadXYZFiltered(&mx, &my, &mz) == 0) {
-            if (MAG_UpdateCompassFilter(mx, my, mz, &stable_mag_heading_cd) != 0U) {
+            if ((heading_mag_settled != 0U) &&
+                (MAG_UpdateCompassFilter(mx, my, mz, &stable_mag_heading_cd) != 0U)) {
                 stable_mag_valid = 1U;
             }
             last_mag_x = mx;
@@ -636,7 +688,6 @@ static void IMU_AhrsPoll(void)
         }
     }
 
-    att = AHRS_GetState();
     if ((att->flags & AHRS_FLAG_READY) == 0U) {
         yaw_zero_valid = 0;
         yaw_gyro_zero_cd = 0L;
@@ -646,12 +697,11 @@ static void IMU_AhrsPoll(void)
         g_heading_ready_snapshot = 0U;
         Heading_Init(&g_heading);
     } else {
-        heading_static_flag = AHRS_IsHeadingStatic(att);
-        self_stabilize_flag = AHRS_HasSelfStabilize(att);
         heading_dt_s = (float)dt_ms * 0.001f;
 
         if (!heading_seeded) {
-            if (g_mag_heading_ready_snapshot == 0U) {
+            if ((g_mag_heading_ready_snapshot == 0U) ||
+                (heading_mag_settled == 0U)) {
                 yaw_zero_valid = 0U;
                 g_heading_rel_cd_snapshot = 0;
                 g_heading_ready_snapshot = 0U;

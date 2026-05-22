@@ -1428,9 +1428,6 @@ static void ShipProtocol_Dispatch(u8 cmd, const u8 *payload, u8 payload_len)
             ShipProtocol_LogCoordBE(&payload[1], (u8)(payload_len - 1U));
         }
         AutoDrive_SetSwitchRaw(payload, payload_len);
-        if (payload[0] != 0x30U) {
-            AutoDrive_TriggerReturnWithReason(AUTODRIVE_DIAG_REASON_RETURN_SWITCH_SAVE);
-        }
         ShipProtocol_LogAutoDriveSnapshot("after-0x15");
         break;
     default:

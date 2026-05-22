@@ -157,6 +157,7 @@ void Heading_Update(HeadingEstimator_t *h,
 
     if (!static_flag) {
         h->static_mag_ref_valid = 0U;
+        h->last_mag_sample_valid = 0U;
     }
 
     if (raw_mag_valid) {
@@ -197,14 +198,11 @@ void Heading_Update(HeadingEstimator_t *h,
                 HEADING_WRAP360_INPLACE(h->heading_deg);
                 mag_used = 1U;
             }
-        } else if (!HEADING_DBG_FORCE_MAG_OFF) {
-            err = value - heading_pred;
-            HEADING_WRAP180_INPLACE(err);
-            if (HEADING_FLOAT_ABS(err) <= HEADING_MAG_ERR_GATE_DEG) {
-                h->heading_deg = heading_pred + (HEADING_KMAG_MOVE * err);
-                HEADING_WRAP360_INPLACE(h->heading_deg);
-                mag_used = 1U;
-            }
+        } else {
+            /* While moving, keep the north reference by gyro integration only.
+             * GPS updates steer the target course; magnetometer samples are
+             * observed but not fused until the boat is stationary again. */
+            h->static_mag_ref_valid = 0U;
         }
 
         if (mag_used) {
