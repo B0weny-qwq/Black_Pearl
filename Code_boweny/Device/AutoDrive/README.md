@@ -91,10 +91,13 @@ GPS 去钓点或返航启动时，状态机会先进入 `AUTO_DRIVE_GET_DIRECTIO
 
 对准阶段当前参数：
 
-- 对准角度容差：`AUTODRIVE_ALIGN_TOLERANCE_CD = 500`，即 `±5.00°`
+- 对准角度容差：`AUTODRIVE_ALIGN_TOLERANCE_CD = 800`，即 `±8.00°`
+- 对准放行前必须先“过零”：航向误差进入 `AUTODRIVE_ALIGN_ZERO_CROSS_CD = 50`，即 `±0.50°`，或误差符号从正到负/从负到正穿过 0
 - 连续稳定计数：`AUTODRIVE_ALIGN_STABLE_TICKS = 20`，以 `10ms` 轮询计算，约 `200ms`
 - 对准超时：`AUTODRIVE_ALIGN_TIMEOUT_TICKS = 800`，约 `8s`，超时后放行进入巡航，避免浪、磁环境或 PID 抖动导致一直卡在原地
 - 对准阶段不使用前进基础速度，调用 `ShipControl_RequestGpsAlign()`，只允许原地差速转向
+
+也就是说，系统不会在第一次刚摸到 `±8°` 窗口时立刻启动前进；必须先确认船头已经扫过目标航向附近，然后才开始累计 `±8°` 稳定时间。这样可以避免还没真正对准就提前进入 `RUNING`。
 
 控制层对准阶段单独使用较软的 PID：
 
@@ -102,7 +105,7 @@ GPS 去钓点或返航启动时，状态机会先进入 `AUTO_DRIVE_GET_DIRECTIO
 - `SHIP_GPS_ALIGN_KI_Q10 = 0`
 - `SHIP_GPS_ALIGN_KD_Q10 = 0`
 
-注意：PID 输出里的 `SHIP_YAW_HOLD_OUTPUT_LIMIT = 1000` 是内部归一化控制量，不是 PWM duty，也不是最终电机命令。对准阶段最终差速命令会再限制为 `SHIP_MOTOR_OUTPUT_MAX_COMMAND * 8%`，当前 `SHIP_MOTOR_OUTPUT_MAX_COMMAND = 850`，所以原地对准最大差速约为 `68`。
+注意：PID 输出里的 `SHIP_YAW_HOLD_OUTPUT_LIMIT = 1000` 是内部归一化控制量，不是 PWM duty，也不是最终电机命令。对准阶段最终差速命令会再限制为 `SHIP_MOTOR_OUTPUT_MAX_COMMAND * 18%`，当前 `SHIP_MOTOR_OUTPUT_MAX_COMMAND = 850`，所以原地对准最大差速约为 `153`。
 
 进入 `RUNING` 后，`AutoDrive` 切回 `ShipControl_RequestGpsNav(target, base_speed)`，使用正常 GPS 导航 yaw-hold PID 和距离减速逻辑。
 
@@ -211,7 +214,9 @@ lat_frac[BE]
 - 最多保存 5 个钓点，编号按遥控器先后发来的顺序自动分配为 `1..5`。
 - 不要求一次收满 5 个钓点；只有 1 号钓点有效时，也可以正常去 1 号。
 - 第一次收到未知有效坐标时只保存并返回 `AUTODRIVE_FISH_CMD_STORED`。
-- 再次收到已保存坐标时，匹配对应编号并尝试进入去钓点流程。
+- 同一坐标在短时间内连续重发时返回 `AUTODRIVE_FISH_CMD_DUP_WAIT`，用于过滤遥控器/RF 重发，不触发去点。
+- 停止重发超过去重窗口后，再次收到已保存坐标时，匹配对应编号并尝试进入去钓点流程。
+- 已保存的钓点在本次上电期间一直保留；去过一次、到点停车、手动停止、超时失败或切换模式都不会删除 1..5 表。
 - 5 个槽位已满后，未匹配任何已保存钓点的新坐标会被拒绝，避免误去未知点。
 - `AutoDrive_GetLastFishCommandIndex()` 记录最近一次 `0x14` 保存或匹配到的钓点编号，供无线日志打印。
 
@@ -228,7 +233,7 @@ lat_frac[BE]
 注意：
 
 - `0x13`、`0x15` 更新的返航点和开关掉电后不会保留。
-- 钓点列表也只保存在 RAM 中，复位或重新上电后清空。
+- 钓点列表也只保存在 RAM 中，本次上电期间不会因去点/到点/停车而清空；复位或重新上电后清空。
 
 ## 当前已知边界
 

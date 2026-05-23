@@ -88,7 +88,9 @@
 #define SHIP_AXIS_CENTER               100U
 #define SHIP_CRUISE_KEY_START_INPUT    60
 #define SHIP_CRUISE_KEY_STOP_INPUT     (-50)
-#define SHIP_CRUISE_KEY_SPEED          800
+#define SHIP_CRUISE_KEY_SPEED          760
+#define SHIP_CRUISE_STEER_START_MAX    8
+#define SHIP_CRUISE_GYRO_START_MAX_DPS 8
 #define SHIP_POWER_LEVEL_0             0U
 #define SHIP_POWER_LEVEL_1             1U
 #define SHIP_POWER_LEVEL_2             2U
@@ -224,6 +226,7 @@ static void ShipProtocol_ReadPowerSample(ShipPowerSample_t *sample);
 static void ShipProtocol_ServicePowerSample(void);
 static u8 ShipProtocol_AdcRawToPowerLevel(u16 adc_raw);
 static int16 ShipProtocol_RawUdToInput(u8 front_back);
+static int16 ShipProtocol_RawLrToInput(u8 left_right);
 static u8 ShipProtocol_IsLowPower(void);
 static void ShipProtocol_LowPowerCheck(void);
 #if SHIP_PROTOCOL_DIAG_ENABLE
@@ -300,6 +303,11 @@ u8 ShipProtocol_ApplyYawHoldTarget(u16 target_heading_cd, int16 base_speed)
 static int16 ShipProtocol_RawUdToInput(u8 front_back)
 {
     return (int16)((int16)front_back - (int16)SHIP_AXIS_CENTER);
+}
+
+static int16 ShipProtocol_RawLrToInput(u8 left_right)
+{
+    return (int16)((int16)left_right - (int16)SHIP_AXIS_CENTER);
 }
 
 /* True when the cached battery level has dropped to the lowest band. */
@@ -496,6 +504,8 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
 {
     u8 cruise_active;
     int16 throttle_input;
+    int16 steering_input;
+    int16 yaw_rate_dps;
     u16 heading_cd;
 
     if (key == g_ship_rt.last_key) {
@@ -503,6 +513,8 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
     }
     g_ship_rt.last_key = key;
     throttle_input = ShipProtocol_RawUdToInput(front_back);
+    steering_input = ShipProtocol_RawLrToInput(g_ship_rt.lr);
+    yaw_rate_dps = (int16)(MainLoop_GetGyroZDps100() / 100);
     cruise_active =
         (ShipControl_GetMode() == SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD) ? 1U : 0U;
 
@@ -527,7 +539,11 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
                      throttle_input,
                      (u16)front_back);
             SHIP_VIEWER_LOG0(SHIP_TAG, "key action=E cruise-toggle-stop");
-        } else if (throttle_input >= SHIP_CRUISE_KEY_START_INPUT) {
+        } else if ((throttle_input >= SHIP_CRUISE_KEY_START_INPUT) &&
+                   (steering_input <= SHIP_CRUISE_STEER_START_MAX) &&
+                   (steering_input >= (int16)(-SHIP_CRUISE_STEER_START_MAX)) &&
+                   (yaw_rate_dps <= SHIP_CRUISE_GYRO_START_MAX_DPS) &&
+                   (yaw_rate_dps >= (int16)(-SHIP_CRUISE_GYRO_START_MAX_DPS))) {
             if (MainLoop_IsHeadingReady() != 0U) {
                 heading_cd = MainLoop_GetHeadingDeg100();
                 ShipControl_RequestCruise(heading_cd,
@@ -550,6 +566,18 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
                              "key action=E cruise-high input=%d raw_ud=%u",
                              throttle_input,
                              (u16)front_back);
+        } else if (throttle_input >= SHIP_CRUISE_KEY_START_INPUT) {
+            log_info((u8 *)SHIP_DATA_TAG,
+                     (u8 *)"cruise ignore reason=not-straight input=%d steer=%d gyro=%d raw_ud=%u raw_lr=%u",
+                     throttle_input,
+                     steering_input,
+                     yaw_rate_dps,
+                     (u16)front_back,
+                     (u16)g_ship_rt.lr);
+            SHIP_VIEWER_LOGI(SHIP_TAG,
+                             "key action=E cruise-not-straight input=%d steer=%d",
+                             throttle_input,
+                             steering_input);
         } else if (throttle_input <= SHIP_CRUISE_KEY_STOP_INPUT) {
             ShipControl_Stop(SHIP_CONTROL_STOP_REASON_CRUISE_KEY);
             log_info((u8 *)SHIP_DATA_TAG,

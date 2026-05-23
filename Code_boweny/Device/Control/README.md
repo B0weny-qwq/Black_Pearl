@@ -40,16 +40,25 @@
 
 - 手动转向明显时走开环差速。
 - 手动前进且转向回中稳定后，锁当前融合航向并进入手动 yaw 自稳。
-- E 键定速巡航锁进入瞬间的融合航向，当前请求基础速度为 `800`。
-- 定速巡航不走 GPS/yaw 大角度靠近减速的基速降档；`base` 保持请求速度，只在左右电机上叠加 yaw-hold 差速修正。
-- 运行时可看 `[DATA] I: cruise run req=... base=... l=... r=... err=... pid=... diff=... tgt=...`，确认定速巡航有没有被内部降速。
+- E 键定速巡航锁进入瞬间的融合航向，当前请求基础速度为 `760`。
+- 定速巡航起步使用软启动：`SHIP_CRUISE_RAMP_MIN_BASE=520`，`SHIP_CRUISE_RAMP_MS=1800`，`base` 会从约 `520` 逐步拉到请求速度，避免刚进入时带出弧线。
+- 定速巡航不走 GPS/yaw 大角度靠近减速的基速降档；只叠加 yaw-hold 左右差速修正。
+- 高速定速巡航的差速修正不再受“电机上行余量”夹紧；当基础速度接近电机上限时，控制层允许通过压低一侧电机获得转向力，减少修正不足导致的偏航。
+- 运行时可看 `[DATA] I: cruise run req=... base=... l=... r=... err=... pid=... diff=... tgt=...`：`req=760`，`base` 起步阶段逐步上升，`err/pid/diff` 用于判断是否仍有 S 型回摆。
 - GPS 定点巡航由 `AutoDrive` 计算目标航向，`ShipControl` 只负责按目标航向自稳输出电机。
 - GPS 对准阶段使用 `ShipControl_RequestGpsAlign()`，它与正常 GPS 巡航同属 `GPS_NAV_HEADING_HOLD` 模式，但使用单独的软 PID。
 - yaw 自稳基础速度降额只在偏航误差较大时触发：`SHIP_YAW_HOLD_DERATE_START_CD=1000` 表示 `10.00°` 后开始降速，`SHIP_YAW_HOLD_DERATE_FULL_CD=2000` 表示 `20.00°` 后达到满降速，满降速基础速度上限为 `500`。
-- 对准 PID 默认 `Kp=384(Q10)`、`Ki=0`、`Kd=0`；正常 yaw-hold 参数以 `User/FeatureSwitch.h` 为准，当前 `Kp=512(Q10)`、`Ki=128(Q10)`、`Kd=64(Q10)`。
-- 对准阶段最终左右差速命令限制为 `SHIP_MOTOR_OUTPUT_MAX_COMMAND * 8%`，当前约 `68`，用于降低低速原地转向过快和抖动。
+- 对准 PID 默认 `Kp=384(Q10)`、`Ki=0`、`Kd=0`；正常 yaw-hold 参数以 `User/FeatureSwitch.h` 为准，当前 `Kp=384(Q10)`、`Ki=0(Q10)`、`Kd=96(Q10)`。
+- 当前 yaw-hold 差速限幅为 `SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=320`，陀螺阻尼为 `SHIP_YAW_HOLD_GYRO_DAMP_Q10=4096`，最终差速斜坡为 `SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP=20`。
+- 对准阶段最终左右差速命令限制为 `SHIP_MOTOR_OUTPUT_MAX_COMMAND * 18%`，当前约 `153`，用于降低低速原地转向过快和抖动，同时保留足够转向力。
 - `SHIP_YAW_HOLD_OUTPUT_LIMIT = 1000` 是 PID 内部归一化控制量，不是 PWM duty；最终电机命令仍由 `ShipControl_YawControlToSpeed()` 换算并受 `SHIP_MOTOR_OUTPUT_MAX_COMMAND` 限制。
 
 ## 配置来源
 
 控制周期、yaw-hold 增益、差速限幅、日志节流和 PWM 总开关都以 `User/FeatureSwitch.h` 为准。
+
+## 版本记录
+
+| 日期 | 版本 | 说明 |
+|------|------|------|
+| 2026-05-23 | v1.1 | 同步定速巡航 `760` 请求速度、`520 -> 760 / 1.8s` 软启动、高速差速余量策略和当前 yaw-hold 参数。 |

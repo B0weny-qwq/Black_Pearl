@@ -49,6 +49,12 @@
 #ifndef SHIP_CRUISE_BASE_SPEED
 #define SHIP_CRUISE_BASE_SPEED           SHIP_THROTTLE_MAX_COMMAND
 #endif
+#ifndef SHIP_CRUISE_RAMP_MS
+#define SHIP_CRUISE_RAMP_MS              1800UL
+#endif
+#ifndef SHIP_CRUISE_RAMP_MIN_BASE
+#define SHIP_CRUISE_RAMP_MIN_BASE        520
+#endif
 #ifndef SHIP_MANUAL_CONTROL_PERIOD_MS
 #define SHIP_MANUAL_CONTROL_PERIOD_MS    10UL
 #endif
@@ -125,7 +131,7 @@
 #define SHIP_GPS_ALIGN_KD_Q10            0
 #endif
 #ifndef SHIP_GPS_ALIGN_DIFF_PERCENT
-#define SHIP_GPS_ALIGN_DIFF_PERCENT      8U
+#define SHIP_GPS_ALIGN_DIFF_PERCENT      18U
 #endif
 
 #define SHIP_CONTROL_REASON_MANUAL_OPEN  20U
@@ -175,6 +181,7 @@ typedef struct
     int16 yaw_hold_last_yaw_speed;
     u32 yaw_hold_last_update_ms;
     u8 yaw_hold_stable_count;
+    u32 cruise_start_ms;
     int16 left_speed;
     int16 right_speed;
     int16 throttle_speed;
@@ -210,6 +217,7 @@ static int16 ShipControl_YawErrorToControl(int16 yaw_error_cd);
 static int16 ShipControl_ApplyYawHoldDamping(int16 yaw_control);
 static int16 ShipControl_ApplyYawOutputSlew(int16 yaw_output);
 static int16 ShipControl_LimitGpsAlignYawOutput(int16 yaw_output);
+static int16 ShipControl_ApplyCruiseBaseRamp(int16 base_speed, int16 yaw_error_cd);
 static int16 ShipControl_ApplyYawHoldBaseDerate(int16 base_speed, int16 yaw_error_cd);
 static int16 ShipControl_YawControlToSpeed(int16 yaw_control, int16 base_speed);
 static u8 ShipControl_YawHoldGateStable(void);
@@ -270,6 +278,7 @@ void ShipControl_Init(void)
     g_ship_ctrl.yaw_hold_last_yaw_speed = 0;
     g_ship_ctrl.yaw_hold_last_update_ms = 0UL;
     g_ship_ctrl.yaw_hold_stable_count = 0U;
+    g_ship_ctrl.cruise_start_ms = 0UL;
     g_ship_ctrl.left_speed = 0;
     g_ship_ctrl.right_speed = 0;
     g_ship_ctrl.throttle_speed = 0;
@@ -370,6 +379,7 @@ void ShipControl_RequestCruise(u16 heading_cd, int16 base_speed)
 
     ShipControl_ResetYawHoldController();
     g_ship_ctrl.auto_last_apply_ms = Task_GetTickMs();
+    g_ship_ctrl.cruise_start_ms = g_ship_ctrl.auto_last_apply_ms;
     g_ship_ctrl.yaw_hold_target_cd = ShipControl_WrapUnsignedCd((int32)heading_cd);
     g_ship_ctrl.base_speed = ShipControl_LimitSpeed(base_speed);
     if (g_ship_ctrl.base_speed == 0) {
@@ -484,6 +494,7 @@ void ShipControl_ResetYawHoldController(void)
     g_ship_ctrl.yaw_hold_last_yaw_speed = 0;
     g_ship_ctrl.yaw_hold_last_update_ms = 0UL;
     g_ship_ctrl.yaw_hold_stable_count = 0U;
+    g_ship_ctrl.cruise_start_ms = 0UL;
     PID_Reset(&g_ship_ctrl_yaw_pid);
     PID_Reset(&g_ship_ctrl_align_pid);
 }
@@ -756,6 +767,51 @@ static int16 ShipControl_LimitGpsAlignYawOutput(int16 yaw_output)
     return yaw_output;
 }
 
+static int16 ShipControl_ApplyCruiseBaseRamp(int16 base_speed, int16 yaw_error_cd)
+{
+    u32 now_ms;
+    u32 elapsed_ms;
+    int16 sign;
+    int32 abs_base;
+    int32 min_base;
+    int32 ramped_base;
+
+    (void)yaw_error_cd;
+
+    if ((base_speed == 0) || (g_ship_ctrl.cruise_start_ms == 0UL)) {
+        return base_speed;
+    }
+
+    if ((u32)SHIP_CRUISE_RAMP_MS == 0UL) {
+        return base_speed;
+    }
+
+    sign = (base_speed >= 0) ? 1 : -1;
+    abs_base = (base_speed >= 0) ? (int32)base_speed : -(int32)base_speed;
+    min_base = (int32)SHIP_CRUISE_RAMP_MIN_BASE;
+    if (min_base < 0L) {
+        min_base = 0L;
+    }
+    if (min_base >= abs_base) {
+        return base_speed;
+    }
+
+    now_ms = Task_GetTickMs();
+    elapsed_ms = now_ms - g_ship_ctrl.cruise_start_ms;
+    if (elapsed_ms >= (u32)SHIP_CRUISE_RAMP_MS) {
+        return base_speed;
+    }
+
+    ramped_base = min_base +
+                  (((abs_base - min_base) * (int32)elapsed_ms) /
+                   (int32)SHIP_CRUISE_RAMP_MS);
+    if (ramped_base > abs_base) {
+        ramped_base = abs_base;
+    }
+
+    return (int16)(sign * (int16)ramped_base);
+}
+
 static int16 ShipControl_ApplyYawHoldBaseDerate(int16 base_speed, int16 yaw_error_cd)
 {
 #if SHIP_YAW_HOLD_DERATE_ENABLE
@@ -814,7 +870,6 @@ static int16 ShipControl_YawControlToSpeed(int16 yaw_control, int16 base_speed)
     int32 yaw_limit;
     int32 yaw_speed;
     int32 diff_limit_permille;
-    int32 speed_headroom;
 
     scale = (base_speed >= 0) ? (int32)base_speed : -(int32)base_speed;
     if (scale == 0L) {
@@ -829,15 +884,6 @@ static int16 ShipControl_YawControlToSpeed(int16 yaw_control, int16 base_speed)
     }
 
     yaw_limit = (scale * diff_limit_permille) / 1000L;
-    if (base_speed != 0) {
-        speed_headroom = (int32)SHIP_MOTOR_OUTPUT_MAX_COMMAND - scale;
-        if (speed_headroom < 0L) {
-            speed_headroom = 0L;
-        }
-        if (yaw_limit > speed_headroom) {
-            yaw_limit = speed_headroom;
-        }
-    }
     if (yaw_limit <= 0L) {
         return 0;
     }
@@ -1052,7 +1098,8 @@ static u8 ShipControl_ApplyYawHoldTargetEx(u16 target_heading_cd,
     }
 
     if (mode == SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD) {
-        yaw_base_speed = base_speed;
+        yaw_base_speed = ShipControl_ApplyCruiseBaseRamp(base_speed,
+                                                         g_ship_ctrl.yaw_hold_error_cd);
     } else {
         yaw_base_speed = ShipControl_ApplyYawHoldBaseDerate(base_speed,
                                                             g_ship_ctrl.yaw_hold_error_cd);

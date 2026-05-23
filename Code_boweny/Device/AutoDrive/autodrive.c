@@ -23,8 +23,10 @@
 #define AUTODRIVE_METERS_PER_DEG           111130UL
 #define AUTODRIVE_ATAN_Q10                 1024UL
 #define AUTODRIVE_ALIGN_TOLERANCE_CD       800
+#define AUTODRIVE_ALIGN_ZERO_CROSS_CD      50
 #define AUTODRIVE_ALIGN_STABLE_TICKS       20U
 #define AUTODRIVE_ALIGN_TIMEOUT_TICKS      800U
+#define AUTODRIVE_FISH_DUP_WAIT_MS         1500UL
 
 static u8 g_autoDrive_switch = 0U;
 static u8 g_autoDrive_state = AUTO_DRIVE_IDLE;
@@ -37,8 +39,12 @@ static AutoDrive_PointRaw_t g_now_position;
 static AutoDrive_PointRaw_t g_last_position;
 static AutoDrive_PointRaw_t g_return_position;
 static AutoDrive_PointRaw_t g_fish_position;
+/* Session RAM table: keep saved fish points until AutoDrive_Init() on reset/power-on. */
 static AutoDrive_FishPointStore_t g_fish_points;
 static u8 g_last_fish_cmd_index = 0U;
+static AutoDrive_PointRaw_t g_last_fish_rx_point;
+static u32 g_last_fish_rx_ms = 0UL;
+static u8 g_last_fish_rx_valid = 0U;
 static AutoDrive_ReturnConfig_t g_autodrv_cfg;
 
 static u8 g_destination_direction = POSITION_EAST;
@@ -50,6 +56,9 @@ static u8 g_autodrive_target_heading_valid = 0U;
 static u16 g_autodrive_base_speed = AUTODRIVE_CRUISE_BASE_SPEED;
 static u16 g_autodrive_align_ticks = 0U;
 static u8 g_autodrive_align_stable_ticks = 0U;
+static u8 g_autodrive_align_zero_seen = 0U;
+static u8 g_autodrive_align_prev_valid = 0U;
+static int16 g_autodrive_align_prev_error_cd = 0;
 
 static u16 g_link_alive_ticks = 0U;
 static u16 g_link_close_ticks = 0U;
@@ -143,6 +152,8 @@ static void AutoDrive_ClearFishPoints(void)
 {
     u8 i;
 
+    /* Do not call this from arrive/stop paths; a saved point remains reusable
+     * for the whole power-on session. */
     for (i = 0U; i < AUTODRIVE_FISH_POINT_COUNT; i++) {
         AutoDrive_ClearPoint(&g_fish_points.point[i]);
     }
@@ -213,6 +224,28 @@ static u8 AutoDrive_StoreFishPoint(const AutoDrive_PointRaw_t *point)
     index++;
     g_fish_points.next_index = index;
     return g_fish_points.latest_index;
+}
+
+static u8 AutoDrive_IsFishRxDuplicate(const AutoDrive_PointRaw_t *point, u32 now_ms)
+{
+    if ((point == 0) || (g_last_fish_rx_valid == 0U)) {
+        return 0U;
+    }
+    if (AutoDrive_PointRawEqual(point, &g_last_fish_rx_point) == 0U) {
+        return 0U;
+    }
+    return ((now_ms - g_last_fish_rx_ms) < AUTODRIVE_FISH_DUP_WAIT_MS) ? 1U : 0U;
+}
+
+static void AutoDrive_RecordFishRxPoint(const AutoDrive_PointRaw_t *point, u32 now_ms)
+{
+    if ((point == 0) || (AutoDrive_PointRawValid(point) == 0U)) {
+        return;
+    }
+
+    AutoDrive_CopyPoint(&g_last_fish_rx_point, point);
+    g_last_fish_rx_ms = now_ms;
+    g_last_fish_rx_valid = 1U;
 }
 
 static void AutoDrive_PointFromGps(AutoDrive_PointRaw_t *point, const GPS_State_t *gps)
@@ -323,6 +356,9 @@ static void AutoDrive_ResetAlignTracker(void)
 {
     g_autodrive_align_ticks = 0U;
     g_autodrive_align_stable_ticks = 0U;
+    g_autodrive_align_zero_seen = 0U;
+    g_autodrive_align_prev_valid = 0U;
+    g_autodrive_align_prev_error_cd = 0;
 }
 
 static int16 AutoDrive_Abs16(int16 value)
@@ -360,9 +396,11 @@ static u8 AutoDrive_GetHeadingErrorCd(int16 *error_cd)
 static u8 AutoDrive_AlignTargetReached(void)
 {
     int16 heading_error_cd;
+    u8 crossed_zero;
 
     if (AutoDrive_GetHeadingErrorCd(&heading_error_cd) == 0U) {
         g_autodrive_align_stable_ticks = 0U;
+        g_autodrive_align_prev_valid = 0U;
         return 0U;
     }
 
@@ -370,7 +408,23 @@ static u8 AutoDrive_AlignTargetReached(void)
         g_autodrive_align_ticks++;
     }
 
-    if (AutoDrive_Abs16(heading_error_cd) <= (int16)AUTODRIVE_ALIGN_TOLERANCE_CD) {
+    crossed_zero = 0U;
+    if (AutoDrive_Abs16(heading_error_cd) <= (int16)AUTODRIVE_ALIGN_ZERO_CROSS_CD) {
+        crossed_zero = 1U;
+    } else if (g_autodrive_align_prev_valid != 0U) {
+        if (((g_autodrive_align_prev_error_cd < 0) && (heading_error_cd > 0)) ||
+            ((g_autodrive_align_prev_error_cd > 0) && (heading_error_cd < 0))) {
+            crossed_zero = 1U;
+        }
+    }
+    if (crossed_zero != 0U) {
+        g_autodrive_align_zero_seen = 1U;
+    }
+    g_autodrive_align_prev_error_cd = heading_error_cd;
+    g_autodrive_align_prev_valid = 1U;
+
+    if ((g_autodrive_align_zero_seen != 0U) &&
+        (AutoDrive_Abs16(heading_error_cd) <= (int16)AUTODRIVE_ALIGN_TOLERANCE_CD)) {
         if (g_autodrive_align_stable_ticks < 255U) {
             g_autodrive_align_stable_ticks++;
         }
@@ -631,6 +685,7 @@ u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
     AutoDrive_PointRaw_t rx_point;
     u8 matched_index;
     u8 stored_index;
+    u32 now_ms;
 
     AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT);
     g_last_fish_cmd_index = 0U;
@@ -643,7 +698,14 @@ u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
         return AUTODRIVE_FISH_CMD_INVALID;
     }
 
+    now_ms = Task_GetTickMs();
     matched_index = AutoDrive_FindFishPointIndex(&rx_point);
+    if (AutoDrive_IsFishRxDuplicate(&rx_point, now_ms) != 0U) {
+        g_last_fish_cmd_index = matched_index;
+        AutoDrive_RecordFishRxPoint(&rx_point, now_ms);
+        return AUTODRIVE_FISH_CMD_DUP_WAIT;
+    }
+
     if (matched_index == 0U) {
         if (AutoDrive_FishPointsReady() == 0U) {
             stored_index = AutoDrive_StoreFishPoint(&rx_point);
@@ -651,12 +713,14 @@ u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
                 return AUTODRIVE_FISH_CMD_REJECT_UNKNOWN;
             }
             g_last_fish_cmd_index = (u8)(stored_index + 1U);
+            AutoDrive_RecordFishRxPoint(&rx_point, now_ms);
             return AUTODRIVE_FISH_CMD_STORED;
         }
         return AUTODRIVE_FISH_CMD_REJECT_UNKNOWN;
     }
 
     g_last_fish_cmd_index = matched_index;
+    AutoDrive_RecordFishRxPoint(&rx_point, now_ms);
     AutoDrive_CopyPoint(&g_fish_position, &rx_point);
     if (AutoDrive_IsCanActive(&g_fish_position) == 0U) {
         return AUTODRIVE_FISH_CMD_REJECT_DISTANCE;
@@ -1118,6 +1182,9 @@ void AutoDrive_Init(void)
     AutoDrive_ClearPoint(&g_fish_position);
     AutoDrive_ClearFishPoints();
     g_last_fish_cmd_index = 0U;
+    AutoDrive_ClearPoint(&g_last_fish_rx_point);
+    g_last_fish_rx_ms = 0UL;
+    g_last_fish_rx_valid = 0U;
 
     g_autoDrive_switch = g_autodrv_cfg.auto_ret_onoff;
     g_autoDrive_state = AUTO_DRIVE_IDLE;

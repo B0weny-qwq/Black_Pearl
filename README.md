@@ -144,20 +144,23 @@
 当前遥控 E 键定速巡航逻辑：
 
 - 进入：按下 E，并且遥控油门输入 `ud - 100 >= 60`。
+- 启动保护：进入时左右杆必须基本回中，`abs(lr - 100) <= 8`；船体 Z 轴角速度也要基本稳定，`abs(gyro_z) <= 8dps`。如果船还在转，固件会拒绝进入定速，避免一锁航向就先画弧。
 - 退出：巡航中再次按 E，或油门输入 `ud - 100 <= -50`。
-- 进入时锁定当前 `MainLoop_GetHeadingDeg100()` 为目标航向，基础速度为 800。
-- 定速巡航的 800 基础速度不再走 GPS/yaw 大角度靠近减速的基速降档；只叠加左右差速修正，便于和遥控慢油门区分。
+- 进入时锁定当前 `MainLoop_GetHeadingDeg100()` 为目标航向，当前请求基础速度为 `760`。
+- 定速巡航起步有软启动：`base` 约从 `520` 在 `1.8s` 内线性拉到 `760`，减少刚进入时的弧线。
+- 定速巡航不走 GPS/yaw 大角度靠近减速的基速降档；只叠加左右差速修正。高速时差速不再被电机上行余量卡死，必要时通过压低一侧电机来获得转向力。
 - 巡航运行时不使用 GPS 定位；控制反馈来自 IMU/AHRS 航向，运动中主要靠 gyro 积分保持船头方向。
 
 巡航相关 `[DATA]` 日志：
 
-- `[DATA] I: cruise enter input=... raw_ud=... speed=800 hd=... start_th=60`
+- `[DATA] I: cruise enter input=... raw_ud=... speed=760 hd=... start_th=60`
 - `[DATA] I: cruise run req=... base=... l=... r=... err=... pid=... diff=... tgt=...`
 - `[DATA] I: cruise exit reason=key-toggle ...`
 - `[DATA] I: cruise exit reason=throttle ... stop_th=-50`
 - `[DATA] I: cruise ignore input=... raw_ud=... need=60`
+- `[DATA] I: cruise ignore reason=not-straight input=... steer=... gyro=... raw_ud=... raw_lr=...`
 
-其中 `req/base` 用来确认定速巡航内部是否仍是 800，`l/r` 是最终写给左右电机的命令，`err/pid/diff/tgt` 用来看船头自稳修正量。
+其中 `req` 是巡航请求速度，当前为 `760`；`base` 是控制层实际使用的基础速度，起步软启动时会从约 `520` 逐步升到 `760`；`l/r` 是最终写给左右电机的命令，`err/pid/diff/tgt` 用来看船头自稳修正量。
 
 ### 4.4 姿态 / 航向 / Heading
 

@@ -117,8 +117,8 @@
  * - 250 表示 PID 满输出时，单边差速修正最多为当前基础油门的 25%
  * - 可防止自稳态把单侧电机直接压死或拉满
  */
-#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 250
-/* 当前限幅：在余量夹紧前，yaw_output <= 当前基础速度的 25%。 */
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 320
+/* 当前限幅：yaw_output <= 当前基础速度的 32%，高速时允许通过压低单侧电机获得转向力。 */
 
 /* 手动 yaw 自稳进入条件：abs(left-right) < max(abs(left),abs(right)) * 本百分比。 */
 #define SHIP_MANUAL_YAW_HOLD_DIFF_PERCENT 20U
@@ -140,10 +140,10 @@
 /* 航向误差较大时可把巡航基础速度拉低到 500，以获得更紧凑的转向。 */
 
 /* yaw 自稳陀螺阻尼系数，单位为 Q10 输出量/（度/秒）。 */
-#define SHIP_YAW_HOLD_GYRO_DAMP_Q10    3072
+#define SHIP_YAW_HOLD_GYRO_DAMP_Q10    4096
 
 /* 每个 10ms 手动控制步的最终差速变化上限。 */
-#define SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP 30
+#define SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP 20
 /* 更高的斜率上限会让 PID 体感更“硬”，同时保留防突变斜坡。 */
 
 /* 在锁定 yaw 目标前，先等待 N 帧稳定的回中转向输入。 */
@@ -155,7 +155,7 @@
  * - Q10 定点
  * - 当前值偏保守，先保证不明显过冲
  */
-#define SHIP_YAW_HOLD_KP_Q10           512
+#define SHIP_YAW_HOLD_KP_Q10           384
 
 
 /**
@@ -166,15 +166,15 @@
 
 /**
  * @brief  yaw 自稳积分增益
- * @details 当前关闭，避免静态状态下积分堆积。
+ * @details 当前关闭，避免水面延迟下积分堆积引起 S 型来回追。
  */
-#define SHIP_YAW_HOLD_KI_Q10           128
+#define SHIP_YAW_HOLD_KI_Q10           0
 
 /**
  * @brief  yaw 自稳微分增益
- * @details 当前关闭，避免噪声放大。
+ * @details 当前保留少量微分，用于抑制巡航回摆。
  */
-#define SHIP_YAW_HOLD_KD_Q10           64
+#define SHIP_YAW_HOLD_KD_Q10           96
 
 /* 核心模块 */
 /**
