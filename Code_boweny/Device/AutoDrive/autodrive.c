@@ -22,7 +22,7 @@
 #define AUTODRIVE_METERS_PER_MINUTE        1850UL
 #define AUTODRIVE_METERS_PER_DEG           111130UL
 #define AUTODRIVE_ATAN_Q10                 1024UL
-#define AUTODRIVE_ALIGN_TOLERANCE_CD       1000
+#define AUTODRIVE_ALIGN_TOLERANCE_CD       800
 #define AUTODRIVE_ALIGN_STABLE_TICKS       20U
 #define AUTODRIVE_ALIGN_TIMEOUT_TICKS      800U
 
@@ -37,6 +37,8 @@ static AutoDrive_PointRaw_t g_now_position;
 static AutoDrive_PointRaw_t g_last_position;
 static AutoDrive_PointRaw_t g_return_position;
 static AutoDrive_PointRaw_t g_fish_position;
+static AutoDrive_FishPointStore_t g_fish_points;
+static u8 g_last_fish_cmd_index = 0U;
 static AutoDrive_ReturnConfig_t g_autodrv_cfg;
 
 static u8 g_destination_direction = POSITION_EAST;
@@ -121,6 +123,96 @@ static void AutoDrive_CopyPoint(AutoDrive_PointRaw_t *dst, const AutoDrive_Point
         return;
     }
     *dst = *src;
+}
+
+static void AutoDrive_ClearPoint(AutoDrive_PointRaw_t *point)
+{
+    if (point == 0) {
+        return;
+    }
+
+    point->lon_ew = 0U;
+    point->lon_whole = 0U;
+    point->lon_frac = 0U;
+    point->lat_ns = 0U;
+    point->lat_whole = 0U;
+    point->lat_frac = 0U;
+}
+
+static void AutoDrive_ClearFishPoints(void)
+{
+    u8 i;
+
+    for (i = 0U; i < AUTODRIVE_FISH_POINT_COUNT; i++) {
+        AutoDrive_ClearPoint(&g_fish_points.point[i]);
+    }
+    g_fish_points.valid_mask = 0U;
+    g_fish_points.next_index = 0U;
+    g_fish_points.latest_index = 0xFFU;
+}
+
+static u8 AutoDrive_FishPointsReady(void)
+{
+    return ((g_fish_points.valid_mask & ((1U << AUTODRIVE_FISH_POINT_COUNT) - 1U)) ==
+            ((1U << AUTODRIVE_FISH_POINT_COUNT) - 1U)) ? 1U : 0U;
+}
+
+static u8 AutoDrive_PointRawEqual(const AutoDrive_PointRaw_t *lhs,
+                                  const AutoDrive_PointRaw_t *rhs)
+{
+    if ((lhs == 0) || (rhs == 0)) {
+        return 0U;
+    }
+
+    return ((lhs->lon_ew == rhs->lon_ew) &&
+            (lhs->lon_whole == rhs->lon_whole) &&
+            (lhs->lon_frac == rhs->lon_frac) &&
+            (lhs->lat_ns == rhs->lat_ns) &&
+            (lhs->lat_whole == rhs->lat_whole) &&
+            (lhs->lat_frac == rhs->lat_frac)) ? 1U : 0U;
+}
+
+static u8 AutoDrive_FindFishPointIndex(const AutoDrive_PointRaw_t *point)
+{
+    u8 i;
+
+    if ((point == 0) || (AutoDrive_PointRawValid(point) == 0U)) {
+        return 0U;
+    }
+
+    for (i = 0U; i < AUTODRIVE_FISH_POINT_COUNT; i++) {
+        if ((g_fish_points.valid_mask & (u8)(1U << i)) == 0U) {
+            continue;
+        }
+        if (AutoDrive_PointRawEqual(point, &g_fish_points.point[i]) != 0U) {
+            return (u8)(i + 1U);
+        }
+    }
+    return 0U;
+}
+
+static u8 AutoDrive_StoreFishPoint(const AutoDrive_PointRaw_t *point)
+{
+    u8 index;
+
+    if ((point == 0) || (AutoDrive_PointRawValid(point) == 0U)) {
+        return 0xFFU;
+    }
+    if (AutoDrive_FishPointsReady() != 0U) {
+        return 0xFFU;
+    }
+
+    index = g_fish_points.next_index;
+    if (index >= AUTODRIVE_FISH_POINT_COUNT) {
+        return 0xFFU;
+    }
+
+    AutoDrive_CopyPoint(&g_fish_points.point[index], point);
+    g_fish_points.valid_mask |= (u8)(1U << index);
+    g_fish_points.latest_index = index;
+    index++;
+    g_fish_points.next_index = index;
+    return g_fish_points.latest_index;
 }
 
 static void AutoDrive_PointFromGps(AutoDrive_PointRaw_t *point, const GPS_State_t *gps)
@@ -424,6 +516,21 @@ static u8 AutoDrive_ApplyHeadingHold(u16 base_speed)
     return 1U;
 }
 
+static u8 AutoDrive_ApplyAlignHeadingHold(void)
+{
+    if (g_autodrive_target_heading_valid == 0U) {
+        ShipControl_StopGpsNav();
+        return 0U;
+    }
+    if (MainLoop_IsHeadingReady() == 0U) {
+        ShipControl_StopGpsNav();
+        return 0U;
+    }
+
+    ShipControl_RequestGpsAlign(g_autodrive_target_heading_cd);
+    return 1U;
+}
+
 void AutoDrive_StopMotion(void)
 {
     g_autodrive_target_heading_valid = 0U;
@@ -507,6 +614,8 @@ void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
     }
 
     AutoDrive_PointFromLegacyWire(&g_return_position, data_m);
+    AutoDrive_CopyPoint(&g_autodrv_cfg.ret_point, &g_return_position);
+    (void)AutoDriveCfg_Save(&g_autodrv_cfg);
     if (AutoDrive_IsCanActive(&g_return_position) == 0U) {
         return;
     }
@@ -517,22 +626,47 @@ void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
     g_autoDrive_fail_flag = 0U;
 }
 
-void AutoDrive_SetFishPositionRaw(const u8 *data_m)
+u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
 {
+    AutoDrive_PointRaw_t rx_point;
+    u8 matched_index;
+    u8 stored_index;
+
     AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT);
+    g_last_fish_cmd_index = 0U;
     if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
-        return;
+        return AUTODRIVE_FISH_CMD_BUSY;
     }
 
-    AutoDrive_PointFromLegacyWire(&g_fish_position, data_m);
+    AutoDrive_PointFromLegacyWire(&rx_point, data_m);
+    if (AutoDrive_PointRawValid(&rx_point) == 0U) {
+        return AUTODRIVE_FISH_CMD_INVALID;
+    }
+
+    matched_index = AutoDrive_FindFishPointIndex(&rx_point);
+    if (matched_index == 0U) {
+        if (AutoDrive_FishPointsReady() == 0U) {
+            stored_index = AutoDrive_StoreFishPoint(&rx_point);
+            if (stored_index == 0xFFU) {
+                return AUTODRIVE_FISH_CMD_REJECT_UNKNOWN;
+            }
+            g_last_fish_cmd_index = (u8)(stored_index + 1U);
+            return AUTODRIVE_FISH_CMD_STORED;
+        }
+        return AUTODRIVE_FISH_CMD_REJECT_UNKNOWN;
+    }
+
+    g_last_fish_cmd_index = matched_index;
+    AutoDrive_CopyPoint(&g_fish_position, &rx_point);
     if (AutoDrive_IsCanActive(&g_fish_position) == 0U) {
-        return;
+        return AUTODRIVE_FISH_CMD_REJECT_DISTANCE;
     }
 
     AutoDrive_SetMode(AUTO_DRIVE_GO_FISISH_POSITION);
     g_autoDrive_state = AUTO_DRIVE_START;
     g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
     g_autoDrive_fail_flag = 0U;
+    return AUTODRIVE_FISH_CMD_STARTED;
 }
 
 void AutoDrive_TriggerReturnWithReason(u8 reason)
@@ -581,6 +715,9 @@ void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len)
         }
     }
     (void)AutoDriveCfg_Save(&g_autodrv_cfg);
+    if (g_autodrv_cfg.auto_ret_onoff != 0x30U) {
+        AutoDrive_TriggerReturnWithReason(AUTODRIVE_DIAG_REASON_RETURN_SWITCH_SAVE);
+    }
 }
 
 void AutoDrive_GetStoredConfig(AutoDrive_ReturnConfig_t *cfg)
@@ -604,6 +741,30 @@ u8 AutoDrive_GetFishPositionRaw(AutoDrive_PointRaw_t *point)
         AutoDrive_CopyPoint(point, &g_fish_position);
     }
     return AutoDrive_PointRawValid(&g_fish_position);
+}
+
+u8 AutoDrive_GetFishPositionByIndexRaw(u8 index, AutoDrive_PointRaw_t *point)
+{
+    u8 slot;
+
+    if ((index == 0U) || (index > AUTODRIVE_FISH_POINT_COUNT)) {
+        return 0U;
+    }
+
+    slot = (u8)(index - 1U);
+    if ((g_fish_points.valid_mask & (u8)(1U << slot)) == 0U) {
+        return 0U;
+    }
+
+    if (point != 0) {
+        AutoDrive_CopyPoint(point, &g_fish_points.point[slot]);
+    }
+    return AutoDrive_PointRawValid(&g_fish_points.point[slot]);
+}
+
+u8 AutoDrive_GetLastFishCommandIndex(void)
+{
+    return g_last_fish_cmd_index;
 }
 
 u8 AutoDrive_GetDirectionNowToDestination(const u8 *nowpositionData,
@@ -954,6 +1115,9 @@ void AutoDrive_Init(void)
         g_autodrv_cfg.auto_ret_onoff = 0x30U;
     }
     AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
+    AutoDrive_ClearPoint(&g_fish_position);
+    AutoDrive_ClearFishPoints();
+    g_last_fish_cmd_index = 0U;
 
     g_autoDrive_switch = g_autodrv_cfg.auto_ret_onoff;
     g_autoDrive_state = AUTO_DRIVE_IDLE;
@@ -1067,7 +1231,7 @@ void AutoDrive_Poll(void)
         AutoDrive_ResetAlignTracker();
         g_last_run_update_seq = gps->update_sequence;
         g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
-        (void)AutoDrive_ApplyHeadingHold(0U);
+        (void)AutoDrive_ApplyAlignHeadingHold();
         break;
 
     case AUTO_DRIVE_GET_DIRECTION:
@@ -1098,7 +1262,7 @@ void AutoDrive_Poll(void)
             }
         }
 
-        if (AutoDrive_ApplyHeadingHold(0U) == 0U) {
+        if (AutoDrive_ApplyAlignHeadingHold() == 0U) {
             g_autodrive_align_stable_ticks = 0U;
             break;
         }

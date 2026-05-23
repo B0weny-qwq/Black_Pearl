@@ -135,12 +135,29 @@
 实际手动开环、手动 yaw 自稳、定速巡航和 GPS 航向保持统一由
 `Code_boweny/Device/Control/ShipControl.*` 仲裁并最终写入电机目标。
 
+当前手动 yaw 自稳降速逻辑：
+
+- 只有进入 yaw 自稳后才会按航向误差压低基础速度。
+- 偏航误差超过 `10.00°` 才开始降速，超过 `20.00°` 才达到满降速。
+- 满降速时基础速度最低压到 `500`；小于 `10.00°` 的航向波动不再触发基速降档。
+
 当前遥控 E 键定速巡航逻辑：
 
 - 进入：按下 E，并且遥控油门输入 `ud - 100 >= 60`。
 - 退出：巡航中再次按 E，或油门输入 `ud - 100 <= -50`。
 - 进入时锁定当前 `MainLoop_GetHeadingDeg100()` 为目标航向，基础速度为 800。
+- 定速巡航的 800 基础速度不再走 GPS/yaw 大角度靠近减速的基速降档；只叠加左右差速修正，便于和遥控慢油门区分。
 - 巡航运行时不使用 GPS 定位；控制反馈来自 IMU/AHRS 航向，运动中主要靠 gyro 积分保持船头方向。
+
+巡航相关 `[DATA]` 日志：
+
+- `[DATA] I: cruise enter input=... raw_ud=... speed=800 hd=... start_th=60`
+- `[DATA] I: cruise run req=... base=... l=... r=... err=... pid=... diff=... tgt=...`
+- `[DATA] I: cruise exit reason=key-toggle ...`
+- `[DATA] I: cruise exit reason=throttle ... stop_th=-50`
+- `[DATA] I: cruise ignore input=... raw_ud=... need=60`
+
+其中 `req/base` 用来确认定速巡航内部是否仍是 800，`l/r` 是最终写给左右电机的命令，`err/pid/diff/tgt` 用来看船头自稳修正量。
 
 ### 4.4 姿态 / 航向 / Heading
 

@@ -34,6 +34,7 @@ void ShipControl_Init(void);
 void ShipControl_Tick(u32 now_ms);
 void ShipControl_UpdateManualInput(u8 lr, u8 ud, u8 key, u32 now_ms);
 void ShipControl_RequestCruise(u16 heading_cd, int16 base_speed);
+void ShipControl_RequestGpsAlign(u16 target_heading_cd);
 void ShipControl_RequestGpsNav(u16 target_heading_cd, int16 base_speed);
 void ShipControl_Stop(u8 reason);
 void ShipControl_StopGpsNav(void);

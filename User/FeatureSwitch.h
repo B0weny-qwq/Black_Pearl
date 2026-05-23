@@ -129,11 +129,11 @@
 /* 仅在 yaw 自稳已激活且偏航误差较大时，才降低 yaw 自稳基础速度。 */
 #define SHIP_YAW_HOLD_DERATE_ENABLE 1
 
-/* 基础速度开始降额的偏航误差阈值（0.01 度），300=3.00 度。 */
-#define SHIP_YAW_HOLD_DERATE_START_CD 300
+/* 基础速度开始降额的偏航误差阈值（0.01 度），1000=10.00 度。 */
+#define SHIP_YAW_HOLD_DERATE_START_CD 1000
 
-/* 基础速度降额达到最大值的偏航误差阈值（0.01 度），1000=10.00 度。 */
-#define SHIP_YAW_HOLD_DERATE_FULL_CD 1000
+/* 基础速度降额达到最大值的偏航误差阈值（0.01 度），2000=20.00 度。 */
+#define SHIP_YAW_HOLD_DERATE_FULL_CD 2000
 
 /* 满降额时的电机速度上限；单位为 speed，不是 PWM 占空比。 */
 #define SHIP_YAW_HOLD_DERATE_MIN_BASE 500
@@ -155,8 +155,8 @@
  * - Q10 定点
  * - 当前值偏保守，先保证不明显过冲
  */
-#define SHIP_YAW_HOLD_KP_Q10           768
-/* Q10 下 768=0.75，相比此前 512=0.50 更“硬”一些。 */
+#define SHIP_YAW_HOLD_KP_Q10           512
+
 
 /**
  * @brief  yaw 自稳误差死区（centi-degree）
@@ -168,14 +168,13 @@
  * @brief  yaw 自稳积分增益
  * @details 当前关闭，避免静态状态下积分堆积。
  */
-#define SHIP_YAW_HOLD_KI_Q10           0
+#define SHIP_YAW_HOLD_KI_Q10           128
 
 /**
  * @brief  yaw 自稳微分增益
  * @details 当前关闭，避免噪声放大。
  */
-#define SHIP_YAW_HOLD_KD_Q10           0
-/** @} */
+#define SHIP_YAW_HOLD_KD_Q10           64
 
 /* 核心模块 */
 /**
@@ -593,6 +592,18 @@
  * @brief  油门超时判定周期
  */
 #define SHIP_THROTTLE_TIMEOUT_MS       1500UL
+
+/**
+ * @brief  开机后手动油门最短阻塞时间
+ * @details 主循环和传感器照常运行，仅 0x11 手动电机控制在该窗口内不下发。
+ */
+#define SHIP_MANUAL_BOOT_BLOCK_MS      3000UL
+
+/**
+ * @brief  开机手动控制是否等待航向传感器 ready
+ * @details 1 表示最短等待结束后仍需 MainLoop_IsHeadingReady() 成立才放行。
+ */
+#define SHIP_MANUAL_BOOT_WAIT_HEADING  1U
 
 /**
  * @brief  工作接收重开 tick

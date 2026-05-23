@@ -46,10 +46,12 @@ u8 AutoDrive_IsBusy(void);
 u8 AutoDrive_IsCanActive(const AutoDrive_PointRaw_t *point);
 
 void AutoDrive_SetReturnPositionRaw(const u8 *data_m);
-void AutoDrive_SetFishPositionRaw(const u8 *data_m);
+u8 AutoDrive_SetFishPositionRaw(const u8 *data_m);
 void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len);
 void AutoDrive_GetStoredConfig(AutoDrive_ReturnConfig_t *cfg);
 void AutoDrive_GetCurrentPointRaw(AutoDrive_PointRaw_t *point);
+u8 AutoDrive_GetFishPositionByIndexRaw(u8 index, AutoDrive_PointRaw_t *point);
+u8 AutoDrive_GetLastFishCommandIndex(void);
 
 void AutoDrive_LinkAliveTick(void);
 void AutoDrive_LinkAliveKick(void);
@@ -81,7 +83,28 @@ IDLE
   -> CLOSE + STOP
 ```
 
-说明：`AUTO_DRIVE_GET_DIRECTION` 不再执行老工程那种“定时左/右转修正”；它只在目标航向误差较大时用 `ShipControl_RequestGpsNav(target, 0)` 走统一 yaw-hold 链路原地对准，对准后进入 `RUNING`。
+说明：`AUTO_DRIVE_GET_DIRECTION` 不再执行老工程那种“定时左/右转修正”；它在进入前进巡航前先调用 `ShipControl_RequestGpsAlign(target)` 原地低油门对准目标航向，对准后才进入 `RUNING`。
+
+## 当前 GPS 对准机制
+
+GPS 去钓点或返航启动时，状态机会先进入 `AUTO_DRIVE_GET_DIRECTION` 对准阶段，再进入 `AUTO_DRIVE_RUNING` 前进阶段。
+
+对准阶段当前参数：
+
+- 对准角度容差：`AUTODRIVE_ALIGN_TOLERANCE_CD = 500`，即 `±5.00°`
+- 连续稳定计数：`AUTODRIVE_ALIGN_STABLE_TICKS = 20`，以 `10ms` 轮询计算，约 `200ms`
+- 对准超时：`AUTODRIVE_ALIGN_TIMEOUT_TICKS = 800`，约 `8s`，超时后放行进入巡航，避免浪、磁环境或 PID 抖动导致一直卡在原地
+- 对准阶段不使用前进基础速度，调用 `ShipControl_RequestGpsAlign()`，只允许原地差速转向
+
+控制层对准阶段单独使用较软的 PID：
+
+- `SHIP_GPS_ALIGN_KP_Q10 = 384`
+- `SHIP_GPS_ALIGN_KI_Q10 = 0`
+- `SHIP_GPS_ALIGN_KD_Q10 = 0`
+
+注意：PID 输出里的 `SHIP_YAW_HOLD_OUTPUT_LIMIT = 1000` 是内部归一化控制量，不是 PWM duty，也不是最终电机命令。对准阶段最终差速命令会再限制为 `SHIP_MOTOR_OUTPUT_MAX_COMMAND * 8%`，当前 `SHIP_MOTOR_OUTPUT_MAX_COMMAND = 850`，所以原地对准最大差速约为 `68`。
+
+进入 `RUNING` 后，`AutoDrive` 切回 `ShipControl_RequestGpsNav(target, base_speed)`，使用正常 GPS 导航 yaw-hold PID 和距离减速逻辑。
 
 ## 当前激活条件
 
@@ -179,31 +202,33 @@ lat_frac[BE]
 
 对应命令：
 
-- `0x13` 设置返航点并尝试返航
-- `0x14` 设置目标点并尝试去目标点
-- `0x15` 保存自动返航开关，若长度至少 `11` 字节，同时保存返航点
+- `0x13` 设置返航点到 RAM，并在条件满足时尝试返航
+- `0x14` 接收钓点坐标，按收到顺序自动分配到 `1..5` 号 RAM 钓点
+- `0x15` 更新 RAM 中的自动返航开关，若长度至少 `11` 字节，同时更新 RAM 返航点；开关不为 `0x30` 时立即尝试返航
+
+`0x14` 钓点鉴别逻辑：
+
+- 最多保存 5 个钓点，编号按遥控器先后发来的顺序自动分配为 `1..5`。
+- 不要求一次收满 5 个钓点；只有 1 号钓点有效时，也可以正常去 1 号。
+- 第一次收到未知有效坐标时只保存并返回 `AUTODRIVE_FISH_CMD_STORED`。
+- 再次收到已保存坐标时，匹配对应编号并尝试进入去钓点流程。
+- 5 个槽位已满后，未匹配任何已保存钓点的新坐标会被拒绝，避免误去未知点。
+- `AutoDrive_GetLastFishCommandIndex()` 记录最近一次 `0x14` 保存或匹配到的钓点编号，供无线日志打印。
 
 ## 当前配置存储
 
-当前没有外置 EEPROM。
-自动返航配置由 `autodrive_cfg.c` 写入 STC 内部 flash/EEPROM 区：
-
-```c
-#define AUTODRIVE_CFG_FLASH_ADDR 0x0001F800UL
-```
-
-当前镜像格式：
-
-- `magic = 0x41554432`
-- `version = 0x0002`
-- `length`
-- `checksum`
-- `AutoDrive_ReturnConfig_t cfg`
+当前自动返航配置是 RAM-only。
+`AutoDriveCfg_Load()` / `AutoDriveCfg_Save()` 仍保留接口，但只读写 `autodrive_cfg.c` 内部 RAM 变量，不再擦写 STC flash/EEPROM。
 
 默认配置：
 
 - `auto_ret_onoff = 0x30`
 - 返航点全零
+
+注意：
+
+- `0x13`、`0x15` 更新的返航点和开关掉电后不会保留。
+- 钓点列表也只保存在 RAM 中，复位或重新上电后清空。
 
 ## 当前已知边界
 

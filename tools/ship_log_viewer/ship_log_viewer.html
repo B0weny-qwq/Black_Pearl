@@ -650,8 +650,8 @@
     const RC_DEAD_LOW = 90;
     const RC_DEAD_HIGH = 110;
     const MANUAL_SELF_STEER_GATE = 20;
-    const CRUISE_START_INPUT = 50;
-    const CRUISE_EXIT_THROTTLE = -60;
+    const CRUISE_START_INPUT = 60;
+    const CRUISE_EXIT_THROTTLE = -50;
     const CRUISE_SPEED = 800;
 
     const state = {
@@ -1852,6 +1852,26 @@
         state.last.selfStabilizeMeta = state.last.selfStabilizeValue === "ON"
           ? `角度闭环 ${ctrlModeText} / diff=${ctrlOut[6]}`
           : `CTRL ${ctrlModeText}`;
+        important = true;
+      }
+
+      const cruiseRun = line.match(/\[DATA\] I: cruise run req=([-\d]+) base=([-\d]+) l=([-\d]+) r=([-\d]+) err=([-\d]+) pid=([-\d]+) diff=([-\d]+) tgt=(\d+)/);
+      if (cruiseRun) {
+        state.last.controlModeValue = "CRUISE_HEADING_HOLD";
+        state.last.controlModeMeta =
+          `cruise speed request=${cruiseRun[1]} base=${cruiseRun[2]}\n`
+          + `err=${cruiseRun[5]} pid=${cruiseRun[6]} diff=${cruiseRun[7]} tgt=${cruiseRun[8]}`;
+        state.last.throttleOutputValue = formatMotorOutputPercent(cruiseRun[3], cruiseRun[4]);
+        state.last.throttleOutputMeta =
+          `DATA cruise run speed=${cruiseRun[1]} base=${cruiseRun[2]}\n`
+          + `left=${cruiseRun[3]} right=${cruiseRun[4]}`;
+        state.last.selfStabilizeValue = "ON";
+        state.last.selfStabilizeMeta = `CRUISE_HEADING_HOLD / err=${cruiseRun[5]} diff=${cruiseRun[7]}`;
+        updateMotionDecision(
+          "forward",
+          `left=${cruiseRun[3]} right=${cruiseRun[4]}\nbase=${cruiseRun[2]} diff=${cruiseRun[7]}`,
+          `DATA cruise run: speed=${cruiseRun[1]} base=${cruiseRun[2]} left=${cruiseRun[3]} right=${cruiseRun[4]}`
+        );
         important = true;
       }
 
