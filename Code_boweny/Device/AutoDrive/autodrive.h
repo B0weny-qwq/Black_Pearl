@@ -98,6 +98,8 @@ void AutoDrive_SetFishPositionRaw(const u8 *data_m);
 void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len);
 void AutoDrive_GetStoredConfig(AutoDrive_ReturnConfig_t *cfg);
 void AutoDrive_GetCurrentPointRaw(AutoDrive_PointRaw_t *point);
+u8 AutoDrive_GetReturnPositionRaw(AutoDrive_PointRaw_t *point);
+u8 AutoDrive_GetFishPositionRaw(AutoDrive_PointRaw_t *point);
 void AutoDrive_GetDebugSnapshot(AutoDrive_DebugSnapshot_t *snapshot);
 
 u16 AutoDrive_GetDistanceNowToDestination(const u8 *nowpositionData,

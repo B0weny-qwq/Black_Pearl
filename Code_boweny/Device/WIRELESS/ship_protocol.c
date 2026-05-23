@@ -1,12 +1,23 @@
 /**
  * @file    ship_protocol.c
- * @brief   鑸圭鏃ч仴鎺у櫒鏃犵嚎涓氬姟鍗忚绉绘瀹炵幇銆?
+ * @brief   Ship-side legacy wireless business protocol.
  * @author  boweny
  * @date    2026-05-07
  * @version v1.2
  *
  * @details
- * 鏈枃浠朵繚鎸佹棫鐗?`Wireless/wirelessProtocal.c` 鐨勯厤瀵广€佹敹鍖呰В鏋愩€? * 鍥哄畾 `0x12` 鍥炰紶鍜?`0x11` 杞借嵎璇箟锛屽悓鏃舵寜褰撳墠鏍圭洰褰曞伐绋嬬殑鐪熷疄鐘舵€? * 鎺ュ叆濡備笅琛屼负锛? * - `0x11` 鎵嬪姩閾捐矾浼氭墽琛岃酱婊ゆ尝銆佸樊閫熸槧灏勶紝骞跺湪闂ㄦ帶婊¤冻鏃跺彔鍔?yaw-hold銆? * - `0x13/0x14/0x15` 浼氶┍鍔?`AutoDrive` 璁剧疆杩旇埅鐐广€佺洰鏍囩偣鍜岃嚜鍔ㄨ繑鑸紑鍏炽€? * - 閬ユ帶澶辫仈銆佷綆鐢靛拰绌洪棽鎬佷細涓?`AutoDrive`銆乣AHRS`銆乣Motor` 鍏卞悓宸ヤ綔銆? * 鍥犳鏈枃浠剁幇鍦ㄤ笉鏄€滃彧淇濈暀寮€鐜帶鑸光€濈殑鍘嗗彶鑱旇皟鐗堬紝鑰屾槸褰撳墠鏃犵嚎涓讳笟鍔″叆鍙ｃ€? */
+ * This file implements the ship-side legacy wireless business protocol.
+ * Frame format: AA | len | cmd | payload... | xor | BB.
+ * len = 2 + payload_len; xor covers len, cmd, and all payload bytes.
+ *
+ * Responsibilities:
+ * - send pair requests on the fixed pair channel, then listen on the
+ *   calculated work channel;
+ * - parse 0x11 throttle/key frames and forward manual input to ShipControl;
+ * - reply to accepted frames with one legacy 0x12 GPS/status packet;
+ * - forward 0x13/0x14/0x15 point and switch commands to AutoDrive;
+ * - monitor link timeout, battery level, and AutoDrive diagnostics.
+ */
 #include "ship_protocol.h"
 #include "wireless.h"
 #include "..\..\Device\GPS\GPS.h"
@@ -74,8 +85,8 @@
 
 #define SHIP_LEGACY_PROTO_MAX_LEN      30U
 #define SHIP_AXIS_CENTER               100U
-#define SHIP_CRUISE_KEY_START_INPUT    50
-#define SHIP_CRUISE_KEY_STOP_INPUT     (-30)
+#define SHIP_CRUISE_KEY_START_INPUT    60
+#define SHIP_CRUISE_KEY_STOP_INPUT     (-50)
 #define SHIP_CRUISE_KEY_SPEED          800
 #define SHIP_POWER_LEVEL_0             0U
 #define SHIP_POWER_LEVEL_1             1U
@@ -123,11 +134,16 @@
 
 typedef enum
 {
+    /* Initial delay before the first pairing burst. */
     SHIP_STATE_BOOT_WAIT = 0,
+    /* Pair requests are being transmitted on SHIP_PAIR_CHANNEL_DEFAULT. */
     SHIP_STATE_PAIR_SEND,
+    /* Work-channel receive mode: parse commands and report ship status. */
     SHIP_STATE_WORK_RX
 } ShipState_t;
 
+/* Protocol runtime state.  This is intentionally kept as transport/business
+ * state only; closed-loop control details belong to ShipControl/AutoDrive. */
 typedef struct
 {
     u8 lr;
@@ -159,6 +175,8 @@ typedef struct
     u32 rc_input_last_log_ms;
 } ShipRuntime_t;
 
+/* Last known power sample.  report is the compact 0..4 value sent back to
+ * the handheld; raw/millivolt fields are retained for diagnostics. */
 typedef struct
 {
     u16 raw;
@@ -249,22 +267,28 @@ static u32 ShipProtocol_ElapsedMs(u32 now_ms, u32 start_ms)
     return (u32)(now_ms - start_ms);
 }
 
+/* Compatibility wrapper used by older navigation code.  New code should call
+ * ShipControl_RequestGpsNav() directly. */
 u8 ShipProtocol_ApplyYawHoldTarget(u16 target_heading_cd, int16 base_speed)
 {
     ShipControl_RequestGpsNav(target_heading_cd, base_speed);
     return 1U;
 }
 
+/* Convert the legacy stick center value 100 to signed control input. */
 static int16 ShipProtocol_RawUdToInput(u8 front_back)
 {
     return (int16)((int16)front_back - (int16)SHIP_AXIS_CENTER);
 }
 
+/* True when the cached battery level has dropped to the lowest band. */
 static u8 ShipProtocol_IsLowPower(void)
 {
     return (g_ship_power_level == SHIP_POWER_LEVEL_0) ? 1U : 0U;
 }
 
+/* Periodically sample battery level and request AutoDrive return when the
+ * boat is idle, not already in AutoDrive, and power stays low long enough. */
 static void ShipProtocol_LowPowerCheck(void)
 {
     ShipProtocol_ServicePowerSample();
@@ -308,6 +332,7 @@ static const char *ShipProtocol_CmdName(u8 cmd)
 }
 #endif
 
+/* Rate-limit high-frequency RC input logs. */
 static u8 ShipProtocol_ShouldLogRcInputSample(u32 now_ms)
 {
     if ((SHIP_RC_INPUT_LOG_PERIOD_MS == 0U) ||
@@ -319,6 +344,8 @@ static u8 ShipProtocol_ShouldLogRcInputSample(u32 now_ms)
     return 0U;
 }
 
+/* A key is logged as a placeholder because this board version does not bind
+ * the lamp output pin at this protocol layer. */
 static void ShipProtocol_LogLightPending(void)
 {
 #if SHIP_PROTOCOL_DIAG_ENABLE
@@ -333,6 +360,8 @@ static void ShipProtocol_LogLightPending(void)
 #endif
 }
 
+/* Decode one key edge.  Repeated key bytes are ignored so holding a button
+ * does not retrigger cruise/lamp actions every throttle frame. */
 static void ShipProtocol_HandleKey(u8 front_back, u8 key)
 {
     u8 cruise_active;
@@ -395,11 +424,13 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
     }
 }
 
+/* Convert ADC count to voltage at the MCU pin. */
 static u16 ShipProtocol_AdcRawToMv(u16 adc_raw)
 {
     return (u16)(((u32)adc_raw * (u32)SHIP_ADC_REF_MV) / 4095UL);
 }
 
+/* Convert divider output voltage back to estimated battery voltage. */
 static u32 ShipProtocol_AdcMvToBatteryMv(u16 adc_mv)
 {
     if (SHIP_BAT_DIV_DEN == 0UL) {
@@ -408,6 +439,7 @@ static u32 ShipProtocol_AdcMvToBatteryMv(u16 adc_mv)
     return (((u32)adc_mv * (u32)SHIP_BAT_DIV_NUM) / (u32)SHIP_BAT_DIV_DEN);
 }
 
+/* Map raw ADC thresholds to the compact legacy power level 0..4. */
 static u8 ShipProtocol_AdcRawToPowerLevel(u16 adc_raw)
 {
     if (adc_raw >= SHIP_BATT_ADC_FULL_RAW) {
@@ -425,6 +457,8 @@ static u8 ShipProtocol_AdcRawToPowerLevel(u16 adc_raw)
     return SHIP_POWER_LEVEL_0;
 }
 
+/* Take one ADC reading.  On invalid ADC results, preserve the last report
+ * level so the handheld does not jump to a misleading value. */
 static void ShipProtocol_ReadPowerSample(ShipPowerSample_t *sample)
 {
     u16 adc_raw;
@@ -455,6 +489,7 @@ static void ShipProtocol_ReadPowerSample(ShipPowerSample_t *sample)
     sample->valid = 1U;
 }
 
+/* Downsample battery reads to reduce ADC/log traffic in the 10 ms scheduler. */
 static void ShipProtocol_ServicePowerSample(void)
 {
     if (g_ship_power_sample_times < SHIP_POWER_SAMPLE_DIVIDER) {
@@ -506,6 +541,7 @@ static void ShipProtocol_LogPowerSample(const ShipPowerSample_t *sample, u8 forc
 }
 #endif
 
+/* Legacy checksum: XOR all bytes from len through the last payload byte. */
 static u8 ShipProtocol_Xor(const u8 *buf, u8 len)
 {
     u8 i;
@@ -518,6 +554,8 @@ static u8 ShipProtocol_Xor(const u8 *buf, u8 len)
     return val;
 }
 
+/* Pair seed can be fixed constants or chip ID bytes, depending on build
+ * configuration.  The same seed also derives work channel and sync keys. */
 static void ShipProtocol_GetPairSeed(u8 *seed)
 {
     if (seed == 0) {
@@ -544,6 +582,7 @@ static u16 ShipProtocol_ReadU16Legacy(const u8 *buf)
 }
 #endif
 
+/* Convert decimal degrees * 1e7 to the legacy ddmm.mmmm split format. */
 static void ShipProtocol_ToLegacyNmeaCoord(u32 abs_deg1e7, u16 *coord1, u16 *coord2)
 {
     u32 degrees;
@@ -560,6 +599,7 @@ static void ShipProtocol_ToLegacyNmeaCoord(u32 abs_deg1e7, u16 *coord1, u16 *coo
     *coord2 = (u16)(minutes_scaled1e4 % 10000UL);
 }
 
+/* Legacy protocol stores 16-bit fields in big-endian order. */
 static void ShipProtocol_WriteU16Legacy(u8 *dst, u16 value)
 {
     dst[0] = (u8)(value >> 8);
@@ -574,6 +614,8 @@ static void ShipProtocol_WriteU16GpsReportBE(u8 *dst, u16 value)
     dst[1] = (u8)(value & 0xFFU);
 }
 
+/* Serialize AutoDrive point in the exact 10-byte layout expected by the
+ * handheld: lon dir, lon whole/frac, lat dir, lat whole/frac. */
 static void ShipProtocol_WritePointLegacy(u8 *dst, const AutoDrive_PointRaw_t *point)
 {
     if ((dst == 0) || (point == 0)) {
@@ -612,6 +654,7 @@ static void ShipProtocol_LogCoordBE(const u8 *buf, u8 len)
 }
 #endif
 
+/* Build one AA-BB business frame and send it on the selected RF channel. */
 static s8 ShipProtocol_SendFrame(u8 channel, u8 cmd, const u8 *payload, u8 payload_len, u8 log_frame)
 {
     u8 *frame;
@@ -643,6 +686,8 @@ static s8 ShipProtocol_SendFrame(u8 channel, u8 cmd, const u8 *payload, u8 paylo
     return Wireless_SendOnChannel(channel, frame, idx);
 }
 
+/* Match the old handheld derivation of work channel and sync register bytes.
+ * Changing this formula breaks pairing with existing remotes. */
 static void ShipProtocol_CalcDefaultRf(u8 *channel, u8 *key0, u8 *key1)
 {
     u8 seed[4];
@@ -660,8 +705,11 @@ static void ShipProtocol_CalcDefaultRf(u8 *channel, u8 *key0, u8 *key1)
 }
 
 #if SHIP_PROTOCOL_DIAG_ENABLE
+/* Recalculate and cache derived RF parameters; diagnostics can warn if a
+ * previous cached value drifted from the current seed-derived value. */
 static u8 ShipProtocol_RefreshDefaultRfImpl(const char *stage, u8 log_mismatch)
 #else
+/* Recalculate and cache derived RF parameters. */
 static u8 ShipProtocol_RefreshDefaultRfImpl(void)
 #endif
 {
@@ -696,11 +744,14 @@ static u8 ShipProtocol_RefreshDefaultRfImpl(void)
     return channel;
 }
 
+/* Seed the runtime RF cache before the radio is configured. */
 static void ShipProtocol_ApplyDefaultRf(void)
 {
     (void)ShipProtocol_RefreshDefaultRf(SHIP_REASON_C("default"), 0U);
 }
 
+/* Program work-channel sync words while keeping the radio idle.  This mirrors
+ * the legacy pair response window sequence before RX is enabled. */
 static s8 ShipProtocol_ApplyWorkSyncIdle(u8 log_rxdbg)
 {
     u16 reg36;
@@ -725,6 +776,7 @@ static s8 ShipProtocol_ApplyWorkSyncIdle(u8 log_rxdbg)
     return SUCCESS;
 }
 
+/* Put the radio back on the derived work channel in receive mode. */
 static s8 ShipProtocol_ApplyWorkRx(u8 log_rxdbg)
 {
     s8 rc;
@@ -769,6 +821,8 @@ static void ShipProtocol_ReopenWorkRxImpl(u8 log_rxdbg)
 #endif
 }
 
+/* Any valid business frame proves that the remote is on the derived work
+ * channel.  Use that as a pairing success signal for legacy compatibility. */
 static void ShipProtocol_MarkPairedByFrame(u8 cmd)
 {
     u32 now_ms;
@@ -890,6 +944,8 @@ static void ShipProtocol_LogFrameBrief(const u8 *stage, u8 channel, const u8 *fr
 }
 #endif
 
+/* Send one pair request on the fixed pair channel.  left_after_send is used
+ * only for retry/sequence logging and scheduler state updates. */
 static s8 ShipProtocol_TryPairSend(u16 left_after_send)
 {
     u8 pair_data[4];
@@ -935,6 +991,8 @@ static s8 ShipProtocol_TryPairSend(u16 left_after_send)
     return rc;
 }
 
+/* After a pair burst, switch to the work sync/channel and keep a short window
+ * open for the handheld pair response. */
 static s8 ShipProtocol_ArmPairRspWindow(u8 log_rxdbg)
 {
     s8 rc;
@@ -957,6 +1015,8 @@ static s8 ShipProtocol_ArmPairRspWindow(u8 log_rxdbg)
     return SUCCESS;
 }
 
+/* Send one legacy 0x12 GPS/status report.  The payload remains 15 bytes so
+ * old handheld firmware can parse it without a protocol upgrade. */
 static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
 {
     u8 payload[15];
@@ -1120,6 +1180,7 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
     }
 }
 
+/* Send a compact AutoDrive diagnostic snapshot to the handheld/viewer. */
 static void ShipProtocol_SendAutoDriveDiagOnce(u8 log_this_tx)
 {
 #if SHIP_AUTODRIVE_DIAG_ENABLE
@@ -1190,6 +1251,8 @@ static void ShipProtocol_SendAutoDriveDiagOnce(u8 log_this_tx)
 #endif
 }
 
+/* Emit AutoDrive diagnostics on state changes, and periodically while a
+ * tracked condition is active. */
 static void ShipProtocol_ServiceAutoDriveDiag(u32 now_ms)
 {
 #if SHIP_AUTODRIVE_DIAG_ENABLE
@@ -1280,6 +1343,7 @@ static void ShipProtocol_LogAutoDriveSnapshot(const char *stage)
 }
 #endif
 
+/* Accept pair response only while the response window is open. */
 static void ShipProtocol_HandlePairRsp(const u8 *payload, u8 payload_len)
 {
     if (g_ship_rt.pair_wait_rsp_time == 0U) {
@@ -1320,6 +1384,8 @@ static void ShipProtocol_HandlePairRsp(const u8 *payload, u8 payload_len)
     }
 }
 
+/* Handle 0x11 manual control frames.  AutoDrive busy state consumes link
+ * keepalive and key edges but blocks direct manual motor updates. */
 static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
 {
     u32 now_ms;
@@ -1376,6 +1442,8 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
     return log_this_sample;
 }
 
+/* Route a verified protocol frame to its business handler.  A GPS/status
+ * reply is sent after every accepted command to match legacy behavior. */
 static void ShipProtocol_Dispatch(u8 cmd, const u8 *payload, u8 payload_len)
 {
     u8 log_gps_after_rsp;
@@ -1438,6 +1506,7 @@ static void ShipProtocol_Dispatch(u8 cmd, const u8 *payload, u8 payload_len)
     ShipProtocol_SendGpsOnce(log_gps_after_rsp);
 }
 
+/* Validate a complete AA-BB frame, update link state, and dispatch payload. */
 s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len)
 {
     u8 body_len;
@@ -1488,6 +1557,9 @@ s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len)
     return SUCCESS;
 }
 
+/* Rebuild protocol frames from RF payload bytes.  Wireless_Receive() may
+ * deliver raw chunks rather than exactly one business frame, so this keeps
+ * the legacy byte-by-byte frame finder. */
 static void ShipProtocol_ReceiveHandle(const u8 *rx_buf, u8 len)
 {
     u8 i;
@@ -1514,6 +1586,7 @@ static void ShipProtocol_ReceiveHandle(const u8 *rx_buf, u8 len)
                    (u16)((len > 6U) ? rx_buf[6] : 0U),
                    (u16)((len > 7U) ? rx_buf[7] : 0U));
 
+    /* Keep the legacy truncation behavior for oversized RF payloads. */
     if (len > SHIP_LEGACY_PROTO_MAX_LEN) {
         len = 10U;
     }
@@ -1523,6 +1596,8 @@ static void ShipProtocol_ReceiveHandle(const u8 *rx_buf, u8 len)
     frame_finish = 0U;
     for (i = 0U; i < len; i++) {
         check_ok = 1U;
+        /* frame_index 0 waits for head, 1 reads len, later bytes count down
+         * until tail/checksum bytes are available. */
         switch (frame_index) {
         case 0U:
             if (rx_buf[i] != SHIP_PROTO_HEAD) {
@@ -1586,6 +1661,8 @@ static void ShipProtocol_ReceiveHandle(const u8 *rx_buf, u8 len)
     }
 }
 
+/* Compatibility poll-only entry.  Normal firmware should use
+ * ShipProtocol_RunScheduler() so pairing, timeout, and reports also run. */
 void ShipProtocol_Poll(void)
 {
     u8 *frame;
@@ -1603,6 +1680,7 @@ void ShipProtocol_Poll(void)
     } while (rc == SUCCESS);
 }
 
+/* Drain the wireless receive queue before each scheduler step. */
 static void ShipProtocol_PollRxFrames(void)
 {
     u8 *frame;
@@ -1619,6 +1697,7 @@ static void ShipProtocol_PollRxFrames(void)
     } while (rc == SUCCESS);
 }
 
+/* Initialize local protocol state and the two downstream control modules. */
 static void ShipProtocol_InitRuntime(void)
 {
     u8 seed[4];
@@ -1665,6 +1744,8 @@ static void ShipProtocol_InitRuntime(void)
          (u16)seed[0], (u16)seed[1], (u16)seed[2], (u16)seed[3]);
 }
 
+/* Scheduler state: send one pair request when the wait counter expires, then
+ * arm the response window after the configured burst count. */
 static void ShipProtocol_StepPairSend(void)
 {
     s8 rc;
@@ -1706,6 +1787,8 @@ static void ShipProtocol_StepPairSend(void)
     }
 }
 
+/* Scheduler state: keep the radio in work-channel RX and periodically reopen
+ * receive mode to recover from radio state drift. */
 static void ShipProtocol_StepWorkRx(void)
 {
     s8 rc;
@@ -1750,6 +1833,8 @@ static void ShipProtocol_StepWorkRx(void)
     }
 }
 
+/* Main 10 ms protocol scheduler.  It drains RX, maintains pairing/RX state,
+ * checks link/battery timeouts, and ticks AutoDrive/ShipControl. */
 void ShipProtocol_RunScheduler(void)
 {
     static u8 initialized = 0U;

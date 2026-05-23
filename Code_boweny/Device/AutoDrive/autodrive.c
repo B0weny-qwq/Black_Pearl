@@ -576,6 +576,9 @@ void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len)
     if (len >= (u8)(1U + AUTODRIVE_LEGACY_POINT_WIRE_LEN)) {
         AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_RETURN_SWITCH_SAVE);
         AutoDrive_PointFromLegacyWire(&g_autodrv_cfg.ret_point, &data_m[1]);
+        if (g_autoDrive_state == AUTO_DRIVE_IDLE) {
+            AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
+        }
     }
     (void)AutoDriveCfg_Save(&g_autodrv_cfg);
 }
@@ -585,6 +588,22 @@ void AutoDrive_GetStoredConfig(AutoDrive_ReturnConfig_t *cfg)
     if (cfg != 0) {
         *cfg = g_autodrv_cfg;
     }
+}
+
+u8 AutoDrive_GetReturnPositionRaw(AutoDrive_PointRaw_t *point)
+{
+    if (point != 0) {
+        AutoDrive_CopyPoint(point, &g_return_position);
+    }
+    return AutoDrive_PointRawValid(&g_return_position);
+}
+
+u8 AutoDrive_GetFishPositionRaw(AutoDrive_PointRaw_t *point)
+{
+    if (point != 0) {
+        AutoDrive_CopyPoint(point, &g_fish_position);
+    }
+    return AutoDrive_PointRawValid(&g_fish_position);
 }
 
 u8 AutoDrive_GetDirectionNowToDestination(const u8 *nowpositionData,
@@ -934,6 +953,7 @@ void AutoDrive_Init(void)
     if (g_autodrv_cfg.auto_ret_onoff == 0xFFU) {
         g_autodrv_cfg.auto_ret_onoff = 0x30U;
     }
+    AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
 
     g_autoDrive_switch = g_autodrv_cfg.auto_ret_onoff;
     g_autoDrive_state = AUTO_DRIVE_IDLE;

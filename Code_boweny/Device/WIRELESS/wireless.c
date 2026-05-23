@@ -1,18 +1,20 @@
 /**
  * @file    wireless.c
- * @brief   LT8920 无线链路管理层实现。
+ * @brief   LT8920 wireless link management layer.
  * @author  boweny
  * @date    2026-05-06
  * @version v1.1
  *
  * @details
- * 本文件在 LT8920 芯片层之上维护初始化、天线选择、收发状态、
- * 接收队列、发送入口和调试接口。旧遥控器业务需要的指定信道发送、
- * 同步寄存器 idle 写入、工作 RX 打开等流程都在这里封装给协议层使用。
+ * This file manages initialization, antenna selection, TX/RX state,
+ * receive queues, transmit entry points, and debug hooks above the LT8920
+ * chip layer. The legacy remote-control workflow, including fixed-channel
+ * transmit, idle register writes, and opening the working RX path, is
+ * wrapped here for the protocol layer.
  *
  * @note
- * `Wireless_Receive()` 返回的是 LT8920 RF payload，不等同于完整
- * `AA | len | cmd | payload | xor | BB` 业务协议帧。
+ * `Wireless_Receive()` returns LT8920 RF payload bytes, not the full
+ * `AA | len | cmd | payload | xor | BB` business frame.
  */
 #include "wireless.h"
 #include "lt8920.h"
@@ -140,7 +142,8 @@ static s8 Wireless_SetRxMode(void)
     s8 rc;
 
 #if !WIRELESS_FRONTEND_BYPASS_TEST
-    WirelessPort_SetTxEn(0U);
+    /* Enable the TX frontend when the legacy transmitter path is used.
+     * Keep RX_EN/TX_EN sequencing in sync with LT8920_TxData(). */
     WirelessPort_SetRxEn(1U);
     WirelessPort_DelayUs(5U);
 #endif
@@ -172,7 +175,8 @@ static s8 Wireless_SetRxModeOnChannel(u8 channel)
 static void Wireless_EnableTxFrontend(void)
 {
 #if !WIRELESS_FRONTEND_BYPASS_TEST
-    /* 鍏煎鏃х増 LT8920_TxData() 鐨勬椂搴忥細RX_EN 淇濇寔楂樼數骞筹紝鍙剦鍐?TX_EN銆?*/
+    /* Enable the TX frontend when the legacy transmitter path is used. 
+     * Keep RX_EN/TX_EN sequencing in sync with LT8920_TxData(). */
     WirelessPort_SetRxEn(1U);
     WirelessPort_SetTxEn(0U);
     WirelessPort_DelayUs(5U);
@@ -1084,10 +1088,9 @@ s8 Wireless_RunMinimalTest(void)
         LOGE(WIRELESS_TAG, "test verify reg41 fail val=0x%04X", reg41);
         return WIRELESS_ERR_VERIFY;
     }
-
-    /* Reg7 鍚屾椂娣峰悎浜嗘ā寮忔帶鍒朵綅鍜屼俊閬撳瓧娈碉紝
-     * 涓嶆槸閭ｇ鈥滃啓杩涘幓鍐嶅師鏍疯鍥炴潵鈥濈殑瀵勫瓨鍣紝
-     * 鎵€浠ヤ笉瑕佹嬁瀹冨綋浣?SPI 鍐欒矾寰勭殑鍞竴楠岃瘉渚濇嵁銆?     */
+    /* Reg7 mixes mode-control bits with channel-related fields, so
+     * do not treat it as the only source of truth for SPI writeback.
+     */
     rc = LT8920_SetChannel(0x12U);
     if (rc != SUCCESS) {
         LOGE(WIRELESS_TAG, "test set ch fail rc=%d", rc);

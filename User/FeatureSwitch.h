@@ -26,7 +26,7 @@
  * 需要调参时，优先改本文件，不要在业务层到处散落重复常量。
  */
 
-/* PID / yaw hold */
+/* PID / yaw 自稳 */
 /**
  * @name   PID 与船体 yaw 自稳参数
  * @brief  船体闭环差速控制相关参数，放在文件顶部便于调试和快速取值
@@ -49,11 +49,11 @@
  */
 #define SHIP_MANUAL_CONTROL_PERIOD_MS  10UL
 
-/* manual RC axis low-pass: 1 = 50% new sample per 10 ms, 0 = no filter. */
+/* 手动遥控轴低通滤波：1=每 10ms 融合 50% 新样本，0=不过滤。 */
 #define SHIP_AXIS_FILTER_SHIFT         1U
 
-/* Legacy remote axis full throw: payload center is 100, field remotes commonly
- * report about 40..160, so +/-60 should map to full manual command. */
+/* 旧遥控器轴量程：载荷中心为 100，现场遥控器常见范围约 40..160，
+ * 因此 +/-60 映射为手动指令满量程。 */
 #define SHIP_RC_AXIS_MAX_DELTA         60
 
 /**
@@ -118,35 +118,35 @@
  * - 可防止自稳态把单侧电机直接压死或拉满
  */
 #define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 250
-/* Current cap: yaw_output <= 25% of current base speed before headroom clamp. */
+/* 当前限幅：在余量夹紧前，yaw_output <= 当前基础速度的 25%。 */
 
-/* manual yaw-hold enters when abs(left-right) < max(abs(left),abs(right)) * this percent. */
+/* 手动 yaw 自稳进入条件：abs(left-right) < max(abs(left),abs(right)) * 本百分比。 */
 #define SHIP_MANUAL_YAW_HOLD_DIFF_PERCENT 20U
 
-/* 1 keeps current sign; -1 flips yaw correction if field test shows positive feedback. */
+/* 1 保持当前符号；若现场测试出现正反馈，可改为 -1 反转 yaw 修正方向。 */
 #define SHIP_YAW_HOLD_OUTPUT_SIGN 1
 
-/* reduce yaw-hold base speed only after yaw-hold is active and yaw error is large. */
+/* 仅在 yaw 自稳已激活且偏航误差较大时，才降低 yaw 自稳基础速度。 */
 #define SHIP_YAW_HOLD_DERATE_ENABLE 1
 
-/* yaw error in centi-degree where base derate begins, 300 = 3.00 deg. */
+/* 基础速度开始降额的偏航误差阈值（0.01 度），300=3.00 度。 */
 #define SHIP_YAW_HOLD_DERATE_START_CD 300
 
-/* yaw error in centi-degree where base derate reaches max, 1000 = 10.00 deg. */
+/* 基础速度降额达到最大值的偏航误差阈值（0.01 度），1000=10.00 度。 */
 #define SHIP_YAW_HOLD_DERATE_FULL_CD 1000
 
-/* motor speed cap used at full derate; unit is speed, not PWM duty. */
+/* 满降额时的电机速度上限；单位为 speed，不是 PWM 占空比。 */
 #define SHIP_YAW_HOLD_DERATE_MIN_BASE 500
-/* Large heading error can pull cruise base speed down to 500 for tighter turns. */
+/* 航向误差较大时可把巡航基础速度拉低到 500，以获得更紧凑的转向。 */
 
-/* yaw-hold gyro damping, Q10 output units per deg/s. */
+/* yaw 自稳陀螺阻尼系数，单位为 Q10 输出量/（度/秒）。 */
 #define SHIP_YAW_HOLD_GYRO_DAMP_Q10    3072
 
-/* max final differential speed change per 10 ms manual-control step. */
+/* 每个 10ms 手动控制步的最终差速变化上限。 */
 #define SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP 30
-/* Higher slew makes PID feel firmer without removing the anti-jerk ramp. */
+/* 更高的斜率上限会让 PID 体感更“硬”，同时保留防突变斜坡。 */
 
-/* wait N stable centered-steering frames before locking yaw target. */
+/* 在锁定 yaw 目标前，先等待 N 帧稳定的回中转向输入。 */
 #define SHIP_YAW_HOLD_STEER_STABLE_FRAMES 2U
 
 /**
@@ -156,7 +156,7 @@
  * - 当前值偏保守，先保证不明显过冲
  */
 #define SHIP_YAW_HOLD_KP_Q10           768
-/* Q10 768 = 0.75, firmer than the previous 512 = 0.50. */
+/* Q10 下 768=0.75，相比此前 512=0.50 更“硬”一些。 */
 
 /**
  * @brief  yaw 自稳误差死区（centi-degree）
@@ -177,7 +177,7 @@
 #define SHIP_YAW_HOLD_KD_Q10           0
 /** @} */
 
-/* Core modules */
+/* 核心模块 */
 /**
  * @name   核心模块开关
  * @brief  控制无线、GPS、磁力计和 IMU 是否参与当前固件运行档位
@@ -216,7 +216,7 @@
 #define ENABLE_IMU_MODULE              1
 /** @} */
 
-/* Runtime polling */
+/* 运行期轮询 */
 /**
  * @name   运行期轮询开关
  * @brief  控制主循环中各业务轮询是否进入调度
@@ -263,7 +263,7 @@
 #define ENABLE_LOG_INIT                1
 /** @} */
 
-/* Test / diagnostics */
+/* 测试/诊断 */
 /**
  * @name   测试与诊断开关
  * @brief  控制是否压缩运行输出，只保留关键日志
@@ -278,7 +278,7 @@
 #define AHRS_TEST_ONLY                 0
 /** @} */
 
-/* Logging and serial */
+/* 日志与串口 */
 /**
  * @name   串口与日志参数
  * @brief  定义主日志与 GPS 日志的波特率和诊断等级
@@ -312,7 +312,7 @@
 #define GPS_DIAG_LOG_ENABLE            0U
 /** @} */
 
-/* Sensor bus */
+/* 传感器总线 */
 /**
  * @name   传感器总线参数
  * @brief  定义当前 IMU / MAG 共用的 I2C 速度档位
@@ -325,7 +325,7 @@
 #define SENSOR_I2C_SPEED_CFG           58U
 /** @} */
 
-/* IMU / QMI8658 */
+/* IMU / QMI8658 相关 */
 /**
  * @name   IMU 与 AHRS 相关参数
  * @brief  定义 QMI8658 初始化、诊断和 AHRS 运行模式
@@ -400,7 +400,7 @@
 #define QMI8658_INIT_NONBLOCKING       0
 /** @} */
 
-/* Wireless hardware */
+/* 无线硬件 */
 /**
  * @name   无线硬件参数
  * @brief  定义 LT8920 与前端芯片的基本开关和 SPI 档位
@@ -445,7 +445,7 @@
 #define WIRELESS_SOFT_SPI_DELAY_US     0
 /** @} */
 
-/* Antenna selection */
+/* 天线选择 */
 /**
  * @name   天线选择
  * @brief  指定当前无线链路使用哪一路天线
@@ -473,7 +473,7 @@
 #define WIRELESS_FORCE_ANT_MODE        WIRELESS_FORCE_ANT_1
 /** @} */
 
-/* Wireless diagnostics */
+/* 无线诊断 */
 /**
  * @name   无线诊断开关
  * @brief  控制无线前端旁路、发射测试和 trace 输出
@@ -523,7 +523,7 @@
 #define WIRELESS_TX_TRACE_ENABLE       0
 /** @} */
 
-/* Wireless protocol */
+/* 无线协议 */
 /**
  * @name   无线协议参数
  * @brief  定义配对、超时、重连与协议兼容策略
@@ -600,7 +600,7 @@
 #define SHIP_WORK_RX_REOPEN_TICKS      10U
 /** @} */
 
-/* Pairing seed */
+/* 配对种子 */
 /**
  * @name   配对种子
  * @brief  定义无线配对所使用的固定种子或芯片 ID 方式
@@ -642,7 +642,7 @@
 #define SHIP_PAIR_CHANNEL_DEFAULT      ((u8)(PAIR_CHANNEL))
 /** @} */
 
-/* Motor / ADC */
+/* 电机 / ADC */
 /**
  * @name   电机与 ADC 参数
  * @brief  控制电池电压换算与剩余 ADC 诊断参数
@@ -689,7 +689,7 @@
 #define SHIP_PROTO_DEBUG_PERIOD_MS     100U
 /** @} */
 
-/* Legacy compatibility */
+/* 旧版兼容 */
 /**
  * @name   旧版兼容开关
  * @brief  保留给历史代码路径和旧调试脚本使用

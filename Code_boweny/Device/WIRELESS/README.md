@@ -209,6 +209,7 @@ AA 11 12 <15字节载荷> xor BB
 | `0x13` | `SET_RETURN` | 遥控器 -> 船 | 10 字节点位 | 设置返航点并尝试进入返航 |
 | `0x14` | `SET_DESTINATION` | 遥控器 -> 船 | 10 字节点位 | 设置目标点并尝试进入定点巡航 |
 | `0x15` | `SWITCH_AUTO_RETURN` | 遥控器 -> 船 | `switch + 可选 10 字节点位` | 保存自动返航开关和返航点 |
+| `0x16` | `AUTODRIVE_DIAG` | 船 -> 遥控器/上位机 | 固定 36 字节 | 自动驾驶状态、原因、距离、当前点和目标点诊断上报 |
 
 遥控器命令对齐结论：
 
@@ -220,7 +221,7 @@ AA 11 12 <15字节载荷> xor BB
 | `0x14` | `autoDrive_Set_FishPosition()` | `AutoDrive_SetFishPositionRaw()` | 10 字节点位格式对齐，收到后尝试去目标点 |
 | `0x15` | `autoDrive_Set_Switch()` | `AutoDrive_SetSwitchRaw()` | 完整 11 字节旧遥控器帧兼容；当前对短包增加长度保护 |
 
-任意合法 `0x0F/0x11/0x13/0x14/0x15` 帧分发后都会立即发送一次 `0x12` 回包。旧遥控器串口接收依赖固定命令号和固定字段位置，所以这些字节位置不能改。
+任意合法 `0x0F/0x11/0x13/0x14/0x15` 帧分发后都会立即发送一次 `0x12` 回包。`0x16` 是船端主动诊断上报，不改变旧遥控器必需的 `0x12` 固定回包节奏。旧遥控器串口接收依赖固定命令号和固定字段位置，所以这些字节位置不能改。
 
 ## 8. 配对流程
 
@@ -308,7 +309,7 @@ payload[2] = key  // 按键码
 |------|------|
 | 收到完整 `AA ... BB` 头尾包 | 上位机显示层刷新遥控链路在线/活动时间 |
 | 超过 `SHIP_THROTTLE_TIMEOUT_MS=1500ms` 未收到有效 `0x11` | 固件判定控制帧超时，停机 |
-| 配对后超过 `SHIP_THROTTLE_RECOVER_MS=3000ms` 没有新油门帧 | 重新整理默认 RF 参数并重开工作 RX |
+| 配对后工作信道超过 `SHIP_THROTTLE_RECOVER_MS=3000ms` 没有任何合法协议帧 | 重新整理默认 RF 参数并重开工作 RX |
 | 任意合法协议帧处理结束 | 立即回发一次 `0x12` |
 
 ## 10. `0x12` GPS/状态回传
@@ -392,7 +393,7 @@ AutoDrive_GetMode() == AUTO_DRIVE_CLOSE
 ShipControl_GetManualAccelerator() < 10
 ```
 
-满足条件后调用 `AutoDrive_TriggerReturn()`。是否真正进入返航，还要看已保存返航点是否合法、当前 GPS 是否可用、距离是否满足 AutoDrive 激活条件。
+满足条件后调用 `AutoDrive_TriggerReturnWithReason(AUTODRIVE_DIAG_REASON_LOW_POWER)`。是否真正进入返航，还要看已保存返航点是否合法、当前 GPS 是否可用、距离是否满足 AutoDrive 激活条件。
 
 ## 12. `0x13/0x14/0x15` 点位与自动驾驶
 
@@ -430,7 +431,38 @@ AutoDrive 激活条件：
 - 当前 GPS 可用，卫星数至少 7，当前经纬度非 0。
 - 当前点到目标点距离必须大于 10m 且小于 800m。
 
-## 13. 自动返航配置存储
+## 13. `0x16` 自动驾驶诊断上报
+
+`0x16` 是当前工程新增的船端诊断上报，不属于旧遥控器必须解析的控制命令。它用于上位机或调试工具观察 AutoDrive 状态，不改变 `0x12` 的固定 15 字节回包。
+
+诊断载荷固定 36 字节：
+
+| offset | 字段 | 长度 | 说明 |
+|--------|------|------|------|
+| 0 | `version` | 1 | 当前为 `0x01` |
+| 1 | `state` | 1 | AutoDrive 状态 |
+| 2 | `mode` | 1 | AutoDrive 模式 |
+| 3 | `auto_ret_onoff` | 1 | 自动返航开关保存值 |
+| 4 | `fail_flag` | 1 | 最近一次激活失败标志 |
+| 5 | `last_reason` | 1 | 最近一次诊断原因 |
+| 6 | `gps_ready` | 1 | GPS 是否满足自动驾驶条件 |
+| 7 | `sat_count` | 1 | 当前卫星数 |
+| 8 | `can_activate_target` | 1 | 当前目标是否可激活 |
+| 9 | `reserved` | 1 | 保留，当前为 0 |
+| 10..11 | `distance_to_target_m` | 2 | 到目标点距离，米，高字节在前 |
+| 12..13 | `current_heading_deg` | 2 | 当前航向整数度，高字节在前 |
+| 14..15 | `target_heading_deg` | 2 | 目标航向整数度，高字节在前 |
+| 16..25 | `current_point` | 10 | 当前点，沿用旧版 10 字节点位格式 |
+| 26..35 | `target_point` | 10 | 目标点，沿用旧版 10 字节点位格式 |
+
+发送节奏：
+
+- `SHIP_AUTODRIVE_DIAG_ENABLE=1` 时启用。
+- 配对完成后才发送。
+- 状态、模式、原因、开关或失败标志变化时，满足 `SHIP_AUTODRIVE_DIAG_MIN_GAP_MS=200ms` 最小间隔即可上报。
+- 有跟踪状态时，即使没有变化，也会按 `SHIP_AUTODRIVE_DIAG_PERIOD_MS=1000ms` 周期上报。
+
+## 14. 自动返航配置存储
 
 当前工程没有外置 EEPROM。自动返航配置写到 STC flash/EEPROM 区：
 
@@ -451,7 +483,7 @@ AutoDrive 激活条件：
 - `auto_ret_onoff = 0x30`
 - 返航点全部清零
 
-## 14. 诊断日志
+## 15. 诊断日志
 
 默认诊断开关当前较保守：
 
@@ -483,12 +515,13 @@ AutoDrive 激活条件：
 [SHIP] rc cmd=0x11 lr=... ud=... key=...
 [SHIP] tx cmd=0x12 ch=... payload_len=15 ...
 [SHIP] gps payload bytes=...
+[SHIP] tx cmd=0x16 state=... mode=... sw=... reason=... gps=... sat=... dist=...
 [SHIP] remote link online by aa-bb-frame cmd=...
 [SHIP] remote link timeout by aa-bb-frame, dt=...ms
 [SHIP] manual control timeout by cmd=0x11, dt=...ms
 ```
 
-## 15. 联调验收清单
+## 16. 联调验收清单
 
 配对：
 
@@ -512,6 +545,12 @@ GPS 回传：
 - 经纬度字段是旧版 `dddmm.mmmm/ddmm.mmmm` 拆分格式。
 - 电量字段是 `0..4` 等级，不是 ADC 原始值。
 
+自动驾驶诊断：
+
+- 配对后 AutoDrive 状态变化时可看到 `0x16` 诊断上报。
+- `0x16` 载荷长度固定 36。
+- 诊断点位字段沿用旧版 10 字节格式，不影响 `0x12` 回包字段。
+
 点位和返航：
 
 - `0x13/0x14` 载荷必须至少 10 字节。
@@ -519,7 +558,7 @@ GPS 回传：
 - 自动返航配置能保存到 `0x0001F800`。
 - 低电返航只在电量等级为 0、自动驾驶关闭、油门低于 10 时触发入口。
 
-## 16. 禁止修改项
+## 17. 禁止修改项
 
 为了保持旧遥控器兼容，以下内容不要随意改：
 
@@ -529,13 +568,14 @@ GPS 回传：
 - 不要把上位机“显示在线”和固件 `0x11` 控制保活混成同一个状态；显示层按 `AA ... BB` 包活动，电机安全按有效 `0x11`。
 - 不要改命令号 `0x0F~0x15`。
 - 不要向 `0x12` 增加字段。
+- 不要把 `0x16` 诊断字段塞进 `0x12`；旧遥控器依赖 `0x12` 固定 15 字节布局。
 - 不要把 `0x12` 半球字段改成真实 `N/S/E/W`。
 - 不要把 `0x12` 电量字段改回 ADC 原始值。
 - 不要把当前板级电量采样通道改回旧板 `ADC_CH9`，除非硬件也改回旧板接法。
 - 不要清零 LT8920 `reg37/reg38`。
 - 不要把 `Wireless_Receive()` 的射频载荷当成完整协议帧直接分发。
 
-## 17. 当前已知差异
+## 18. 当前已知差异
 
 | 差异 | 当前处理 | 影响 |
 |------|----------|------|
@@ -548,7 +588,7 @@ GPS 回传：
 | 配对参数不持久化 | 每次上电重新按 seed 派生 | 上电需重新跑配对节奏 |
 | 自动驾驶可用性受 GPS 条件限制 | 点位合法、卫星数、距离都要满足 | 收到命令不等于一定进入巡航 |
 
-## 18. 相关文件
+## 19. 相关文件
 
 - `Code_boweny/Device/WIRELESS/wireless_port.h`
 - `Code_boweny/Device/WIRELESS/wireless_port.c`
@@ -572,10 +612,11 @@ GPS 回传：
 - `ship_Gps_V2.1_20260406-115200/App/ADC/power_Adc.c`
 - `ship_Gps_V2.1_20260406-115200/App/AutoDrive/autoDrive.c`
 
-## 19. 版本记录
+## 20. 版本记录
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-23 | v1.7 | 同步 `ship_protocol.c` 当前行为，补充 `0x16` AutoDrive 诊断上报、低电返航原因接口和工作信道静默恢复说明。 |
 | 2026-05-13 | v1.6 | 补充 `AutoDrive` 实际接入路径、`0x11` 手动 yaw-hold 触发条件和当前主链说明，收口到根目录代码真实状态。 |
 | 2026-05-13 | v1.5 | 补齐遥控器命令对齐表、ADC_CH8/ADC_CH9 板级差异说明、主循环条件入口和禁止修改项，统一中文表述。 |
 | 2026-05-13 | v1.4 | 按当前工作区真实代码重写 README，补全硬件、开关、配对、帧格式、命令、GPS 回传、电量、点位、flash 存储、联调验收和已知差异。 |
