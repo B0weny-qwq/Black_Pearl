@@ -182,7 +182,7 @@
 /* ==================== GPS 启航前原地对准 PID ==================== */
 #ifndef SHIP_GPS_ALIGN_KP_Q10
 /* GPS 原地对准比例增益，Q10；越大越积极转向目标航向。 */
-#define SHIP_GPS_ALIGN_KP_Q10            512
+#define SHIP_GPS_ALIGN_KP_Q10            384
 #endif
 #ifndef SHIP_GPS_ALIGN_KI_Q10
 /* GPS 原地对准积分增益；保持 0 可避免原地旋转时积分堆积。 */
@@ -190,11 +190,11 @@
 #endif
 #ifndef SHIP_GPS_ALIGN_KD_Q10
 /* GPS 原地对准微分增益，Q10；用于抑制接近目标航向时的过冲。 */
-#define SHIP_GPS_ALIGN_KD_Q10            96
+#define SHIP_GPS_ALIGN_KD_Q10            0
 #endif
 #ifndef SHIP_GPS_ALIGN_DIFF_PERCENT
 /* 原地对准最大差速，占电机最大命令的百分比；30 表示 30%。 */
-#define SHIP_GPS_ALIGN_DIFF_PERCENT      30U
+#define SHIP_GPS_ALIGN_DIFF_PERCENT      18U
 #endif
 
 #define SHIP_CONTROL_REASON_MANUAL_OPEN  20U
