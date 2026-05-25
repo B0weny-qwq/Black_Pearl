@@ -266,14 +266,15 @@ static void ShipProtocol_LogCoordBE(const u8 *buf, u8 len);
 #endif
 static u8 ShipProtocol_ShouldLogRcInputSample(u32 now_ms);
 static u16 ShipProtocol_ReadU16Legacy(const u8 *buf);
-static const char *ShipProtocol_FishCmdResultName(u8 result);
+static const char *ShipProtocol_FishNavResultName(u8 result);
+static const char *ShipProtocol_FishSaveResultName(u8 result);
 static void ShipProtocol_LogGotoPointUart(const u8 *frame,
                                           u8 frame_len,
                                           const u8 *payload,
                                           u8 payload_len,
                                           u8 xor_calc,
                                           u8 xor_recv,
-                                          u8 result);
+                                          u8 nav_result);
 
 void ShipProtocol_ResetYawHoldController(void)
 {
@@ -373,22 +374,36 @@ static u8 ShipProtocol_ShouldLogRcInputSample(u32 now_ms)
     return 0U;
 }
 
-static const char *ShipProtocol_FishCmdResultName(u8 result)
+static const char *ShipProtocol_FishNavResultName(u8 result)
 {
     switch (result) {
     case AUTODRIVE_FISH_CMD_BUSY:
         return "busy";
-    case AUTODRIVE_FISH_CMD_STORED:
-        return "store";
-    case AUTODRIVE_FISH_CMD_DUP_WAIT:
-        return "dup-wait";
-    case AUTODRIVE_FISH_CMD_REJECT_UNKNOWN:
-        return "reject-unknown";
     case AUTODRIVE_FISH_CMD_REJECT_DISTANCE:
         return "reject-distance";
     case AUTODRIVE_FISH_CMD_STARTED:
         return "start";
     case AUTODRIVE_FISH_CMD_INVALID:
+        return "invalid";
+    default:
+        return "unknown";
+    }
+}
+
+static const char *ShipProtocol_FishSaveResultName(u8 result)
+{
+    switch (result) {
+    case AUTODRIVE_FISH_SAVE_NONE:
+        return "none";
+    case AUTODRIVE_FISH_SAVE_STORED:
+        return "stored";
+    case AUTODRIVE_FISH_SAVE_EXISTS:
+        return "exists";
+    case AUTODRIVE_FISH_SAVE_FULL_TEMP:
+        return "full-temp";
+    case AUTODRIVE_FISH_SAVE_BUSY:
+        return "busy";
+    case AUTODRIVE_FISH_SAVE_INVALID:
         return "invalid";
     default:
         return "unknown";
@@ -401,19 +416,20 @@ static void ShipProtocol_LogGotoPointUart(const u8 *frame,
                                           u8 payload_len,
                                           u8 xor_calc,
                                           u8 xor_recv,
-                                          u8 result)
+                                          u8 nav_result)
 {
 #if SHIP_GOTO_POINT_UART_LOG_ENABLE
     AutoDrive_PointRaw_t point;
     u8 fish_index;
+    u8 save_result;
 
     if ((payload == 0) || (payload_len < AUTODRIVE_LEGACY_POINT_WIRE_LEN)) {
         log_warn((u8 *)SHIP_DATA_TAG,
-                 (u8 *)"0x14 short len=%u xor=%02X/%02X res=%s",
+                 (u8 *)"0x14 short len=%u xor=%02X/%02X nav=%s",
                  (u16)payload_len,
                  (u16)xor_calc,
                  (u16)xor_recv,
-                 ShipProtocol_FishCmdResultName(result));
+                 ShipProtocol_FishNavResultName(nav_result));
         return;
     }
 
@@ -424,15 +440,18 @@ static void ShipProtocol_LogGotoPointUart(const u8 *frame,
     point.lat_whole = ShipProtocol_ReadU16Legacy(&payload[6]);
     point.lat_frac = ShipProtocol_ReadU16Legacy(&payload[8]);
     fish_index = AutoDrive_GetLastFishCommandIndex();
+    save_result = AutoDrive_GetLastFishSaveResult();
 
     log_info((u8 *)SHIP_DATA_TAG,
-             (u8 *)"0x14 rx fl=%u pl=%u xor=%02X/%02X res=%u(%s) idx=%u",
+             (u8 *)"0x14 rx fl=%u pl=%u xor=%02X/%02X save=%u(%s) nav=%u(%s) idx=%u",
              (u16)frame_len,
              (u16)payload_len,
              (u16)xor_calc,
              (u16)xor_recv,
-             (u16)result,
-             ShipProtocol_FishCmdResultName(result),
+             (u16)save_result,
+             ShipProtocol_FishSaveResultName(save_result),
+             (u16)nav_result,
+             ShipProtocol_FishNavResultName(nav_result),
              (u16)fish_index);
     log_info((u8 *)SHIP_DATA_TAG,
              (u8 *)"0x14 point ew=0x%02X lon=%u.%u ns=0x%02X lat=%u.%u",
@@ -478,7 +497,7 @@ static void ShipProtocol_LogGotoPointUart(const u8 *frame,
     (void)payload_len;
     (void)xor_calc;
     (void)xor_recv;
-    (void)result;
+    (void)nav_result;
 #endif
 }
 
@@ -1668,10 +1687,10 @@ static void ShipProtocol_Dispatch(u8 cmd,
                                   u8 xor_recv)
 {
     u8 log_gps_after_rsp;
-    u8 fish_result;
+    u8 fish_nav_result;
 
     log_gps_after_rsp = 1U;
-    fish_result = AUTODRIVE_FISH_CMD_INVALID;
+    fish_nav_result = AUTODRIVE_FISH_CMD_INVALID;
     if (cmd != SHIP_CMD_THROTTLE) {
         LOGI(SHIP_TAG, "dispatch cmd=0x%02X(%s) payload_len=%u",
              (u16)cmd,
@@ -1704,14 +1723,14 @@ static void ShipProtocol_Dispatch(u8 cmd,
         }
         LOGI(SHIP_TAG, "cmd=0x14 goto-point rx len=%u", (u16)payload_len);
         ShipProtocol_LogCoordBE(payload, payload_len);
-        fish_result = AutoDrive_SetFishPositionRaw(payload);
+        fish_nav_result = AutoDrive_SetFishPositionRaw(payload);
         ShipProtocol_LogGotoPointUart(frame,
                                       frame_len,
                                       payload,
                                       payload_len,
                                       xor_calc,
                                       xor_recv,
-                                      fish_result);
+                                      fish_nav_result);
         ShipProtocol_LogAutoDriveSnapshot("after-0x14");
         break;
     case SHIP_CMD_RETURN_SWITCH:

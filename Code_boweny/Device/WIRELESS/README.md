@@ -207,7 +207,7 @@ AA 11 12 <15字节载荷> xor BB
 | `0x11` | `THROTTLE` | 遥控器 -> 船 | `lr, ud, key` | 手动控制、电机输出、按键处理 |
 | `0x12` | `GPS_REPORT` | 船 -> 遥控器 | 固定 15 字节 | GPS、航向、电量、自动驾驶状态回传 |
 | `0x13` | `SET_RETURN` | 遥控器 -> 船 | 10 字节点位 | 设置返航点并尝试进入返航 |
-| `0x14` | `SET_DESTINATION` | 遥控器 -> 船 | 10 字节点位 | 按收到顺序保存/匹配 1..5 号钓点；匹配已保存点后才尝试进入定点巡航 |
+| `0x14` | `SET_DESTINATION` | 遥控器 -> 船 | 10 字节点位 | 按收到顺序保存/匹配 1..5 号钓点；每个有效坐标都会按当前目标尝试进入定点巡航 |
 | `0x15` | `SWITCH_AUTO_RETURN` | 遥控器 -> 船 | `switch + 可选 10 字节点位` | 更新 RAM 自动返航开关和返航点 |
 | `0x16` | `AUTODRIVE_DIAG` | 船 -> 遥控器/上位机 | 固定 36 字节 | 自动驾驶状态、原因、距离、当前点和目标点诊断上报 |
 
@@ -218,7 +218,7 @@ AA 11 12 <15字节载荷> xor BB
 | `0x0F` | `WIRELESS_CMD_PAIR_RSP` | `ShipProtocol_HandlePairRsp()` | 命令号和窗口判断保留；当前不再触发旧版 `Compass_calib_start()` |
 | `0x11` | `WirelessProtocal_Accelerator_Resolve()` | `ShipProtocol_HandleThrottle()` | 帧格式和三字节载荷对齐；应用层手感因当前手动航向保持不完全等同 |
 | `0x13` | `autoDrive_Set_ReturnPosition()` | `AutoDrive_SetReturnPositionRaw()` | 10 字节点位格式对齐，收到后尝试返航 |
-| `0x14` | `autoDrive_Set_FishPosition()` | `AutoDrive_SetFishPositionRaw()` | 10 字节点位格式对齐；当前增加钓点编号鉴别，未知点先保存，已保存点才尝试去目标点 |
+| `0x14` | `autoDrive_Set_FishPosition()` | `AutoDrive_SetFishPositionRaw()` | 10 字节点位格式对齐；当前增加 1..5 钓点 RAM 保存，同时保持旧版“收到坐标即尝试去目标点”的行为 |
 | `0x15` | `autoDrive_Set_Switch()` | `AutoDrive_SetSwitchRaw()` | 完整 11 字节旧遥控器帧兼容；当前对短包增加长度保护 |
 
 任意合法 `0x0F/0x11/0x13/0x14/0x15` 帧分发后都会立即发送一次 `0x12` 回包。`0x16` 是船端主动诊断上报，不改变旧遥控器必需的 `0x12` 固定回包节奏。旧遥控器串口接收依赖固定命令号和固定字段位置，所以这些字节位置不能改。
@@ -422,7 +422,7 @@ ShipControl_GetManualAccelerator() < 10
 | 命令 | 载荷 | 当前行为 |
 |------|---------|----------|
 | `0x13` | 10 字节点位 | `AutoDrive_SetReturnPositionRaw()`，设置返航点并尝试进入返航 |
-| `0x14` | 10 字节点位 | `AutoDrive_SetFishPositionRaw()`，按收到顺序保存/匹配 `1..5` 号钓点；匹配已保存点后尝试进入目标点巡航 |
+| `0x14` | 10 字节点位 | `AutoDrive_SetFishPositionRaw()`，按收到顺序保存/匹配 `1..5` 号钓点；每个有效坐标都会作为当前目标尝试进入巡航 |
 | `0x15` | `switch + 可选 10 字节点位` | 更新 RAM 自动返航开关；若长度至少 11 字节，同时更新 RAM 返航点；开关不为 `0x30` 时立即尝试返航 |
 
 与旧版差异：
@@ -432,30 +432,38 @@ ShipControl_GetManualAccelerator() < 10
 - 正常旧遥控器发送完整 11 字节载荷时，空口行为兼容。
 - 为匹配遥控器“返航指令”的现场语义，`0x15` 开启状态现在会立即调用 `AutoDrive_TriggerReturnWithReason()` 尝试返航；如果 GPS、卫星数、距离门槛不满足，日志会打印 AutoDrive 快照说明原因。
 - `0x14` 不是一次接收 5 个钓点，而是最多先后接收 5 次，每次 1 个 10 字节点位，按收到顺序分配为 `1..5`。
-- 如果只有 1 号钓点有效，停过短时间去重窗口后再次收到同一坐标即可尝试去 1 号，不需要等待 2..5 号。
-- 同一坐标连续重发会返回 `dup-wait`，用于过滤遥控器/RF 重发，不触发去点。
+- 如果只有 1 号钓点有效，再次收到同一坐标即可尝试去 1 号，不需要等待 2..5 号。
+- 同一坐标连续重发不会重复占槽，但仍会按该坐标尝试去点。
 - 钓点保存后在本次上电期间一直有效；去过一次、到点停车、手动停止、超时失败或模式切换不会删除该编号。
-- 5 个钓点槽位已满后，未匹配任何已保存钓点的新坐标会被拒绝，防止误去未知点。
+- 5 个钓点槽位已满后，未匹配任何已保存钓点的新坐标不会保存到 1..5 表，但仍会作为本次临时目标尝试去点。
 
 `0x14` 数据日志写到 `DATA` tag，便于遥控器日志串口过滤：
 
 ```text
-[DATA] I: 0x14 rx fl=15 pl=10 xor=38/38 res=1(store) idx=1
+[DATA] I: 0x14 rx fl=15 pl=10 xor=38/38 save=1(stored) nav=5(start) idx=1
 [DATA] I: 0x14 point ew=0x45 lon=12156.6298 ns=0x57 lat=3725.3437
 [DATA] I: 0x14 payload=45 2F 7C 18 9A 57 0E 8D 0D 6D
 [DATA] I: 0x14 frame=AA 0C 14 ...
 ```
 
-`res` 含义：
+`save` 含义：
+
+| 值 | 名称 | 含义 |
+|----|------|------|
+| `0` | `none` | 未执行保存判定 |
+| `1` | `stored` | 新钓点已保存，`idx` 为自动分配编号 |
+| `2` | `exists` | 坐标已在 1..5 表中，`idx` 为已保存编号 |
+| `3` | `full-temp` | 1..5 已满，新坐标未入库；仍作为本次临时目标尝试去点 |
+| `4` | `busy` | AutoDrive 当前不在 `IDLE`，未保存也未切换目标 |
+| `5` | `invalid` | 载荷坐标无效 |
+
+`nav` 含义：
 
 | 值 | 名称 | 含义 |
 |----|------|------|
 | `0` | `busy` | AutoDrive 当前不在 `IDLE`，忽略本次去点命令 |
-| `1` | `store` | 新钓点已保存，`idx` 为自动分配编号 |
-| `2` | `dup-wait` | 同一坐标短时间连续重发，已过滤，不触发去点 |
-| `3` | `reject-unknown` | 槽位已满且坐标不属于已保存钓点 |
-| `4` | `reject-distance` | 已匹配钓点，但 GPS/距离等激活条件不满足 |
-| `5` | `start` | 已匹配钓点并进入去钓点流程 |
+| `4` | `reject-distance` | GPS/距离等激活条件不满足，未进入巡航 |
+| `5` | `start` | 已把当前 `0x14` 坐标作为目标并进入去钓点流程 |
 | `6` | `invalid` | 载荷坐标无效 |
 
 AutoDrive 激活条件：
@@ -546,7 +554,7 @@ AutoDrive 激活条件：
 [SHIP] tx cmd=0x12 ch=... payload_len=15 ...
 [SHIP] gps payload bytes=...
 [SHIP] tx cmd=0x16 state=... mode=... sw=... reason=... gps=... sat=... dist=...
-[DATA] I: 0x14 rx fl=... pl=10 xor=.../... res=...(...) idx=...
+[DATA] I: 0x14 rx fl=... pl=10 xor=.../... save=...(...) nav=...(...) idx=...
 [DATA] I: 0x14 point ew=0x.. lon=... ns=0x.. lat=...
 [SHIP] remote link online by aa-bb-frame cmd=...
 [SHIP] remote link timeout by aa-bb-frame, dt=...ms
@@ -587,9 +595,9 @@ GPS 回传：
 
 - `0x13/0x14` 载荷必须至少 10 字节。
 - `0x15` 正常完整载荷为 11 字节。
-- `0x14` 首次未知点应看到 `[DATA] ... res=1(store) idx=1..5`。
-- 同一波重发应看到 `[DATA] ... res=2(dup-wait) idx=对应编号`。
-- 停过短时间去重窗口后再次发送已保存点，应看到 `[DATA] ... res=5(start) idx=对应编号`，若距离/GPS 不满足则为 `res=4(reject-distance)`。
+- `0x14` 首次未知点应看到 `[DATA] ... save=1(stored) idx=1..5`，并同时看到 `nav=5(start)` 或 `nav=4(reject-distance)`。
+- 同一波重发应看到 `[DATA] ... save=2(exists) idx=对应编号`，仍会按该坐标尝试去点。
+- 第 6 个新钓点应看到 `[DATA] ... save=3(full-temp) idx=0`，表示不入库但临时尝试去点。
 - 到点或手动停止后再次发送同一已保存点，仍应看到同一 `idx`，不会重新变成 `store` 或丢失。
 - 自动返航配置只保存到 RAM，不再检查 `0x0001F800` flash 区。
 - 低电返航只在电量等级为 0、自动驾驶关闭、油门低于 10 时触发入口。
@@ -622,7 +630,7 @@ GPS 回传：
 | 电量 ADC 通道不同 | 旧板是 `ADC_CH9`，当前板检测电压是 `ADC_CH8` | 协议字段和阈值对齐旧版，采样脚按当前硬件 |
 | `0x15` 短包防御 | 短包只保存开关，不更新返航点 | 正常 11 字节旧遥控器帧不受影响 |
 | 自动返航配置不写 flash | `0x13/0x15` 只更新 RAM 配置 | 掉电后返航点和开关恢复默认值 |
-| `0x14` 钓点鉴别 | 最多先后保存 5 个钓点，已保存坐标才触发去点 | 防止新未知坐标直接误触发去点 |
+| `0x14` 钓点鉴别 | 最多先后保存 5 个钓点；每个有效坐标仍按旧版行为尝试去点 | 保留 5 点表，同时不让保存状态阻塞当前目标前往 |
 | 配对参数不持久化 | 每次上电重新按 seed 派生 | 上电需重新跑配对节奏 |
 | 自动驾驶可用性受 GPS 条件限制 | 点位合法、卫星数、距离都要满足 | 收到命令不等于一定进入巡航 |
 

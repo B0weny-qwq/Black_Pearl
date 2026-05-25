@@ -1,5 +1,86 @@
 # Black Pearl v1.1
 
+## 0. 快速找目录
+
+如果只是想快速定位文件，先按下面这张表找：
+
+| 想找什么 | 去哪里看 | 主要文件 |
+| --- | --- | --- |
+| 主循环、任务调度、总开关 | `User/` | `Main.c`, `MainLoop.c`, `Task.c`, `FeatureSwitch.h`, `Config.h` |
+| 无线遥控、配对、船控协议 | `Code_boweny/Device/WIRELESS/` | `wireless.*`, `ship_protocol.*`, `lt8920.*` |
+| 手动控制、yaw 自稳、定速巡航仲裁 | `Code_boweny/Device/Control/` | `ShipControl.*` |
+| 自动驾驶、返航、钓点 | `Code_boweny/Device/AutoDrive/` | `autodrive.*`, `autodrive_cfg.*` |
+| GPS 解析和定位状态 | `Code_boweny/Device/GPS/` | `GPS.*` |
+| 电机输出 | `Code_boweny/Device/Motor/` | `Motor.*` |
+| 磁力计 QMC6309 | `Code_boweny/Device/QMC6309/` | `QMC6309.*`, `QMC6309_port.*` |
+| IMU QMI8658 | `Code_boweny/Device/QMI8658/` | `QMI8658.*`, `QMI8658_port.*` |
+| AHRS / 航向融合 | `Code_boweny/Function/AHRS/` | `AHRS.*`, `HeadingEstimator.*` |
+| PID、滤波、日志 | `Code_boweny/Function/` | `PID/`, `Filter/`, `Log/` |
+| STC32G 底层驱动 | `Driver/` | `inc/`, `src/`, `isr/`, `lib/` |
+| 板级外设例程/封装 | `App/` | `inc/`, `src/` |
+| Keil 工程和编译产物 | `RVMDK/` | `STC32G-LIB.uvproj`, `list/` |
+| 串口日志上位机 | `tools/ship_log_viewer/` | `ship_log_viewer.html`, `start_ship_log_viewer.*` |
+| 协议包生成工具 | `tools/ship_packet_builder/` | `build_ship_packet.py` |
+| 工程说明文档 | `doc/project_doc/` | `total.md`, `date.md` |
+| 模块构建/调试文档 | `doc/build_doc/` | `README_GPS.md`, `README_wireless.md`, `IMU_QMI8658.md` |
+
+推荐查找顺序：先看本 README 的目录索引，再看对应模块的 `README.md` 和 `.h` 注释，最后再进 `.c` 实现。
+
+### GPS 自动巡航 / 自动调整船头方向去哪里找
+
+这部分不要只看 `GPS/`。`GPS/` 只负责定位数据，真正“去点、算方向、调船头、写电机”分散在下面几层：
+
+```text
+无线协议触发
+  Code_boweny/Device/WIRELESS/ship_protocol.c
+    0x13/0x14/0x15 -> AutoDrive_Set...
+    ShipProtocol_RunScheduler() -> AutoDrive_Poll()
+
+GPS 点位和目标航向计算
+  Code_boweny/Device/AutoDrive/autodrive.c
+    AutoDrive_Poll()
+    AutoDrive_UpdateTargetHeading()
+    AutoDrive_ApplyAlignHeadingHold()
+    AutoDrive_ApplyHeadingHold()
+
+船头自动修正 / yaw-hold / 差速输出
+  Code_boweny/Device/Control/ShipControl.c
+    ShipControl_RequestGpsAlign()
+    ShipControl_RequestGpsNav()
+    ShipControl_ApplyYawHoldTargetEx()
+    ShipControl_YawControlToSpeed()
+    Motor_SetBothSpeed()
+
+当前船头角来源
+  User/MainLoop.c
+    IMU_AhrsPoll()
+    MainLoop_IsHeadingReady()
+    MainLoop_GetHeadingDeg100()
+
+航向融合算法
+  Code_boweny/Function/AHRS/HeadingEstimator.c
+    Heading_Update()
+    Heading_GetDeg100()
+
+GPS 原始定位来源
+  Code_boweny/Device/GPS/GPS.c
+    GPS_Poll()
+    lat_deg1e7 / lon_deg1e7 / update_sequence
+```
+
+按问题查文件：
+
+- “遥控器发去钓点/返航命令后怎么进自动巡航”：看 `ship_protocol.c` 的 `0x13`、`0x14`、`0x15` 分支和 `ShipProtocol_RunScheduler()`。
+- “当前 GPS 点到目标点，目标航向怎么算”：看 `autodrive.c` 的 `AutoDrive_UpdateTargetHeading()`。
+- “为什么先原地转船头再往前跑”：看 `autodrive.c` 的 `AUTO_DRIVE_GET_DIRECTION`、`AutoDrive_ApplyAlignHeadingHold()` 和 `ShipControl_RequestGpsAlign()`。
+- “巡航中怎么持续调整船头方向”：看 `autodrive.c` 的 `AutoDrive_ApplyHeadingHold()`，它会调用 `ShipControl_RequestGpsNav(target_heading, base_speed)`。
+- “PID 怎么把航向误差变成左右电机差速”：看 `ShipControl.c` 的 `ShipControl_ApplyYawHoldTargetEx()`、`ShipControl_ApplyYawHoldDamping()`、`ShipControl_YawControlToSpeed()`。
+- “最终左右电机命令在哪里写”：看 `ShipControl.c` 里调用 `Motor_SetBothSpeed()` 的位置，再追到 `Code_boweny/Device/Motor/Motor.c`。
+- “当前船头角从哪里来”：看 `User/MainLoop.c` 的 `IMU_AhrsPoll()`、`MainLoop_GetHeadingDeg100()`，再追 `HeadingEstimator.c`。
+- “GPS 坐标和更新序号哪里来”：看 `GPS.c` 的 `GPS_Poll()`、`lat_deg1e7`、`lon_deg1e7`、`update_sequence`。
+
+---
+
 ## 1. 交付时先看这里
 
 这个工程对外交付时，优先给对方这几个入口：
@@ -10,10 +91,10 @@
   [tools/ship_log_viewer/README.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/README.md)
 - 上位机页面：
   [tools/ship_log_viewer/ship_log_viewer.html](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/ship_log_viewer.html)
-- 根目录一键启动：
-  [start_ship_log_viewer.bat](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/start_ship_log_viewer.bat)
+- Windows 一键启动：
+  [tools/ship_log_viewer/start_ship_log_viewer.bat](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/start_ship_log_viewer.bat)
 - PowerShell 启动：
-  [start_ship_log_viewer.ps1](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/start_ship_log_viewer.ps1)
+  [tools/ship_log_viewer/start_ship_log_viewer.ps1](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/start_ship_log_viewer.ps1)
 
 工程文档主入口：
 
@@ -34,7 +115,7 @@
 
 如果只是现场打开：
 
-1. 双击根目录 [start_ship_log_viewer.bat](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/start_ship_log_viewer.bat)
+1. 双击 [tools/ship_log_viewer/start_ship_log_viewer.bat](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/tools/ship_log_viewer/start_ship_log_viewer.bat)
 2. 选择串口
 3. 点连接
 4. 先看“配对状态”和“遥控链路”
@@ -108,8 +189,8 @@
 关键行为：
 
 - `0x13/0x14/0x15` 只负责写入返航点、钓点或自动返航配置，不直接下发固定航向角。
-- 当前只维护 1 个 RAM 钓点 `g_fish_position` 和 1 个运行态返航点 `g_return_position`；新的 `0x14` 钓点会覆盖旧钓点，当前没有多钓点数组、编号或顺序巡航。
-- 钓点只在 RAM 中，断电丢失；自动返航配置通过 `0x15` 保存到 STC flash/EEPROM 区，普通断电重启不会清空，但重新下载程序若擦全片可能会清掉。
+- 当前维护 5 个 RAM 钓点表和 1 个当前前往目标 `g_fish_position`；新的有效 `0x14` 会按顺序保存/匹配 1..5，同时也作为本次当前目标尝试前往。
+- 钓点只在 RAM 中，断电丢失；5 个槽位满后新坐标不再入库，但仍可作为临时目标尝试前往。自动返航配置通过 `0x15` 保存到 RAM 配置接口，当前不会写 flash。
 - 进入返航/钓点巡航后，`AutoDrive_Poll()` 在 GPS `update_sequence` 变化时用“当前 GPS 点 -> 目标点”重新计算 `target_heading_cd`，并持续提交给 `ShipControl_RequestGpsNav()`。
 - GPS 没有新点的 10ms 控制周期内，yaw-hold PID 会继续使用上一次 GPS 计算出的目标航向；一旦 GPS 更新，目标航向立即重算。
 - 当前船头角来自 `MainLoop_GetHeadingDeg100()` 的融合绝对航向，GPS 定点巡航禁止退回定时左/右转逻辑。
@@ -228,28 +309,63 @@
 
 ## 6.1 主要目录
 
-- `User/`
-  主循环、FeatureSwitch、项目级入口配置
-- `Code_boweny/Device/`
-  外设和业务设备层
-- `Code_boweny/Function/`
-  AHRS、PID、Filter、Log 等功能模块
-- `Driver/`
-  STC32G 底层驱动
-- `App/`
-  板级外设应用封装
-- `RVMDK/`
-  Keil 工程、编译输出、map/list
-- `tools/ship_log_viewer/`
-  串口日志上位机
-- `doc/project_doc/`
-  项目总览、开发日志
-- `doc/build_doc/`
-  模块级设计/构建说明
-- `ship_Gps_V2.1_20260406-115200/`
-  旧版参考工程和协议对照资料
+```text
+Black_Pearl_v1.1/
+├─ User/                         主程序入口、主循环、任务调度、项目级配置
+├─ Code_boweny/
+│  ├─ Device/                    业务设备层：无线、GPS、电机、IMU、磁力计、控制、自动驾驶
+│  └─ Function/                  通用功能层：AHRS、PID、Filter、Log
+├─ Driver/                       STC32G 底层驱动、ISR、库文件
+├─ App/                          板级外设应用封装和示例
+├─ RVMDK/                        Keil 工程文件和编译输出
+├─ tools/                        PC 调试工具和辅助脚本
+├─ doc/                          项目文档、模块文档、调试记录
+├─ .vscode/                      VS Code / Keil Assistant 配置
+├─ README.md                     中文主说明
+└─ README.zh-CN.md               中文 README 跳转说明
+```
 
-## 6.2 当前最常改的文件
+## 6.2 二级目录速查
+
+### `User/`
+
+- `Main.c`：程序入口
+- `MainLoop.c/.h`：主循环和运行态数据
+- `Task.c/.h`：任务调度
+- `FeatureSwitch.h`：功能总开关
+- `Config.h`：项目配置
+- `System_init.c/.h`：系统初始化
+
+### `Code_boweny/Device/`
+
+- `AutoDrive/`：自动驾驶、返航、钓点和保存配置
+- `Control/`：船控仲裁、手动控制、yaw 自稳、定速巡航、GPS 航向保持
+- `GPS/`：GPS 数据解析和定位状态
+- `Motor/`：左右电机输出
+- `QMC6309/`：磁力计驱动和移植层
+- `QMI8658/`：IMU 驱动和移植层
+- `WIRELESS/`：无线芯片、配对、遥控协议、船控协议
+
+### `Code_boweny/Function/`
+
+- `AHRS/`：姿态解算、航向估计
+- `Filter/`：滤波工具
+- `Log/`：日志输出
+- `PID/`：PID 控制器
+
+### `doc/`
+
+- `project_doc/`：工程总览、开发日志、控制策略、AHRS 报告
+- `build_doc/`：GPS、无线、IMU、磁力计、日志等模块说明
+- `return_home_logic/`：返航逻辑说明
+- `tools/`：文档侧工具说明和旧版日志查看器
+
+### `tools/`
+
+- `ship_log_viewer/`：串口日志上位机，现场联调优先看这里
+- `ship_packet_builder/`：船控协议包生成脚本
+
+## 6.3 当前最常改的文件
 
 - [User/FeatureSwitch.h](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/User/FeatureSwitch.h)
 - [User/MainLoop.c](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/User/MainLoop.c)

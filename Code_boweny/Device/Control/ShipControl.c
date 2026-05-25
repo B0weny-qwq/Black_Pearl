@@ -1,6 +1,11 @@
 /**
  * @file    ShipControl.c
- * @brief   Unified manual, cruise, GPS-nav yaw-hold motor control.
+ * @brief   手动、定速巡航和 GPS 导航共用的船体运动控制实现。
+ *
+ * @details
+ * ShipControl 是工程中唯一直接提交左右电机目标的上层模块。它把摇杆输入、
+ * 巡航请求和 GPS 目标航向统一转换成左右电机速度，并复用同一套 yaw-hold
+ * PID、差速限幅、陀螺阻尼和输出斜率限制。
  */
 
 #include "ShipControl.h"
@@ -131,7 +136,7 @@
 #define SHIP_GPS_ALIGN_KD_Q10            0
 #endif
 #ifndef SHIP_GPS_ALIGN_DIFF_PERCENT
-#define SHIP_GPS_ALIGN_DIFF_PERCENT      18U
+#define SHIP_GPS_ALIGN_DIFF_PERCENT      30U
 #endif
 
 #define SHIP_CONTROL_REASON_MANUAL_OPEN  20U
@@ -148,6 +153,9 @@
 #define SHIP_CTRL_GATE_HEADING_LOST      5U
 #define SHIP_CTRL_GATE_NO_INPUT          6U
 
+/**
+ * @brief 控制层内部运动方向，用于日志和模式判定。
+ */
 typedef enum
 {
     SHIP_CONTROL_MOTION_STOP = 0,
@@ -157,6 +165,13 @@ typedef enum
     SHIP_CONTROL_MOTION_RIGHT
 } ShipControl_Motion_t;
 
+/**
+ * @brief 控制层运行时状态。
+ *
+ * @details
+ * 保存最新遥控输入、滤波状态、当前模式、闭环航向目标、PID 输出、
+ * 左右电机目标以及日志限频字段。该结构只在本文件内部使用。
+ */
 typedef struct
 {
     u8 initialized;
@@ -205,47 +220,77 @@ static ShipControl_Runtime_t xdata g_ship_ctrl;
 static PID_Controller_t xdata g_ship_ctrl_yaw_pid;
 static PID_Controller_t xdata g_ship_ctrl_align_pid;
 
+/** @brief 确保电机 PWM 层已初始化。 */
 static void ShipControl_EnsureMotorInit(void);
+/** @brief 将摇杆滤波状态复位到中心值。 */
 static void ShipControl_ResetAxisFilter(void);
+/** @brief 对摇杆回中停机做多帧确认，避免瞬时抖动直接停机。 */
 static u8 ShipControl_ConfirmCenterStop(void);
+/** @brief 计算摇杆原始值相对中心值 100 的绝对偏差。 */
 static u8 ShipControl_AbsAxisDiff(u8 value);
+/** @brief 计算带符号速度绝对值。 */
 static int16 ShipControl_AbsSpeed(int16 speed);
+/** @brief 将电机命令限制在统一输出范围内。 */
 static int16 ShipControl_LimitSpeed(int16 speed);
+/** @brief 将角度归一化为 [-18000, 18000) 的带符号 0.01 度。 */
 static int16 ShipControl_WrapSignedCd(int32 angle_cd);
+/** @brief 将角度归一化为 [0, 36000) 的无符号 0.01 度。 */
 static u16 ShipControl_WrapUnsignedCd(int32 angle_cd);
+/** @brief 将航向误差映射为 PID 使用的归一化控制量。 */
 static int16 ShipControl_YawErrorToControl(int16 yaw_error_cd);
+/** @brief 叠加陀螺 Z 轴阻尼，抑制转向过冲。 */
 static int16 ShipControl_ApplyYawHoldDamping(int16 yaw_control);
+/** @brief 对航向差速输出做限斜率处理。 */
 static int16 ShipControl_ApplyYawOutputSlew(int16 yaw_output);
+/** @brief 限制 GPS 原地对准阶段的最大差速输出。 */
 static int16 ShipControl_LimitGpsAlignYawOutput(int16 yaw_output);
-static int16 ShipControl_ApplyCruiseBaseRamp(int16 base_speed, int16 yaw_error_cd);
+/** @brief 定速巡航进入阶段基础速度软启动。 */
+static int16 ShipControl_ApplyCruiseBaseRamp(int16 base_speed);
+/** @brief 偏航误差较大时降低基础速度，优先完成转向修正。 */
 static int16 ShipControl_ApplyYawHoldBaseDerate(int16 base_speed, int16 yaw_error_cd);
+/** @brief 将归一化 yaw 控制量转换为左右电机差速量。 */
 static int16 ShipControl_YawControlToSpeed(int16 yaw_control, int16 base_speed);
+/** @brief 手动自稳进入前的连续稳定帧门控。 */
 static u8 ShipControl_YawHoldGateStable(void);
+/** @brief 对摇杆原始值做一阶 IIR 滤波。 */
 static int16 ShipControl_FilterAxis(u8 raw, int32 *state_q8);
+/** @brief 将摇杆偏移按死区和二次曲线转换为电机命令。 */
 static int16 ShipControl_ApplyAxisCurve(int16 value,
                                         int16 deadband,
                                         int16 min_command,
                                         int16 max_command);
+/** @brief 将前后摇杆滤波值转换为带符号油门速度。 */
 static int16 ShipControl_ThrottleToSignedSpeed(int16 value);
+/** @brief 将左右摇杆滤波值转换为带符号转向速度。 */
 static int16 ShipControl_SteeringToSignedSpeed(int16 value);
+/** @brief 更新供上层判断巡航/自动驾驶条件的手动前进油门幅度。 */
 static void ShipControl_UpdateManualAcceleratorRaw(u8 left_right, u8 front_back);
+/** @brief 写入左右电机目标并记录运行时输出。 */
 static void ShipControl_SetMotorTargets(int16 left_speed, int16 right_speed);
+/** @brief 应用手动开环输出。 */
 static void ShipControl_ApplyOpenLoop(ShipControl_Motion_t motion,
                                       int16 left_speed,
                                       int16 right_speed,
                                       int16 throttle_speed,
                                       int16 steering_speed);
+/** @brief 使用普通 yaw-hold PID 应用目标航向。 */
 static u8 ShipControl_ApplyYawHoldTarget(u16 target_heading_cd,
                                          int16 base_speed,
                                          u8 mode);
+/** @brief 应用目标航向，可选择 GPS 对准专用 PID。 */
 static u8 ShipControl_ApplyYawHoldTargetEx(u16 target_heading_cd,
                                            int16 base_speed,
                                            u8 mode,
                                            u8 use_align_pid);
+/** @brief 根据最新遥控输入刷新手动开环或手动航向自稳输出。 */
 static void ShipControl_ApplyManualControl(void);
+/** @brief 输出航向保持状态日志。 */
 static void ShipControl_LogSample(u32 now_ms);
+/** @brief 输出电机目标日志，支持强制打印。 */
 static void ShipControl_LogMotorOutput(u8 force);
+/** @brief 输出控制模式变化事件日志。 */
 static void ShipControl_LogModeEvent(u8 old_mode, u8 new_mode, u8 reason);
+/** @brief 输出手动航向自稳门控状态变化日志。 */
 static void ShipControl_LogManualGate(u8 state,
                                       int16 throttle_speed,
                                       int16 steering_speed,
@@ -253,8 +298,16 @@ static void ShipControl_LogManualGate(u8 state,
                                       int16 right_speed,
                                       int16 diff,
                                       int16 gate);
+/** @brief 设置当前控制模式并在变化时记录事件。 */
 static void ShipControl_SetMode(u8 mode, u8 reason);
 
+/**
+ * @brief 初始化统一控制层。
+ *
+ * @details
+ * 复位运行时状态、摇杆滤波器、日志状态和两套 PID。普通 yaw PID 用于
+ * 手动自稳/巡航/GPS 前进导航；align PID 用于 GPS 原地对准。
+ */
 void ShipControl_Init(void)
 {
     g_ship_ctrl.initialized = 1U;
@@ -315,8 +368,15 @@ void ShipControl_Init(void)
              ((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L));
 }
 
+/**
+ * @brief 周期刷新控制输出和日志。
+ *
+ * @param now_ms 当前系统 tick，单位 ms。
+ */
 void ShipControl_Tick(u32 now_ms)
 {
+    int16 cruise_request_speed;
+
     if (g_ship_ctrl.initialized == 0U) {
         ShipControl_Init();
     }
@@ -337,14 +397,26 @@ void ShipControl_Tick(u32 now_ms)
     if ((g_ship_ctrl.mode == SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD) &&
         ((now_ms - g_ship_ctrl.auto_last_apply_ms) >= SHIP_MANUAL_CONTROL_PERIOD_MS)) {
         g_ship_ctrl.auto_last_apply_ms = now_ms;
+        cruise_request_speed = g_ship_ctrl.throttle_speed;
+        if (cruise_request_speed == 0) {
+            cruise_request_speed = g_ship_ctrl.base_speed;
+        }
         (void)ShipControl_ApplyYawHoldTarget(g_ship_ctrl.yaw_hold_target_cd,
-                                             g_ship_ctrl.base_speed,
+                                             cruise_request_speed,
                                              SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD);
     }
 
     ShipControl_LogSample(now_ms);
 }
 
+/**
+ * @brief 接收并缓存遥控输入。
+ *
+ * @param lr     左右摇杆原始值。
+ * @param ud     前后摇杆原始值。
+ * @param key    按键位。
+ * @param now_ms 接收时间，单位 ms。
+ */
 void ShipControl_UpdateManualInput(u8 lr, u8 ud, u8 key, u32 now_ms)
 {
     if (g_ship_ctrl.initialized == 0U) {
@@ -366,6 +438,12 @@ void ShipControl_UpdateManualInput(u8 lr, u8 ud, u8 key, u32 now_ms)
     ShipControl_ApplyManualControl();
 }
 
+/**
+ * @brief 请求定速巡航航向保持。
+ *
+ * @param heading_cd 目标航向，单位 0.01 度。
+ * @param base_speed 基础速度，0 时使用默认巡航速度。
+ */
 void ShipControl_RequestCruise(u16 heading_cd, int16 base_speed)
 {
     if (g_ship_ctrl.initialized == 0U) {
@@ -394,6 +472,12 @@ void ShipControl_RequestCruise(u16 heading_cd, int16 base_speed)
                                          SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD);
 }
 
+/**
+ * @brief 请求 GPS 前进导航航向保持。
+ *
+ * @param target_heading_cd 目标航向，单位 0.01 度。
+ * @param base_speed        基础速度。
+ */
 void ShipControl_RequestGpsNav(u16 target_heading_cd, int16 base_speed)
 {
     if (g_ship_ctrl.initialized == 0U) {
@@ -416,6 +500,11 @@ void ShipControl_RequestGpsNav(u16 target_heading_cd, int16 base_speed)
                                          SHIP_CONTROL_MODE_GPS_NAV_HEADING_HOLD);
 }
 
+/**
+ * @brief 请求 GPS 原地对准目标航向。
+ *
+ * @param target_heading_cd 目标航向，单位 0.01 度。
+ */
 void ShipControl_RequestGpsAlign(u16 target_heading_cd)
 {
     if (g_ship_ctrl.initialized == 0U) {
@@ -439,6 +528,11 @@ void ShipControl_RequestGpsAlign(u16 target_heading_cd)
                                            1U);
 }
 
+/**
+ * @brief 停止控制层输出。
+ *
+ * @param reason 停止原因，见 @ref ShipControl_StopReason_t。
+ */
 void ShipControl_Stop(u8 reason)
 {
     u8 was_running;
@@ -477,6 +571,9 @@ void ShipControl_Stop(u8 reason)
     }
 }
 
+/**
+ * @brief 停止 GPS 导航模式输出。
+ */
 void ShipControl_StopGpsNav(void)
 {
     if (g_ship_ctrl.mode == SHIP_CONTROL_MODE_GPS_NAV_HEADING_HOLD) {
@@ -484,6 +581,9 @@ void ShipControl_StopGpsNav(void)
     }
 }
 
+/**
+ * @brief 复位航向保持控制器状态。
+ */
 void ShipControl_ResetYawHoldController(void)
 {
     g_ship_ctrl.yaw_hold_active = 0U;
@@ -499,6 +599,11 @@ void ShipControl_ResetYawHoldController(void)
     PID_Reset(&g_ship_ctrl_align_pid);
 }
 
+/**
+ * @brief 判断是否处于自动类控制模式。
+ *
+ * @return 1 表示定速巡航或 GPS 导航中，否则返回 0。
+ */
 u8 ShipControl_IsAutoMode(void)
 {
     if ((g_ship_ctrl.mode == SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD) ||
@@ -508,11 +613,21 @@ u8 ShipControl_IsAutoMode(void)
     return 0U;
 }
 
+/**
+ * @brief 获取当前控制模式。
+ *
+ * @return 当前模式值，见 @ref ShipControl_Mode_t。
+ */
 u8 ShipControl_GetMode(void)
 {
     return g_ship_ctrl.mode;
 }
 
+/**
+ * @brief 获取当前有效前进油门幅度。
+ *
+ * @return 前进油门幅度，0 表示无有效前进油门。
+ */
 u8 ShipControl_GetManualAccelerator(void)
 {
     return g_ship_ctrl.manual_accelerator;
@@ -674,6 +789,17 @@ static u16 ShipControl_WrapUnsignedCd(int32 angle_cd)
     return (u16)angle_cd;
 }
 
+/**
+ * @brief 将航向误差转换为归一化 PID 输入。
+ *
+ * @param yaw_error_cd 航向误差，单位 0.01 度，正负表示左右偏差方向。
+ *
+ * @return 归一化控制量，范围约为 [-SHIP_YAW_HOLD_OUTPUT_LIMIT,
+ *         SHIP_YAW_HOLD_OUTPUT_LIMIT]。
+ *
+ * @details
+ * 小于死区的误差直接视为 0；超过满量程误差后饱和，中间区间线性映射。
+ */
 static int16 ShipControl_YawErrorToControl(int16 yaw_error_cd)
 {
     int16 sign;
@@ -710,6 +836,13 @@ static int16 ShipControl_YawErrorToControl(int16 yaw_error_cd)
     return (int16)(sign * (int16)control);
 }
 
+/**
+ * @brief 对 PID 控制量叠加角速度阻尼。
+ *
+ * @param yaw_control PID 原始输出。
+ *
+ * @return 限幅后的阻尼输出。
+ */
 static int16 ShipControl_ApplyYawHoldDamping(int16 yaw_control)
 {
     int32 damp;
@@ -767,7 +900,14 @@ static int16 ShipControl_LimitGpsAlignYawOutput(int16 yaw_output)
     return yaw_output;
 }
 
-static int16 ShipControl_ApplyCruiseBaseRamp(int16 base_speed, int16 yaw_error_cd)
+/**
+ * @brief 定速巡航基础速度软启动。
+ *
+ * @param base_speed 请求的目标基础速度。
+ *
+ * @return 当前时刻应使用的基础速度。
+ */
+static int16 ShipControl_ApplyCruiseBaseRamp(int16 base_speed)
 {
     u32 now_ms;
     u32 elapsed_ms;
@@ -775,8 +915,6 @@ static int16 ShipControl_ApplyCruiseBaseRamp(int16 base_speed, int16 yaw_error_c
     int32 abs_base;
     int32 min_base;
     int32 ramped_base;
-
-    (void)yaw_error_cd;
 
     if ((base_speed == 0) || (g_ship_ctrl.cruise_start_ms == 0UL)) {
         return base_speed;
@@ -812,6 +950,18 @@ static int16 ShipControl_ApplyCruiseBaseRamp(int16 base_speed, int16 yaw_error_c
     return (int16)(sign * (int16)ramped_base);
 }
 
+/**
+ * @brief 根据偏航误差降低基础速度。
+ *
+ * @param base_speed    原始基础速度。
+ * @param yaw_error_cd  当前航向误差，单位 0.01 度。
+ *
+ * @return 降额后的基础速度。
+ *
+ * @details
+ * 误差较小时保持原速度；误差增大后逐步降到最小基础速度，避免船体
+ * 一边高速前进一边大角度修正。
+ */
 static int16 ShipControl_ApplyYawHoldBaseDerate(int16 base_speed, int16 yaw_error_cd)
 {
 #if SHIP_YAW_HOLD_DERATE_ENABLE
@@ -864,6 +1014,14 @@ static int16 ShipControl_ApplyYawHoldBaseDerate(int16 base_speed, int16 yaw_erro
 #endif
 }
 
+/**
+ * @brief 将 yaw 控制量换算为左右电机差速。
+ *
+ * @param yaw_control 归一化 yaw 控制量。
+ * @param base_speed  当前基础速度，用于按速度比例限制最大差速。
+ *
+ * @return 电机差速量，正负方向由 @ref SHIP_YAW_HOLD_OUTPUT_SIGN 决定。
+ */
 static int16 ShipControl_YawControlToSpeed(int16 yaw_control, int16 base_speed)
 {
     int32 scale;
@@ -918,6 +1076,19 @@ static int16 ShipControl_FilterAxis(u8 raw, int32 *state_q8)
     return (int16)((*state_q8 + 128) >> 8);
 }
 
+/**
+ * @brief 摇杆输入曲线。
+ *
+ * @param value       摇杆值，中心为 100。
+ * @param deadband    中心死区。
+ * @param min_command 离开死区后的最小命令。
+ * @param max_command 最大命令。
+ *
+ * @return 带符号电机命令。
+ *
+ * @details
+ * 死区外使用二次曲线，低速段更细腻，高速段仍可到达最大输出。
+ */
 static int16 ShipControl_ApplyAxisCurve(int16 value,
                                         int16 deadband,
                                         int16 min_command,
@@ -982,6 +1153,16 @@ static int16 ShipControl_SteeringToSignedSpeed(int16 value)
                                       SHIP_STEERING_MAX_COMMAND);
 }
 
+/**
+ * @brief 更新“有效前进油门”快照。
+ *
+ * @param left_right 左右摇杆原始值。
+ * @param front_back 前后摇杆原始值。
+ *
+ * @details
+ * 该值主要供无线协议层判断 E 键定速巡航等条件，只有前进方向占优时
+ * 才记录非零幅度。
+ */
 static void ShipControl_UpdateManualAcceleratorRaw(u8 left_right, u8 front_back)
 {
     u8 abs_left_right;
@@ -1039,6 +1220,20 @@ static u8 ShipControl_ApplyYawHoldTarget(u16 target_heading_cd,
                                             0U);
 }
 
+/**
+ * @brief 航向保持核心输出链路。
+ *
+ * @param target_heading_cd 目标航向，单位 0.01 度。
+ * @param base_speed        基础速度。
+ * @param mode              本次输出要进入的控制模式。
+ * @param use_align_pid     非 0 时使用 GPS 原地对准专用 PID。
+ *
+ * @return 1 表示成功输出电机目标，0 表示航向不可用或功能关闭。
+ *
+ * @details
+ * 本函数完成航向误差归一化、PID 更新、陀螺阻尼、基础速度降额/软启动、
+ * 差速换算、限斜率和最终左右电机目标写入。
+ */
 static u8 ShipControl_ApplyYawHoldTargetEx(u16 target_heading_cd,
                                            int16 base_speed,
                                            u8 mode,
@@ -1098,8 +1293,7 @@ static u8 ShipControl_ApplyYawHoldTargetEx(u16 target_heading_cd,
     }
 
     if (mode == SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD) {
-        yaw_base_speed = ShipControl_ApplyCruiseBaseRamp(base_speed,
-                                                         g_ship_ctrl.yaw_hold_error_cd);
+        yaw_base_speed = ShipControl_ApplyCruiseBaseRamp(base_speed);
     } else {
         yaw_base_speed = ShipControl_ApplyYawHoldBaseDerate(base_speed,
                                                             g_ship_ctrl.yaw_hold_error_cd);
@@ -1148,6 +1342,13 @@ static u8 ShipControl_ApplyYawHoldTargetEx(u16 target_heading_cd,
 #endif
 }
 
+/**
+ * @brief 手动控制仲裁入口。
+ *
+ * @details
+ * 先将摇杆转换为开环左右电机目标，再根据差速比例、前进油门和航向
+ * 可用性决定是否进入手动航向自稳；不满足门控条件时退回手动开环。
+ */
 static void ShipControl_ApplyManualControl(void)
 {
     int16 throttle_speed;

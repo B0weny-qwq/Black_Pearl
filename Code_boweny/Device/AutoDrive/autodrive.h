@@ -44,12 +44,16 @@ typedef struct
 #define AUTODRIVE_FISH_POINT_COUNT      5U
 
 #define AUTODRIVE_FISH_CMD_BUSY            0U
-#define AUTODRIVE_FISH_CMD_STORED          1U
-#define AUTODRIVE_FISH_CMD_DUP_WAIT        2U
-#define AUTODRIVE_FISH_CMD_REJECT_UNKNOWN  3U
 #define AUTODRIVE_FISH_CMD_REJECT_DISTANCE 4U
 #define AUTODRIVE_FISH_CMD_STARTED         5U
 #define AUTODRIVE_FISH_CMD_INVALID         6U
+
+#define AUTODRIVE_FISH_SAVE_NONE           0U
+#define AUTODRIVE_FISH_SAVE_STORED         1U
+#define AUTODRIVE_FISH_SAVE_EXISTS         2U
+#define AUTODRIVE_FISH_SAVE_FULL_TEMP      3U
+#define AUTODRIVE_FISH_SAVE_BUSY           4U
+#define AUTODRIVE_FISH_SAVE_INVALID        5U
 
 typedef struct
 {
@@ -119,6 +123,7 @@ u8 AutoDrive_GetReturnPositionRaw(AutoDrive_PointRaw_t *point);
 u8 AutoDrive_GetFishPositionRaw(AutoDrive_PointRaw_t *point);
 u8 AutoDrive_GetFishPositionByIndexRaw(u8 index, AutoDrive_PointRaw_t *point);
 u8 AutoDrive_GetLastFishCommandIndex(void);
+u8 AutoDrive_GetLastFishSaveResult(void);
 void AutoDrive_GetDebugSnapshot(AutoDrive_DebugSnapshot_t *snapshot);
 
 u16 AutoDrive_GetDistanceNowToDestination(const u8 *nowpositionData,
