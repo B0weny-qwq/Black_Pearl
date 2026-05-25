@@ -18,124 +18,182 @@
 
 #define SHIP_CONTROL_TAG                 "CTRL"
 #define SHIP_CONTROL_DATA_TAG            "DATA"
+
+/* ==================== 遥控输入基础参数 ==================== */
+/* 摇杆中心值，协议中左右/前后通道都以 100 为中心。 */
 #define SHIP_AXIS_CENTER                 100U
+/* 左右摇杆回中死区。 */
 #define SHIP_LR_DEAD_LOW                 90U
 #define SHIP_LR_DEAD_HIGH                110U
+/* 前后油门摇杆回中死区。 */
 #define SHIP_FB_DEAD_LOW                 90U
 #define SHIP_FB_DEAD_HIGH                110U
+/* 左右转向比较偏置，避免摇杆轻微抖动导致方向误判。 */
 #define SHIP_TURN_COMPARE_BIAS           5U
+/* 中位停车确认帧数，连续确认后才真正停车。 */
 #define SHIP_CENTER_STOP_CONFIRM_FRAMES  2U
+/* 手动 yaw 自稳只在前进方向启用。 */
 #define SHIP_YAW_HOLD_FORWARD_ONLY       1U
 
+/* ==================== 遥控输入滤波与曲线 ==================== */
 #ifndef SHIP_AXIS_FILTER_SHIFT
+/* 摇杆一阶滤波强度，越大越平滑但响应越慢。 */
 #define SHIP_AXIS_FILTER_SHIFT           1U
 #endif
 #ifndef SHIP_RC_AXIS_MAX_DELTA
+/* 单次摇杆输入允许的最大变化量，用于压制异常跳变。 */
 #define SHIP_RC_AXIS_MAX_DELTA           100
 #endif
 #ifndef SHIP_THROTTLE_DEADBAND
+/* 油门曲线死区，摇杆偏离中心小于该值时视为 0。 */
 #define SHIP_THROTTLE_DEADBAND           4
 #endif
 #ifndef SHIP_STEERING_DEADBAND
+/* 转向曲线死区，减少中位附近左右电机抖动。 */
 #define SHIP_STEERING_DEADBAND           8
 #endif
+
+/* ==================== 电机输出限幅 ==================== */
 #ifndef SHIP_THROTTLE_MIN_COMMAND
+/* 油门离开死区后的最小有效电机命令。 */
 #define SHIP_THROTTLE_MIN_COMMAND        180
 #endif
 #ifndef SHIP_THROTTLE_MAX_COMMAND
+/* 油门最大电机命令。 */
 #define SHIP_THROTTLE_MAX_COMMAND        850
 #endif
 #ifndef SHIP_MOTOR_OUTPUT_MAX_COMMAND
+/* 所有上层控制最终写电机前的总限幅。 */
 #define SHIP_MOTOR_OUTPUT_MAX_COMMAND    SHIP_THROTTLE_MAX_COMMAND
 #endif
 #ifndef SHIP_STEERING_MAX_COMMAND
+/* 手动原地/差速转向的最大命令。 */
 #define SHIP_STEERING_MAX_COMMAND        700
 #endif
+
+/* ==================== 定速巡航软启动 ==================== */
 #ifndef SHIP_CRUISE_BASE_SPEED
+/* 定速巡航默认基础速度，未显式传入速度时使用。 */
 #define SHIP_CRUISE_BASE_SPEED           SHIP_THROTTLE_MAX_COMMAND
 #endif
 #ifndef SHIP_CRUISE_RAMP_MS
+/* 定速巡航从低速拉到目标速度的软启动时间。 */
 #define SHIP_CRUISE_RAMP_MS              1800UL
 #endif
 #ifndef SHIP_CRUISE_RAMP_MIN_BASE
+/* 定速巡航软启动起始基础速度。 */
 #define SHIP_CRUISE_RAMP_MIN_BASE        520
 #endif
+
+/* ==================== 控制周期与日志周期 ==================== */
 #ifndef SHIP_MANUAL_CONTROL_PERIOD_MS
+/* 手动控制和自动控制输出刷新周期。 */
 #define SHIP_MANUAL_CONTROL_PERIOD_MS    10UL
 #endif
 #ifndef SHIP_YAW_HOLD_LOG_PERIOD_MS
+/* yaw 自稳运行日志输出周期。 */
 #define SHIP_YAW_HOLD_LOG_PERIOD_MS      1000UL
 #endif
 #ifndef SHIP_MOT_LOG_PERIOD_MS
+/* 电机目标日志输出周期。 */
 #define SHIP_MOT_LOG_PERIOD_MS           200UL
 #endif
 #ifndef SHIP_MOT_LOG_ENABLE
+/* 电机日志总开关。 */
 #define SHIP_MOT_LOG_ENABLE              1U
 #endif
 #ifndef SHIP_MANUAL_GATE_LOG_PERIOD_MS
+/* 手动 yaw 自稳门控日志输出周期。 */
 #define SHIP_MANUAL_GATE_LOG_PERIOD_MS   300UL
 #endif
+
+/* ==================== yaw 自稳公共参数 ==================== */
 #ifndef SHIP_YAW_HOLD_PERIOD_MS
+/* yaw PID 计算周期；电机输出仍按控制周期刷新。 */
 #define SHIP_YAW_HOLD_PERIOD_MS          50UL
 #endif
 #ifndef SHIP_YAW_HOLD_FULL_ERROR_CD
+/* 航向误差达到该值时映射为满控制量，单位 0.01 度。 */
 #define SHIP_YAW_HOLD_FULL_ERROR_CD      1000
 #endif
 #ifndef SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE
+/* yaw 修正差速上限，千分比；400 表示基础速度的 40%。 */
 #define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 400
 #endif
 #ifndef SHIP_MANUAL_YAW_HOLD_DIFF_PERCENT
+/* 手动 yaw 自稳进入条件：左右电机差值占当前输入上限的百分比。 */
 #define SHIP_MANUAL_YAW_HOLD_DIFF_PERCENT 20U
 #endif
 #ifndef SHIP_YAW_HOLD_OUTPUT_SIGN
+/* yaw 输出方向，现场若发现越修越偏可改为 -1。 */
 #define SHIP_YAW_HOLD_OUTPUT_SIGN        1
 #endif
 #ifndef SHIP_YAW_HOLD_DERATE_ENABLE
+/* 大偏航时是否压低基础速度，便于更快修正方向。 */
 #define SHIP_YAW_HOLD_DERATE_ENABLE      1
 #endif
 #ifndef SHIP_YAW_HOLD_DERATE_START_CD
+/* 开始降速的偏航误差，单位 0.01 度。 */
 #define SHIP_YAW_HOLD_DERATE_START_CD    300
 #endif
 #ifndef SHIP_YAW_HOLD_DERATE_FULL_CD
+/* 达到最大降速的偏航误差，单位 0.01 度。 */
 #define SHIP_YAW_HOLD_DERATE_FULL_CD     1000
 #endif
 #ifndef SHIP_YAW_HOLD_DERATE_MIN_BASE
+/* 大偏航满降速时允许保留的最低基础速度。 */
 #define SHIP_YAW_HOLD_DERATE_MIN_BASE    500
 #endif
 #ifndef SHIP_YAW_HOLD_GYRO_DAMP_Q10
+/* 陀螺 Z 轴阻尼系数，Q10；用于抑制转向过冲。 */
 #define SHIP_YAW_HOLD_GYRO_DAMP_Q10      3072
 #endif
 #ifndef SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP
+/* 最终差速输出每个控制步允许变化的最大值。 */
 #define SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP 30
 #endif
 #ifndef SHIP_YAW_HOLD_STEER_STABLE_FRAMES
+/* 手动进入 yaw 自稳前，转向回中需要连续稳定的帧数。 */
 #define SHIP_YAW_HOLD_STEER_STABLE_FRAMES 2U
 #endif
 #ifndef SHIP_YAW_HOLD_OUTPUT_LIMIT
+/* PID 内部归一化输出限幅，不是电机 PWM，也不是最终 speed。 */
 #define SHIP_YAW_HOLD_OUTPUT_LIMIT       1000
 #endif
 #ifndef SHIP_YAW_HOLD_DEADBAND_CD
+/* 航向误差死区，单位 0.01 度；50 表示 +/-0.50 度。 */
 #define SHIP_YAW_HOLD_DEADBAND_CD        50
 #endif
+
+/* ==================== 正常巡航 yaw PID ==================== */
 #ifndef SHIP_YAW_HOLD_KP_Q10
+/* 正常 yaw 自稳比例增益，Q10。 */
 #define SHIP_YAW_HOLD_KP_Q10             768
 #endif
 #ifndef SHIP_YAW_HOLD_KI_Q10
+/* 正常 yaw 自稳积分增益，当前关闭以避免水面延迟导致积分堆积。 */
 #define SHIP_YAW_HOLD_KI_Q10             0
 #endif
 #ifndef SHIP_YAW_HOLD_KD_Q10
+/* 正常 yaw 自稳微分增益，Q10。 */
 #define SHIP_YAW_HOLD_KD_Q10             0
 #endif
+
+/* ==================== GPS 启航前原地对准 PID ==================== */
 #ifndef SHIP_GPS_ALIGN_KP_Q10
-#define SHIP_GPS_ALIGN_KP_Q10            384
+/* GPS 原地对准比例增益，Q10；越大越积极转向目标航向。 */
+#define SHIP_GPS_ALIGN_KP_Q10            512
 #endif
 #ifndef SHIP_GPS_ALIGN_KI_Q10
+/* GPS 原地对准积分增益；保持 0 可避免原地旋转时积分堆积。 */
 #define SHIP_GPS_ALIGN_KI_Q10            0
 #endif
 #ifndef SHIP_GPS_ALIGN_KD_Q10
-#define SHIP_GPS_ALIGN_KD_Q10            0
+/* GPS 原地对准微分增益，Q10；用于抑制接近目标航向时的过冲。 */
+#define SHIP_GPS_ALIGN_KD_Q10            96
 #endif
 #ifndef SHIP_GPS_ALIGN_DIFF_PERCENT
+/* 原地对准最大差速，占电机最大命令的百分比；30 表示 30%。 */
 #define SHIP_GPS_ALIGN_DIFF_PERCENT      30U
 #endif
 

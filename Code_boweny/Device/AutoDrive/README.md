@@ -91,7 +91,7 @@ GPS 去钓点或返航启动时，状态机会先进入 `AUTO_DRIVE_GET_DIRECTIO
 
 对准阶段当前参数：
 
-- 对准角度容差：`AUTODRIVE_ALIGN_TOLERANCE_CD = 800`，即 `±8.00°`
+- 对准角度容差：`AUTODRIVE_ALIGN_TOLERANCE_CD = 1000`，即 `±10.00°`
 - 对准放行前必须先“过零”：航向误差进入 `AUTODRIVE_ALIGN_ZERO_CROSS_CD = 50`，即 `±0.50°`，或误差符号从正到负/从负到正穿过 0
 - 连续稳定计数：`AUTODRIVE_ALIGN_STABLE_TICKS = 20`，以 `10ms` 轮询计算，约 `200ms`
 - 对准超时：`AUTODRIVE_ALIGN_TIMEOUT_TICKS = 800`，约 `8s`，超时后放行进入巡航，避免浪、磁环境或 PID 抖动导致一直卡在原地
@@ -101,9 +101,9 @@ GPS 去钓点或返航启动时，状态机会先进入 `AUTO_DRIVE_GET_DIRECTIO
 
 控制层对准阶段单独使用较软的 PID：
 
-- `SHIP_GPS_ALIGN_KP_Q10 = 384`
+- `SHIP_GPS_ALIGN_KP_Q10 = 512`
 - `SHIP_GPS_ALIGN_KI_Q10 = 0`
-- `SHIP_GPS_ALIGN_KD_Q10 = 0`
+- `SHIP_GPS_ALIGN_KD_Q10 = 96`
 
 注意：PID 输出里的 `SHIP_YAW_HOLD_OUTPUT_LIMIT = 1000` 是内部归一化控制量，不是 PWM duty，也不是最终电机命令。对准阶段最终差速命令会再限制为 `SHIP_MOTOR_OUTPUT_MAX_COMMAND * 18%`，当前 `SHIP_MOTOR_OUTPUT_MAX_COMMAND = 850`，所以原地对准最大差速约为 `153`。
 

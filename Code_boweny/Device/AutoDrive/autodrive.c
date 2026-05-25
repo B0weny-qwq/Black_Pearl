@@ -6,23 +6,50 @@
 #include "..\..\..\User\MainLoop.h"
 #include "..\..\..\User\Task.h"
 
+/* ==================== 任务超时与人工接管 ==================== */
+/* 自动巡航最长工作时间：10min，AutoDrive_Poll 按 10ms 周期计数。 */
 #define AUTODRIVE_WORK_OVERTIME            (10U * 60U * 100U)
-#define AUTODRIVE_MIN_ACTIVE_DISTANCE_M    10U
-#define AUTODRIVE_MAX_ACTIVE_DISTANCE_M    800U
-#define AUTODRIVE_ARRIVE_DISTANCE_M        3U
+/* 遥控器人工接管保持时间：30s，超时后允许自动任务继续判断。 */
 #define AUTODRIVE_MANUAL_TIMEOUT_TICKS     (30U * 100U)
+/* 人工关闭确认时间：约 3s，用于避免瞬时丢包误关自动模式。 */
 #define AUTODRIVE_MANUAL_CLOSE_TICKS       300U
+
+/* ==================== 目标距离判定 ==================== */
+/* 小于该距离的目标不启动自动巡航，避免近点反复调头。 */
+#define AUTODRIVE_MIN_ACTIVE_DISTANCE_M    10U
+/* 超过该距离的目标视为异常点，防止错误坐标导致长时间乱跑。 */
+#define AUTODRIVE_MAX_ACTIVE_DISTANCE_M    800U
+/* 到达判定距离，进入该范围后停止自动巡航。 */
+#define AUTODRIVE_ARRIVE_DISTANCE_M        3U
+
+/* ==================== 前进速度策略 ==================== */
+/* 远距离正常巡航基础速度。 */
 #define AUTODRIVE_CRUISE_BASE_SPEED        850
+/* 进入 20m 内开始降速靠近目标。 */
 #define AUTODRIVE_APPROACH_DISTANCE_M      20U
+/* 进入 8m 内切换为低速爬行靠近。 */
 #define AUTODRIVE_CRAWL_DISTANCE_M         8U
+/* 8m~20m 区间的靠近速度上限。 */
 #define AUTODRIVE_APPROACH_BASE_SPEED      700
+/* 3m~8m 区间的低速爬行速度。 */
 #define AUTODRIVE_CRAWL_BASE_SPEED         500
+
+/* ==================== GPS 坐标与角度换算 ==================== */
+/* 遥控协议里的经纬度分钟值放大倍数。 */
 #define AUTODRIVE_MINUTE_SCALE             10000UL
+/* 1 度 = 60 分。 */
 #define AUTODRIVE_MINUTES_PER_DEG          60UL
+/* 1 经纬度分约等于 1850m。 */
 #define AUTODRIVE_METERS_PER_MINUTE        1850UL
+/* 1 纬度约等于 111130m。 */
 #define AUTODRIVE_METERS_PER_DEG           111130UL
+/* atan 近似计算使用的 Q10 缩放。 */
 #define AUTODRIVE_ATAN_Q10                 1024UL
-#define AUTODRIVE_ALIGN_TOLERANCE_CD       500
+
+/* ==================== 启航前原地对准放行条件 ==================== */
+/* 对准放行容差，单位 0.01 度；1000 表示目标航向 +/-10.00 度。 */
+#define AUTODRIVE_ALIGN_TOLERANCE_CD       1000
+/* 航向误差必须连续落在容差内的 tick 数；10ms 周期下 100 约等于 1s。 */
 #define AUTODRIVE_ALIGN_STABLE_TICKS       100U
 
 static u8 g_autoDrive_switch = 0U;
