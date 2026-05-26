@@ -82,7 +82,7 @@
 
 #define SHIP_TAG "SHIP"
 #define SHIP_DATA_TAG "DATA"
-#define SHIP_PAIR_FIX_REV "pairbiz-r4"
+#define SHIP_PAIR_FIX_REV "pairbiz-r5"
 
 #define SHIP_LEGACY_PROTO_MAX_LEN      30U
 #define SHIP_AXIS_CENTER               100U
@@ -176,6 +176,7 @@ typedef struct
     u16 pair_retry_count;
     u16 work_rx_reopen_ticks;
     u16 work_rx_reopen_total;
+    u32 pair_start_ms;
     u32 pair_wait_start_ms;
     u32 last_proto_rx_ms;
     u32 last_throttle_rx_ms;
@@ -1976,6 +1977,7 @@ static void ShipProtocol_InitRuntime(void)
     g_ship_rt.pair_retry_count = 0U;
     g_ship_rt.work_rx_reopen_ticks = 0U;
     g_ship_rt.work_rx_reopen_total = 0U;
+    g_ship_rt.pair_start_ms = Task_GetTickMs();
     g_ship_rt.pair_wait_start_ms = 0UL;
     g_ship_rt.last_proto_rx_ms = 0UL;
     g_ship_rt.last_throttle_rx_ms = 0UL;
@@ -2117,6 +2119,21 @@ void ShipProtocol_RunScheduler(void)
     AutoDrive_LinkAliveTick();
     ShipProtocol_LowPowerCheck();
 
+    if ((g_ship_rt.paired == 0U) &&
+        (g_ship_rt.pair_start_ms != 0UL) &&
+        (SHIP_PAIR_FORCE_WORK_MS != 0UL) &&
+        (ShipProtocol_ElapsedMs(now_ms, g_ship_rt.pair_start_ms) >= SHIP_PAIR_FORCE_WORK_MS)) {
+        g_ship_rt.paired = 1U;
+        g_ship_rt.pair_left = 0U;
+        g_ship_rt.pair_wait_rsp_time = 0U;
+        g_ship_rt.pair_wait_start_ms = 0UL;
+        g_ship_rt.pair_rsp_timeout_logged = 0U;
+        g_ship_rt.state = SHIP_STATE_WORK_RX;
+        g_ship_rt.work_rx_configured = 0U;
+        g_ship_rt.work_state_logged = 0U;
+        LOGW(SHIP_TAG, "pair force work-rx after %lums", (u32)SHIP_PAIR_FORCE_WORK_MS);
+    }
+
     if (g_ship_rt.pair_wait_rsp_time > 0U) {
         g_ship_rt.pair_wait_rsp_time--;
     } else if ((g_ship_rt.pair_wait_start_ms != 0UL) &&
@@ -2124,8 +2141,16 @@ void ShipProtocol_RunScheduler(void)
                (ShipProtocol_ElapsedMs(now_ms, g_ship_rt.pair_wait_start_ms) >= SHIP_PAIR_RSP_EXPIRE_LOG_MS) &&
                (g_ship_rt.paired == 0U)) {
         g_ship_rt.pair_rsp_timeout_logged = 1U;
-        LOGW(SHIP_TAG, "pair rsp window expired, no rsp");
+        LOGW(SHIP_TAG, "pair rsp window expired, retry seed burst");
         ShipProtocol_LogRxDebug(SHIP_STAGE_U8("pair-rsp-expired"));
+        g_ship_rt.pair_retry_count++;
+        g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
+        g_ship_rt.wait_ticks = 0U;
+        g_ship_rt.pair_wait_rsp_time = 0U;
+        g_ship_rt.pair_wait_start_ms = 0UL;
+        g_ship_rt.state = SHIP_STATE_PAIR_SEND;
+        g_ship_rt.work_rx_configured = 0U;
+        g_ship_rt.work_state_logged = 0U;
     }
 
     if (g_ship_rt.wait_ticks > 0U) {
