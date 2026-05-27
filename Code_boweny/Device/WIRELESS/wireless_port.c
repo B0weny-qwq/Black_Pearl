@@ -25,6 +25,7 @@
 static u8 g_wireless_port_initialized = 0U;
 
 
+#if WIRELESS_SPI_USE_SOFT
 static void WirelessPort_SoftSpiClock(u8 level)
 {
     P32 = (level != 0U) ? 1 : 0;
@@ -34,6 +35,7 @@ static void WirelessPort_SoftSpiMosi(u8 level)
 {
     P34 = (level != 0U) ? 1 : 0;
 }
+#endif
 
 s8 WirelessPort_Init(void)
 {

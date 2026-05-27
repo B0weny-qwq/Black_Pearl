@@ -566,27 +566,22 @@
 /**
  * @brief  配对发送次数
  */
-#define SHIP_PAIR_SEND_TIMES           3U
+#define SHIP_PAIR_SEND_TIMES           10U
 
 /**
  * @brief  默认等待 tick
  */
-#define SHIP_WAIT_TICKS_DEFAULT        5U
+#define SHIP_WAIT_TICKS_DEFAULT        30U
 
 /**
  * @brief  配对等待响应 tick
  */
-#define SHIP_PAIR_WAIT_RSP_TICKS       1000U
+#define SHIP_PAIR_WAIT_RSP_TICKS       500U
 
 /**
  * @brief  配对响应超时日志周期
  */
-#define SHIP_PAIR_RSP_EXPIRE_LOG_MS    10000UL
-
-/**
- * @brief  配对流程最长持续时间，超时后强制进入工作 RX。
- */
-#define SHIP_PAIR_FORCE_WORK_MS        60000UL
+#define SHIP_PAIR_RSP_EXPIRE_LOG_MS    5000UL
 
 /**
  * @brief  接收空闲告警周期

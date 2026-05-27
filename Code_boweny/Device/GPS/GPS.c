@@ -56,7 +56,11 @@ static u8   g_gps_diag_logged_once = 0U;
 
 static void GPS_ClearState(void);
 static void GPS_ClearParser(void);
+#if (GPS_RAW_ECHO_ENABLE != 0U)
 static void GPS_RawEchoByte(u8 dat);
+#else
+#define GPS_RawEchoByte(dat)
+#endif
 static u8   GPS_FifoPush(u8 dat);
 static u8   GPS_FifoPop(u8 *dat);
 static void GPS_DrainUart2Buffer(void);
@@ -133,14 +137,12 @@ static void GPS_ClearParser(void)
     }
 }
 
+#if (GPS_RAW_ECHO_ENABLE != 0U)
 static void GPS_RawEchoByte(u8 dat)
 {
-#if (GPS_RAW_ECHO_ENABLE != 0U)
     TX1_write2buff(dat);
-#else
-    dat = dat;
-#endif
 }
+#endif
 
 #if (GPS_DIAG_LOG_ENABLE != 0U)
 static void GPS_DiagLogPoll(void)

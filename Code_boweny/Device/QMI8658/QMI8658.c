@@ -57,16 +57,21 @@ static u8 QMI8658_ReadNByteAtAddr(u8 addr, u8 start_reg, u8 *buf, u8 len);
 static u8 QMI8658_WriteReg(u8 reg_addr, u8 reg_val);
 static void QMI8658_SetState(QMI8658_State_t state, u16 delay_ms);
 static u8 QMI8658_IsDue(u32 now_ms);
+#if QMI8658_DIAG_ENABLE
 static char *QMI8658_StateName(QMI8658_State_t state);
+#endif
 static char *QMI8658_I2cErrName(u8 err);
 static u8 QMI8658_SelectAddrByWhoAmI(u8 *selected_id);
+#if QMI8658_DIAG_ENABLE
 static u8 QMI8658_ProbeAddr(u8 addr);
+#endif
 static u8 QMI8658_CheckReadyFlag(void);
 static s8 QMI8658_ClearDataPath(void);
 static u8 QMI8658_ConfigReadbackOk(void);
 static void QMI8658_LogDataPath(char *phase);
 static s8 QMI8658_EnterRetryOrFail(char *reason);
 static s8 QMI8658_InitMinimalBlocking(void);
+#if QMI8658_DIAG_ENABLE
 static void QMI8658_DiagResetResult(QMI8658_DiagResult_t *result);
 static u8 QMI8658_DiagHasLiveData(QMI8658_DiagResult_t *result);
 static u8 QMI8658_DiagReadSnapshot(char *phase, u16 sample_idx, QMI8658_DiagResult_t *result);
@@ -74,6 +79,7 @@ static u8 QMI8658_DiagCaptureResetWindow(QMI8658_DiagResult_t *result);
 static u8 QMI8658_DiagConfigureLegacy(u8 ctrl7);
 static char *QMI8658_DiagVerdict(QMI8658_DiagResult_t *result, u8 ctrl7, u8 force_soft_reset);
 static u8 QMI8658_DiagRunExperiment(char *name, u8 ctrl7, u8 force_soft_reset, QMI8658_DiagResult_t *result);
+#endif
 
 static u8 QMI8658_ReadReg(u8 reg_addr)
 {
@@ -142,6 +148,7 @@ static u8 QMI8658_IsDue(u32 now_ms)
     return ((int32)(now_ms - g_qmi8658_ctx.due_ms) >= 0) ? 1U : 0U;
 }
 
+#if QMI8658_DIAG_ENABLE
 static char *QMI8658_StateName(QMI8658_State_t state)
 {
     switch (state) {
@@ -175,6 +182,7 @@ static char *QMI8658_StateName(QMI8658_State_t state)
         return "FAILED";
     }
 }
+#endif
 
 static char *QMI8658_I2cErrName(u8 err)
 {
@@ -227,6 +235,7 @@ static u8 QMI8658_SelectAddrByWhoAmI(u8 *selected_id)
     return 1U;
 }
 
+#if QMI8658_DIAG_ENABLE
 static u8 QMI8658_ProbeAddr(u8 addr)
 {
     u8 dummy;
@@ -240,6 +249,7 @@ static u8 QMI8658_ProbeAddr(u8 addr)
     }
     return 0U;
 }
+#endif
 
 static u8 QMI8658_CheckReadyFlag(void)
 {
@@ -494,6 +504,7 @@ static s8 QMI8658_EnterRetryOrFail(char *reason)
     return -1;
 }
 
+#if QMI8658_DIAG_ENABLE
 static void QMI8658_DiagResetResult(QMI8658_DiagResult_t *result)
 {
     if (result == NULL) {
@@ -744,6 +755,7 @@ static u8 QMI8658_DiagRunExperiment(char *name, u8 ctrl7, u8 force_soft_reset, Q
          result->last_temp);
     return 0U;
 }
+#endif
 
 s8 QMI8658_Init(void)
 {

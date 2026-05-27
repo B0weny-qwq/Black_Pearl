@@ -352,8 +352,6 @@ static void ShipControl_LogModeEvent(u8 old_mode, u8 new_mode, u8 reason);
 static void ShipControl_LogManualGate(u8 state,
                                       int16 throttle_speed,
                                       int16 steering_speed,
-                                      int16 left_speed,
-                                      int16 right_speed,
                                       int16 diff,
                                       int16 gate);
 /** @brief 设置当前控制模式并在变化时记录事件。 */
@@ -733,8 +731,6 @@ static void ShipControl_LogModeEvent(u8 old_mode, u8 new_mode, u8 reason)
 static void ShipControl_LogManualGate(u8 state,
                                       int16 throttle_speed,
                                       int16 steering_speed,
-                                      int16 left_speed,
-                                      int16 right_speed,
                                       int16 diff,
                                       int16 gate)
 {
@@ -767,8 +763,6 @@ static void ShipControl_LogManualGate(u8 state,
     (void)state;
     (void)throttle_speed;
     (void)steering_speed;
-    (void)left_speed;
-    (void)right_speed;
     (void)diff;
     (void)gate;
 #endif
@@ -1430,8 +1424,6 @@ static void ShipControl_ApplyManualControl(void)
                                   0,
                                   0,
                                   0,
-                                  0,
-                                  0,
                                   0);
         if (ShipControl_ConfirmCenterStop() == 0U) {
             return;
@@ -1467,8 +1459,6 @@ static void ShipControl_ApplyManualControl(void)
         ShipControl_LogManualGate(SHIP_CTRL_GATE_NO_INPUT,
                                   throttle_speed,
                                   steering_speed,
-                                  left_speed,
-                                  right_speed,
                                   manual_input_diff,
                                   manual_diff_gate);
         ShipControl_Stop(SHIP_CONTROL_STOP_REASON_MANUAL_CENTER);
@@ -1492,8 +1482,6 @@ static void ShipControl_ApplyManualControl(void)
                     ShipControl_LogManualGate(SHIP_CTRL_GATE_HEADING_LOST,
                                               throttle_speed,
                                               steering_speed,
-                                              left_speed,
-                                              right_speed,
                                               manual_input_diff,
                                               manual_diff_gate);
                     goto ship_control_manual_open_loop;
@@ -1501,8 +1489,6 @@ static void ShipControl_ApplyManualControl(void)
                 ShipControl_LogManualGate(SHIP_CTRL_GATE_READY,
                                           throttle_speed,
                                           steering_speed,
-                                          left_speed,
-                                          right_speed,
                                           manual_input_diff,
                                           manual_diff_gate);
                 g_ship_ctrl.yaw_hold_active = 1U;
@@ -1524,8 +1510,6 @@ static void ShipControl_ApplyManualControl(void)
             ShipControl_LogManualGate(SHIP_CTRL_GATE_WAIT_STABLE,
                                       throttle_speed,
                                       steering_speed,
-                                      left_speed,
-                                      right_speed,
                                       manual_input_diff,
                                       manual_diff_gate);
         }
@@ -1540,8 +1524,6 @@ static void ShipControl_ApplyManualControl(void)
 #endif
             throttle_speed,
             steering_speed,
-            left_speed,
-            right_speed,
             manual_input_diff,
             manual_diff_gate);
         g_ship_ctrl.yaw_hold_stable_count = 0U;

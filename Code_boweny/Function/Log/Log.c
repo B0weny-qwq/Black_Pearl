@@ -31,6 +31,7 @@
 static u8  log_ready = 0;          /* 日志就绪标志: 0=禁用, 1=启用 */
 static u8  log_buf[LOG_BUF_SIZE];  /* 格式化缓冲区 */
 
+#if AHRS_TEST_ONLY
 static bit log_tag_is(u8 *tag, u8 *name)
 {
     u8 i;
@@ -79,6 +80,8 @@ static bit log_allow_in_ahrs_test(u8 level, u8 *tag)
  * @param[in]  args  可变参数列表
  * @return     none
  */
+#endif
+
 static void log_vprint(u8 *fmt, va_list args)
 {
     u8  len;
