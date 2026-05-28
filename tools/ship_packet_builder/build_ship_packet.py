@@ -10,8 +10,8 @@ Supported commands:
 The wire format matches the legacy ship firmware:
 AA | len | cmd | payload... | xor | BB
 
-For GPS point payloads, each 16-bit field is encoded as raw legacy bytes:
-low-byte first, high-byte second.
+For GPS point payloads, each 16-bit field is encoded high-byte first to match
+the current firmware's 0x13/0x14/0x15 parser.
 """
 
 from __future__ import annotations
@@ -101,8 +101,8 @@ def require_ascii_dir(label: str, value: str, allowed: str) -> str:
     return upper
 
 
-def u16le_bytes(value: int) -> List[int]:
-    return [value & 0xFF, (value >> 8) & 0xFF]
+def u16be_bytes(value: int) -> List[int]:
+    return [(value >> 8) & 0xFF, value & 0xFF]
 
 
 def build_point_payload(
@@ -115,11 +115,11 @@ def build_point_payload(
 ) -> List[int]:
     return [
         ord(require_ascii_dir("lon_dir", lon_dir, "EW")),
-        *u16le_bytes(lon_whole),
-        *u16le_bytes(lon_frac),
+        *u16be_bytes(lon_whole),
+        *u16be_bytes(lon_frac),
         ord(require_ascii_dir("lat_dir", lat_dir, "NS")),
-        *u16le_bytes(lat_whole),
-        *u16le_bytes(lat_frac),
+        *u16be_bytes(lat_whole),
+        *u16be_bytes(lat_frac),
     ]
 
 
@@ -166,17 +166,22 @@ def parse_gps_report_payload(raw: Sequence[int]) -> List[int]:
 def decode_point_from_gps_report(payload: Sequence[int]) -> dict:
     if len(payload) != GPS_REPORT_PAYLOAD_LEN:
         raise ValueError("gps report payload must be 15 bytes")
+
+    lon_dir = chr(payload[3])
+    lat_dir = chr(payload[8])
     return {
         "sat": payload[0],
-        "angle_deg": payload[1] | (payload[2] << 8),
-        "lon_dir": chr(payload[3]),
-        "lon_whole": payload[4] | (payload[5] << 8),
-        "lon_frac": payload[6] | (payload[7] << 8),
-        "lat_dir": chr(payload[8]),
-        "lat_whole": payload[9] | (payload[10] << 8),
-        "lat_frac": payload[11] | (payload[12] << 8),
+        "angle_deg": (payload[1] << 8) | payload[2],
+        "lon_dir": lon_dir if lon_dir in ("E", "W") else "E",
+        "lon_whole": (payload[4] << 8) | payload[5],
+        "lon_frac": (payload[6] << 8) | payload[7],
+        "lat_dir": lat_dir if lat_dir in ("N", "S") else "N",
+        "lat_whole": (payload[9] << 8) | payload[10],
+        "lat_frac": (payload[11] << 8) | payload[12],
         "power": payload[13],
         "auto": payload[14],
+        "report_lon_dir": lon_dir,
+        "report_lat_dir": lat_dir,
     }
 
 
@@ -219,10 +224,10 @@ def run_from_gps_report(args: argparse.Namespace) -> int:
     point = decode_point_from_gps_report(payload_0x12)
 
     point_payload = build_point_payload(
-        lon_dir=point["lon_dir"],
+        lon_dir=args.lon_dir if args.lon_dir is not None else point["lon_dir"],
         lon_whole=point["lon_whole"],
         lon_frac=point["lon_frac"],
-        lat_dir=point["lat_dir"],
+        lat_dir=args.lat_dir if args.lat_dir is not None else point["lat_dir"],
         lat_whole=point["lat_whole"],
         lat_frac=point["lat_frac"],
     )
@@ -243,6 +248,7 @@ def run_from_gps_report(args: argparse.Namespace) -> int:
         f" angle={point['angle_deg']}"
         f" lon={point['lon_dir']}{point['lon_whole']}.{point['lon_frac']:04d}"
         f" lat={point['lat_dir']}{point['lat_whole']}.{point['lat_frac']:04d}"
+        f" report_dir={point['report_lon_dir']}/{point['report_lat_dir']}"
         f" power=0x{point['power']:02X}"
         f" auto=0x{point['auto']:02X}"
     )
@@ -276,12 +282,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p_report.add_argument("--cmd", required=True, help="return-home | goto-point | return-switch")
     p_report.add_argument("--switch", default="0x31", help="only used for 0x15")
+    p_report.add_argument("--lon-dir", choices=["E", "W", "e", "w"], help="override report longitude marker")
+    p_report.add_argument("--lat-dir", choices=["N", "S", "n", "s"], help="override report latitude marker")
     p_report.add_argument(
         "--report",
         required=True,
         help=(
             "0x12 payload hex (15 bytes) or full frame hex."
-            " Example payload: 08 5A 00 45 AD 2F A2 8A 4E 8C CB 58 01 00 00"
+            " Example payload: 08 00 5A 45 2F 7C 18 9A 57 0E 8D 0D 6D 00 00"
         ),
     )
     p_report.set_defaults(func=run_from_gps_report)

@@ -81,6 +81,7 @@ static u32 g_last_run_update_seq = 0UL;
 static u32 g_last_poll_tick_ms = 0UL;
 static u32 g_last_link_tick_ms = 0UL;
 static u8 g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
+static u8 g_return_switch_started = 0U;
 
 static u16 AutoDrive_ReadU16Wire(const u8 *data_m)
 {
@@ -611,14 +612,22 @@ u8 AutoDrive_IsCanActive(const AutoDrive_PointRaw_t *point)
 
 void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
 {
+    AutoDrive_PointRaw_t rx_point;
+
     AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_CMD_RETURN_HOME);
+    if (data_m == 0) {
+        return;
+    }
+
+    AutoDrive_PointFromLegacyWire(&rx_point, data_m);
+    AutoDrive_CopyPoint(&g_autodrv_cfg.ret_point, &rx_point);
+    (void)AutoDriveCfg_Save(&g_autodrv_cfg);
+    g_return_switch_started = 0U;
     if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
         return;
     }
 
-    AutoDrive_PointFromLegacyWire(&g_return_position, data_m);
-    AutoDrive_CopyPoint(&g_autodrv_cfg.ret_point, &g_return_position);
-    (void)AutoDriveCfg_Save(&g_autodrv_cfg);
+    AutoDrive_CopyPoint(&g_return_position, &rx_point);
     if (AutoDrive_IsCanActive(&g_return_position) == 0U) {
         return;
     }
@@ -641,6 +650,29 @@ static u8 AutoDrive_StartFishPoint(const AutoDrive_PointRaw_t *point)
     g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
     g_autoDrive_fail_flag = 0U;
     return AUTODRIVE_FISH_CMD_STARTED;
+}
+
+static u8 AutoDrive_StartReturnFromConfig(u8 reason)
+{
+    AutoDrive_SetDiagReason(reason);
+    if (g_autodrv_cfg.auto_ret_onoff == 0x30U) {
+        return 0U;
+    }
+    if (g_autoDrive_fail_flag != 0U) {
+        return 0U;
+    }
+    if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
+        return 0U;
+    }
+    if (AutoDrive_IsCanActive(&g_autodrv_cfg.ret_point) == 0U) {
+        return 0U;
+    }
+
+    AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
+    AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
+    g_autoDrive_state = AUTO_DRIVE_START;
+    g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
+    return 1U;
 }
 
 u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
@@ -686,21 +718,7 @@ u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
 
 void AutoDrive_TriggerReturnWithReason(u8 reason)
 {
-    AutoDrive_SetDiagReason(reason);
-    if (g_autodrv_cfg.auto_ret_onoff != 0x30U) {
-        if (g_autoDrive_fail_flag != 0U) {
-            return;
-        }
-        if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
-            return;
-        }
-        if (AutoDrive_IsCanActive(&g_autodrv_cfg.ret_point) != 0U) {
-            AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
-            AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
-            g_autoDrive_state = AUTO_DRIVE_START;
-            g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
-        }
-    }
+    (void)AutoDrive_StartReturnFromConfig(reason);
 }
 
 void AutoDrive_TriggerReturn(void)
@@ -716,22 +734,41 @@ void AutoDrive_WorkOvertimeFail(void)
 
 void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len)
 {
+    AutoDrive_PointRaw_t rx_point;
+    u8 was_enabled;
+    u8 now_enabled;
+    u8 point_changed;
+
     if ((data_m == 0) || (len == 0U)) {
         return;
     }
+
+    was_enabled = (g_autodrv_cfg.auto_ret_onoff != 0x30U) ? 1U : 0U;
+    now_enabled = (data_m[0] != 0x30U) ? 1U : 0U;
+    point_changed = 0U;
 
     g_autoDrive_switch = data_m[0];
     g_autodrv_cfg.auto_ret_onoff = data_m[0];
     if (len >= (u8)(1U + AUTODRIVE_LEGACY_POINT_WIRE_LEN)) {
         AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_RETURN_SWITCH_SAVE);
-        AutoDrive_PointFromLegacyWire(&g_autodrv_cfg.ret_point, &data_m[1]);
+        AutoDrive_PointFromLegacyWire(&rx_point, &data_m[1]);
+        if (AutoDrive_PointRawEqual(&rx_point, &g_autodrv_cfg.ret_point) == 0U) {
+            point_changed = 1U;
+        }
+        AutoDrive_CopyPoint(&g_autodrv_cfg.ret_point, &rx_point);
         if (g_autoDrive_state == AUTO_DRIVE_IDLE) {
             AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
         }
     }
     (void)AutoDriveCfg_Save(&g_autodrv_cfg);
-    if (g_autodrv_cfg.auto_ret_onoff != 0x30U) {
-        AutoDrive_TriggerReturnWithReason(AUTODRIVE_DIAG_REASON_RETURN_SWITCH_SAVE);
+
+    if ((now_enabled == 0U) || (was_enabled == 0U) || (point_changed != 0U)) {
+        g_return_switch_started = 0U;
+    }
+    if ((now_enabled != 0U) && (g_return_switch_started == 0U)) {
+        if (AutoDrive_StartReturnFromConfig(AUTODRIVE_DIAG_REASON_RETURN_SWITCH_SAVE) != 0U) {
+            g_return_switch_started = 1U;
+        }
     }
 }
 
@@ -1151,6 +1188,7 @@ void AutoDrive_Init(void)
     g_last_poll_tick_ms = Task_GetTickMs();
     g_last_link_tick_ms = g_last_poll_tick_ms;
     g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
+    g_return_switch_started = 0U;
     g_autodrive_target_heading_cd = 0U;
     g_autodrive_target_heading_valid = 0U;
     AutoDrive_ResetApproachTracker();

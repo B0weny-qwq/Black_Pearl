@@ -19,7 +19,7 @@ It matches the current firmware after we aligned point parsing back to the old s
 python tools\ship_packet_builder\build_ship_packet.py from-gps-report `
   --cmd return-switch `
   --switch 0x31 `
-  --report "08 5A 00 45 AD 2F A2 8A 4E 8C CB 58 01 00 00"
+  --report "08 00 5A 45 2F 7C 18 9A 57 0E 8D 0D 6D 00 00"
 ```
 
 Notes:
@@ -50,11 +50,11 @@ Legacy point format is 10 bytes:
 
 ```text
 lon_dir
-lon_whole[low][high]
-lon_frac[low][high]
+lon_whole[high][low]
+lon_frac[high][low]
 lat_dir
-lat_whole[low][high]
-lat_frac[low][high]
+lat_whole[high][low]
+lat_frac[high][low]
 ```
 
 `0x15` payload is:
@@ -79,9 +79,13 @@ The script prints:
 2. Read one valid `0x12` GPS report from your tool/log/sniffer.
 3. Run `from-gps-report --cmd return-switch --switch 0x31`.
 4. Send the generated `0x15` frame to the boat.
-5. Power-cycle once if you want to confirm flash persistence.
+5. Keep the boat powered; the return point is RAM-only in current firmware.
 6. Move the boat more than 10 meters away.
 7. Test return by sending `0x13` or by link timeout / low-power trigger.
+
+`0x12` reports keep the old handheld marker bytes for compatibility; if your
+latitude marker is not `N` or `S`, the helper defaults it to `N`. Use
+`--lat-dir S` when testing in the southern hemisphere.
 
 ## Important Notes
 
