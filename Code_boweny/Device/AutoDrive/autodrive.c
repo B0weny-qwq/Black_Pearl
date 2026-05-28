@@ -45,10 +45,13 @@
 #define AUTODRIVE_METERS_PER_DEG           111130UL
 /* atan 近似计算使用的 Q10 缩放。 */
 #define AUTODRIVE_ATAN_Q10                 1024UL
+#define AUTODRIVE_COS_LAT_STEP_DEG         5U
+#define AUTODRIVE_COS_LAT_TABLE_COUNT      19U
+#define AUTODRIVE_COS_LAT_MAX_DEG          90U
 
 /* ==================== 启航前原地对准放行条件 ==================== */
-/* 对准放行容差，单位 0.01 度；500 表示目标航向 +/-5.00 度。 */
-#define AUTODRIVE_ALIGN_EXIT_ERROR_CD      500
+/* 对准放行容差，单位 0.01 度；300 表示目标航向 +/-3.00 度。 */
+#define AUTODRIVE_ALIGN_EXIT_ERROR_CD      300
 
 static u8 g_autoDrive_switch = 0U;
 static u8 g_autoDrive_state = AUTO_DRIVE_IDLE;
@@ -110,6 +113,65 @@ static u32 AutoDrive_Abs32Diff(u32 lhs, u32 rhs)
         return (lhs - rhs);
     }
     return (rhs - lhs);
+}
+
+static u32 AutoDrive_ScaleDistancePermille(u32 distance_m, u16 scale_permille)
+{
+    return ((distance_m / 1000UL) * (u32)scale_permille) +
+           ((((distance_m % 1000UL) * (u32)scale_permille) + 500UL) / 1000UL);
+}
+
+static u16 AutoDrive_LatDegFromPoint(const AutoDrive_PointRaw_t *point)
+{
+    u16 lat_deg;
+
+    if (point == 0) {
+        return 0U;
+    }
+
+    lat_deg = (u16)(point->lat_whole / 100U);
+    if (lat_deg > AUTODRIVE_COS_LAT_MAX_DEG) {
+        lat_deg = AUTODRIVE_COS_LAT_MAX_DEG;
+    }
+    return lat_deg;
+}
+
+static u16 AutoDrive_MeanLatDeg(const AutoDrive_PointRaw_t *lhs,
+                                const AutoDrive_PointRaw_t *rhs)
+{
+    return (u16)(((u32)AutoDrive_LatDegFromPoint(lhs) +
+                  (u32)AutoDrive_LatDegFromPoint(rhs) + 1UL) / 2UL);
+}
+
+static u16 AutoDrive_CosLatPermille(u16 lat_deg)
+{
+    static const u16 cos_lat_permille[AUTODRIVE_COS_LAT_TABLE_COUNT] = {
+        1000U, 996U, 985U, 966U, 940U, 906U, 866U, 819U, 766U, 707U,
+        643U, 574U, 500U, 423U, 342U, 259U, 174U, 87U, 0U
+    };
+    u16 index;
+    u16 rem;
+    u16 low;
+    u16 high;
+    u16 delta;
+
+    if (lat_deg >= AUTODRIVE_COS_LAT_MAX_DEG) {
+        return 0U;
+    }
+
+    index = (u16)(lat_deg / AUTODRIVE_COS_LAT_STEP_DEG);
+    rem = (u16)(lat_deg % AUTODRIVE_COS_LAT_STEP_DEG);
+    if (index >= (AUTODRIVE_COS_LAT_TABLE_COUNT - 1U)) {
+        return cos_lat_permille[AUTODRIVE_COS_LAT_TABLE_COUNT - 1U];
+    }
+
+    low = cos_lat_permille[index];
+    high = cos_lat_permille[index + 1U];
+    delta = (low >= high) ? (u16)(low - high) : 0U;
+    return (u16)(low -
+                 (u16)(((u32)delta * (u32)rem +
+                        (AUTODRIVE_COS_LAT_STEP_DEG / 2U)) /
+                       AUTODRIVE_COS_LAT_STEP_DEG));
 }
 
 static u16 AutoDrive_Atan01Deg(u16 z_q10)
@@ -887,6 +949,7 @@ static u32 AutoDrive_CalDistanceLon(const AutoDrive_PointRaw_t *now,
     u32 sec2;
     u16 ddiff;
     u32 sec_diff;
+    u32 lon_distance_m;
 
     dd1 = now->lon_whole / 100U;
     dd2 = des->lon_whole / 100U;
@@ -895,10 +958,9 @@ static u32 AutoDrive_CalDistanceLon(const AutoDrive_PointRaw_t *now,
 
     if (dd1 == dd2) {
         sec_diff = AutoDrive_Abs32Diff(sec1, sec2);
-        return (sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
-    }
-
-    if (dd1 > dd2) {
+        lon_distance_m =
+            (sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
+    } else if (dd1 > dd2) {
         ddiff = (u16)(dd1 - dd2);
         if (sec1 > sec2) {
             sec_diff = sec1 - sec2;
@@ -906,6 +968,14 @@ static u32 AutoDrive_CalDistanceLon(const AutoDrive_PointRaw_t *now,
             ddiff -= 1U;
             sec1 += (AUTODRIVE_MINUTES_PER_DEG * AUTODRIVE_MINUTE_SCALE);
             sec_diff = sec1 - sec2;
+        }
+        if (ddiff != 0U) {
+            lon_distance_m =
+                ((u32)ddiff * AUTODRIVE_METERS_PER_DEG) +
+                ((sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE);
+        } else {
+            lon_distance_m =
+                (sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
         }
     } else {
         ddiff = (u16)(dd2 - dd1);
@@ -916,13 +986,19 @@ static u32 AutoDrive_CalDistanceLon(const AutoDrive_PointRaw_t *now,
             sec2 += (AUTODRIVE_MINUTES_PER_DEG * AUTODRIVE_MINUTE_SCALE);
             sec_diff = sec2 - sec1;
         }
+        if (ddiff != 0U) {
+            lon_distance_m =
+                ((u32)ddiff * AUTODRIVE_METERS_PER_DEG) +
+                ((sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE);
+        } else {
+            lon_distance_m =
+                (sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
+        }
     }
 
-    if (ddiff != 0U) {
-        return ((u32)ddiff * AUTODRIVE_METERS_PER_DEG) +
-               ((sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE);
-    }
-    return (sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
+    return AutoDrive_ScaleDistancePermille(
+        lon_distance_m,
+        AutoDrive_CosLatPermille(AutoDrive_MeanLatDeg(now, des)));
 }
 
 static u32 AutoDrive_CalDistanceLat(const AutoDrive_PointRaw_t *now,
