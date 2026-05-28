@@ -101,10 +101,16 @@
 #define SHIP_MANUAL_BOOT_BLOCK_MS      3000UL
 #endif
 #ifndef SHIP_MANUAL_BOOT_WAIT_HEADING
-#define SHIP_MANUAL_BOOT_WAIT_HEADING  1U
+#define SHIP_MANUAL_BOOT_WAIT_HEADING  0U
+#endif
+#ifndef SHIP_MANUAL_BOOT_HEADING_MAX_WAIT_MS
+#define SHIP_MANUAL_BOOT_HEADING_MAX_WAIT_MS 30000UL
 #endif
 #ifndef SHIP_RC_INPUT_LOG_ENABLE
 #define SHIP_RC_INPUT_LOG_ENABLE       1U
+#endif
+#ifndef SHIP_PAIR_LISTEN_AFTER_EACH_REQ
+#define SHIP_PAIR_LISTEN_AFTER_EACH_REQ 1U
 #endif
 #ifndef SHIP_GOTO_POINT_UART_LOG_ENABLE
 #define SHIP_GOTO_POINT_UART_LOG_ENABLE 1U
@@ -210,6 +216,7 @@ static u8 xdata g_ship_rx_frame[SHIP_PROTO_MAX_FRAME_LEN];
 static u8 xdata g_ship_parse_frame[SHIP_LEGACY_PROTO_MAX_LEN];
 
 static s8 ShipProtocol_ApplyWorkSyncIdle(u8 log_rxdbg);
+static s8 ShipProtocol_ApplyPairSyncIdle(void);
 static s8 ShipProtocol_ApplyWorkRx(u8 log_rxdbg);
 #if SHIP_PROTOCOL_DIAG_ENABLE
 static void ShipProtocol_ReopenWorkRxImpl(const char *reason, u8 log_rxdbg, u8 log_ok);
@@ -978,6 +985,14 @@ static s8 ShipProtocol_ApplyWorkSyncIdle(u8 log_rxdbg)
     return SUCCESS;
 }
 
+/* Restore the legacy default sync word before every pair request.  The
+ * response listener rewrites reg36/reg39 to the seed-derived work sync. */
+static s8 ShipProtocol_ApplyPairSyncIdle(void)
+{
+    return Wireless_SetSyncRegsIdle((u16)(SHIP_PAIR_SYNC_WORD & 0xFFFFUL),
+                                    (u16)(SHIP_PAIR_SYNC_WORD >> 16));
+}
+
 /* Put the radio back on the derived work channel in receive mode. */
 static s8 ShipProtocol_ApplyWorkRx(u8 log_rxdbg)
 {
@@ -1157,6 +1172,12 @@ static s8 ShipProtocol_TryPairSend(u16 left_after_send)
     ShipProtocol_GetPairSeed(pair_data);
     pair_xor = (u8)(0x06U ^ SHIP_CMD_PAIR ^ pair_data[0] ^
                     pair_data[1] ^ pair_data[2] ^ pair_data[3]);
+
+    rc = ShipProtocol_ApplyPairSyncIdle();
+    if (rc != SUCCESS) {
+        LOGE(SHIP_TAG, "pair sync restore fail rc=%d", rc);
+        return rc;
+    }
 
     rc = ShipProtocol_SendFrame(SHIP_PAIR_CHANNEL_DEFAULT, SHIP_CMD_PAIR, pair_data, 4U, 1U);
     if (rc == SUCCESS) {
@@ -1592,6 +1613,8 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
 {
     u32 now_ms;
     u8 log_this_sample;
+    u8 heading_ready;
+    u8 manual_boot_waiting;
 
     if (payload_len < 3U) {
         LOGW(SHIP_TAG, "throttle short len=%u", (u16)payload_len);
@@ -1603,6 +1626,7 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
     g_ship_rt.key = payload[2];
     g_ship_rt.valid = 1U;
     now_ms = Task_GetTickMs();
+    heading_ready = MainLoop_IsHeadingReady();
     g_ship_rt.last_throttle_rx_ms = now_ms;
     g_ship_rt.throttle_recover_done = 0U;
     log_this_sample = ShipProtocol_ShouldLogRcInputSample(now_ms);
@@ -1622,21 +1646,27 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
                          (u16)g_ship_rt.key);
     }
 #endif
-    if ((now_ms < SHIP_MANUAL_BOOT_BLOCK_MS) ||
 #if SHIP_MANUAL_BOOT_WAIT_HEADING
-        (MainLoop_IsHeadingReady() == 0U)
+    manual_boot_waiting = ((heading_ready == 0U) &&
+                           (now_ms < SHIP_MANUAL_BOOT_HEADING_MAX_WAIT_MS)) ?
+                          1U : 0U;
 #else
-        0U
+    manual_boot_waiting = 0U;
 #endif
-        ) {
+
+    if ((now_ms < SHIP_MANUAL_BOOT_BLOCK_MS) ||
+        (manual_boot_waiting != 0U)) {
         if (g_ship_rt.manual_boot_block_logged == 0U) {
             g_ship_rt.manual_boot_block_logged = 1U;
             SHIP_VIEWER_LOGI(SHIP_TAG,
-                             "manual boot block wait=%lums hd=%u",
+                             "manual boot block wait=%lums hd=%u max=%lums",
                              (now_ms < SHIP_MANUAL_BOOT_BLOCK_MS) ?
                              (u32)(SHIP_MANUAL_BOOT_BLOCK_MS - now_ms) :
-                             0UL,
-                             (u16)MainLoop_IsHeadingReady());
+                             ((manual_boot_waiting != 0U) ?
+                              (u32)(SHIP_MANUAL_BOOT_HEADING_MAX_WAIT_MS - now_ms) :
+                              0UL),
+                             (u16)heading_ready,
+                             SHIP_MANUAL_BOOT_HEADING_MAX_WAIT_MS);
         }
         AutoDrive_LinkAliveKick();
         return log_this_sample;
@@ -1646,7 +1676,7 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
         SHIP_VIEWER_LOGI(SHIP_TAG,
                          "manual boot ready t=%lums hd=%u",
                          now_ms,
-                         (u16)MainLoop_IsHeadingReady());
+                         (u16)heading_ready);
     }
 
     if (AutoDrive_IsBusy() != 0U) {
@@ -2037,6 +2067,13 @@ static void ShipProtocol_StepPairSend(void)
             g_ship_rt.state = SHIP_STATE_WORK_RX;
             LOGI(SHIP_TAG, "pair req burst done, enter rsp wait on work-rx");
         } else {
+#if SHIP_PAIR_LISTEN_AFTER_EACH_REQ
+            rc = ShipProtocol_ArmPairRspWindow(0U);
+            if (rc != SUCCESS) {
+                LOGE(SHIP_TAG, "pair interim rx arm fail rc=%d", rc);
+                return;
+            }
+#endif
             LOGI(SHIP_TAG, "pair req sent seq_left=%u wait=%u",
                  (u16)g_ship_rt.pair_left,
                  (u16)g_ship_rt.wait_ticks);
@@ -2126,6 +2163,13 @@ void ShipProtocol_RunScheduler(void)
         g_ship_rt.pair_rsp_timeout_logged = 1U;
         LOGW(SHIP_TAG, "pair rsp window expired, no rsp");
         ShipProtocol_LogRxDebug(SHIP_STAGE_U8("pair-rsp-expired"));
+        g_ship_rt.pair_retry_count++;
+        g_ship_rt.pair_left = SHIP_PAIR_SEND_TIMES;
+        g_ship_rt.wait_ticks = SHIP_WAIT_TICKS_DEFAULT;
+        g_ship_rt.pair_wait_start_ms = 0UL;
+        g_ship_rt.pair_rsp_timeout_logged = 0U;
+        g_ship_rt.work_rx_configured = 0U;
+        g_ship_rt.state = SHIP_STATE_PAIR_SEND;
     }
 
     if (g_ship_rt.wait_ticks > 0U) {
