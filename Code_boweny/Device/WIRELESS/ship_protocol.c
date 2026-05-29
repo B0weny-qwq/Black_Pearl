@@ -1423,7 +1423,7 @@ static void ShipProtocol_SendAutoDriveDiagOnce(u8 log_this_tx)
     payload[idx++] = snapshot.gps_ready;
     payload[idx++] = snapshot.sat_count;
     payload[idx++] = snapshot.can_activate_target;
-    payload[idx++] = 0U;
+    payload[idx++] = snapshot.heading_ready;
     ShipProtocol_WriteU16Legacy(&payload[idx], snapshot.distance_to_target_m);
     idx += 2U;
     ShipProtocol_WriteU16Legacy(&payload[idx], snapshot.current_heading_deg);
@@ -1442,13 +1442,14 @@ static void ShipProtocol_SendAutoDriveDiagOnce(u8 log_this_tx)
 
     if (log_this_tx != 0U) {
         LOGI(SHIP_TAG,
-             "tx cmd=0x16 state=%u mode=%u sw=0x%02X reason=%u gps=%u sat=%u dist=%u",
+             "tx cmd=0x16 state=%u mode=%u sw=0x%02X reason=%u gps=%u sat=%u heading=%u dist=%u",
              (u16)snapshot.state,
              (u16)snapshot.mode,
              (u16)snapshot.auto_ret_onoff,
              (u16)snapshot.last_reason,
              (u16)snapshot.gps_ready,
              (u16)snapshot.sat_count,
+             (u16)snapshot.heading_ready,
              (u16)snapshot.distance_to_target_m);
         ShipProtocol_LogPayloadBrief(SHIP_STAGE_U8("tx frame"),
                                      SHIP_CMD_AUTODRIVE_DIAG,
@@ -1536,7 +1537,7 @@ static void ShipProtocol_LogAutoDriveSnapshot(const char *stage)
 
     AutoDrive_GetDebugSnapshot(&snapshot);
     LOGI(SHIP_TAG,
-         "ad %s st=%u md=%u sw=0x%02X fail=%u rsn=%u gps=%u sat=%u can=%u dist=%u",
+         "ad %s st=%u md=%u sw=0x%02X fail=%u rsn=%u gps=%u sat=%u hd=%u can=%u dist=%u",
          stage,
          (u16)snapshot.state,
          (u16)snapshot.mode,
@@ -1545,6 +1546,7 @@ static void ShipProtocol_LogAutoDriveSnapshot(const char *stage)
          (u16)snapshot.last_reason,
          (u16)snapshot.gps_ready,
          (u16)snapshot.sat_count,
+         (u16)snapshot.heading_ready,
          (u16)snapshot.can_activate_target,
          (u16)snapshot.distance_to_target_m);
     LOGI(SHIP_TAG,

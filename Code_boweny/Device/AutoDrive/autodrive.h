@@ -93,6 +93,7 @@ typedef struct
     u8 gps_ready;
     u8 sat_count;
     u8 can_activate_target;
+    u8 heading_ready;
     u16 distance_to_target_m;
     u16 current_heading_deg;
     u16 target_heading_deg;

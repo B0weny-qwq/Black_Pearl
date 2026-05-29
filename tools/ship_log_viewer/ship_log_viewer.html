@@ -2142,13 +2142,15 @@
         important = true;
       }
 
-      const autoDiag = line.match(/\[SHIP\] I: tx cmd=0x16 state=(\d+) mode=(\d+) sw=0x([0-9A-Fa-f]{2}) reason=(\d+) gps=(\d+) sat=(\d+) dist=(\d+)/);
+      const autoDiag = line.match(/\[SHIP\] I: tx cmd=0x16 state=(\d+) mode=(\d+) sw=0x([0-9A-Fa-f]{2}) reason=(\d+) gps=(\d+) sat=(\d+)(?: heading=(\d+))? dist=(\d+)/);
       if (autoDiag) {
         const autoStateNum = Number(autoDiag[1]);
         const autoModeNum = Number(autoDiag[2]);
         const autoState = autoDriveStateText(autoStateNum);
         const autoMode = autoDriveModeText(autoModeNum);
         const reason = autoDriveReasonText(Number(autoDiag[4]));
+        const headingReady = autoDiag[7] || "--";
+        const distance = autoDiag[8];
         const gpsPhase = autoStateNum === 2 ? "原地对准方向" :
                          autoStateNum === 3 ? "角度闭环前往 GPS 点" :
                          autoStateNum === 1 ? "准备导航" :
@@ -2157,19 +2159,19 @@
         state.last.autoDriveValue = `${autoMode} / ${autoState}`;
         state.last.autoDriveMeta =
           `${gpsPhase}\nsw=0x${autoDiag[3].toUpperCase()} reason=${reason}\n`
-          + `gps=${autoDiag[5]} sat=${autoDiag[6]} dist=${autoDiag[7]}m`;
+          + `gps=${autoDiag[5]} sat=${autoDiag[6]} heading=${headingReady} dist=${distance}m`;
         if (autoModeNum !== 0 && autoStateNum !== 0) {
           state.last.controlModeValue = "GPS_NAV_HEADING_HOLD";
           state.last.controlModeMeta = `${gpsPhase}，目标航向由 AutoDrive 计算，CTRL mode=4 为准`;
           state.last.selfStabilizeValue = "ON";
           state.last.selfStabilizeMeta = `GPS 定点巡航角度闭环 / ${gpsPhase}`;
-          updateMotionDecision("GPS角度闭环", `${gpsPhase}\ndist=${autoDiag[7]}m sat=${autoDiag[6]}`, `GPS 定点巡航：${gpsPhase}`);
+          updateMotionDecision("GPS角度闭环", `${gpsPhase}\ndist=${distance}m sat=${autoDiag[6]} heading=${headingReady}`, `GPS 定点巡航：${gpsPhase}`);
         } else if (autoModeNum === 0 && autoStateNum === 0) {
           state.last.controlModeValue = state.last.controlModeValue === "GPS_NAV_HEADING_HOLD" ? "STOP" : state.last.controlModeValue;
         }
         state.last.gpsRawInfo =
-          `AutoDrive ${autoMode}/${autoState} ${gpsPhase} gps=${autoDiag[5]} sat=${autoDiag[6]} dist=${autoDiag[7]}m reason=${reason}`;
-        pushTimeline(`自动驾驶诊断：${autoMode}/${autoState} ${gpsPhase} gps=${autoDiag[5]} sat=${autoDiag[6]} dist=${autoDiag[7]}m reason=${reason}`);
+          `AutoDrive ${autoMode}/${autoState} ${gpsPhase} gps=${autoDiag[5]} sat=${autoDiag[6]} heading=${headingReady} dist=${distance}m reason=${reason}`;
+        pushTimeline(`自动驾驶诊断：${autoMode}/${autoState} ${gpsPhase} gps=${autoDiag[5]} sat=${autoDiag[6]} heading=${headingReady} dist=${distance}m reason=${reason}`);
         important = true;
       }
 

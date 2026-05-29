@@ -280,7 +280,7 @@ static u8 MAG_UpdateCompassFilter(int16 raw_x, int16 raw_y, int16 raw_z,
 
 static void MAG_ResetCompassFilter(void)
 {
-    g_mag_heading_ready_snapshot = 0U;
+    /* Keep the last ready heading visible while AHRS rebuilds the filter. */
     g_mag_filter_started = 0U;
     g_mag_filter_stable_count = 0U;
     g_mag_norm_base = 0UL;
@@ -297,6 +297,7 @@ static void MAG_StandalonePoll(void)
     u32 norm1;
     u32 horiz_sum;
     u16 compass_cd;
+    u16 filtered_cd;
     int16 mx, my, mz;
 
     now_ms = Task_GetTickMs();
@@ -319,6 +320,9 @@ static void MAG_StandalonePoll(void)
 
     error_latched = 0;
     if (MAG_CompassHeadingDeg100(mx, my, mz, &compass_cd, &norm1, &horiz_sum) != 0U) {
+        if (MAG_UpdateCompassFilter(mx, my, mz, &filtered_cd) != 0U) {
+            compass_cd = filtered_cd;
+        }
         LOGI("MAG", "test raw=%d %d %d norm1=%lu compass=%u.%02u stable=%u",
              mx,
              my,
@@ -677,10 +681,13 @@ static void IMU_AhrsPoll(void)
     if ((now_ms - last_mag_ms) >= AHRS_MAG_PERIOD_MS) {
         last_mag_ms = now_ms;
         if (QMC6309_ReadXYZFiltered(&mx, &my, &mz) == 0) {
-            if ((heading_mag_settled != 0U) &&
-                (MAG_UpdateCompassFilter(mx, my, mz, &stable_mag_heading_cd) != 0U)) {
-                stable_mag_valid = 1U;
+            (void)AHRS_UpdateRawMag(mx, my, mz);
+            if (MAG_UpdateCompassFilter(mx, my, mz, &stable_mag_heading_cd) != 0U) {
+                if (heading_mag_settled != 0U) {
+                    stable_mag_valid = 1U;
+                }
             }
+            self_stabilize_flag = AHRS_HasSelfStabilize(att);
             last_mag_x = mx;
             last_mag_y = my;
             last_mag_z = mz;
@@ -908,6 +915,11 @@ u8 MainLoop_IsHeadingReady(void)
         return 1U;
     }
 #endif
+#if ENABLE_MAG_MODULE
+    if (g_mag_heading_ready_snapshot != 0U) {
+        return 1U;
+    }
+#endif
     return 0U;
 }
 
@@ -927,12 +939,17 @@ u16 MainLoop_GetHeadingDeg100(void)
         return (u16)heading_cd;
     }
 #endif
+#if ENABLE_MAG_MODULE
+    if (g_mag_heading_ready_snapshot != 0U) {
+        return g_mag_heading_deg100_snapshot;
+    }
+#endif
     return 0U;
 }
 
 u8 MainLoop_IsMagHeadingFallback(void)
 {
-#if ENABLE_MAG_MODULE && ENABLE_MAG_STANDALONE_POLL
+#if ENABLE_MAG_MODULE
     if (g_mag_heading_ready_snapshot != 0U) {
         return 1U;
     }

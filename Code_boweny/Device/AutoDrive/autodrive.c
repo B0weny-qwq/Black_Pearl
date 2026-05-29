@@ -21,6 +21,8 @@
 #define AUTODRIVE_MAX_ACTIVE_DISTANCE_M    800U
 /* 到达判定距离，进入该范围后停止自动巡航。 */
 #define AUTODRIVE_ARRIVE_DISTANCE_M        3U
+/* 有效定位已经成立时，卫星数低于该值才阻止 AutoDrive 启动。 */
+#define AUTODRIVE_GPS_MIN_READY_SAT         5U
 
 /* ==================== 前进速度策略 ==================== */
 /* 远距离正常巡航基础速度。 */
@@ -359,10 +361,13 @@ static u8 AutoDrive_GpsReady(void)
         return 0U;
     }
     sat_count = (gps->satellites_used_gsa > 0U) ? gps->satellites_used_gsa : gps->satellites_used;
-    if (sat_count < 7U) {
+    if ((gps->lat_deg1e7 == 0L) || (gps->lon_deg1e7 == 0L)) {
         return 0U;
     }
-    if ((gps->lat_deg1e7 == 0L) || (gps->lon_deg1e7 == 0L)) {
+    if ((gps->fix_valid == 0U) && (gps->legacy_coord_valid == 0U)) {
+        return 0U;
+    }
+    if ((sat_count > 0U) && (sat_count < AUTODRIVE_GPS_MIN_READY_SAT)) {
         return 0U;
     }
     return 1U;
@@ -422,6 +427,18 @@ static void AutoDrive_TickAlignTracker(void)
     if (g_autodrive_align_ticks < AUTODRIVE_ALIGN_SOFT_EXIT_TICKS) {
         g_autodrive_align_ticks++;
     }
+}
+
+static void AutoDrive_StartTarget(u8 mode)
+{
+    AutoDrive_SetMode(mode);
+    g_autoDrive_state = AUTO_DRIVE_START;
+    g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
+    g_autoDrive_fail_flag = 0U;
+    g_autodrive_target_heading_valid = 0U;
+    AutoDrive_ResetApproachTracker();
+    AutoDrive_ResetAlignTracker();
+    ShipControl_StopGpsNav();
 }
 
 static int16 AutoDrive_Abs16(int16 value)
@@ -712,27 +729,16 @@ void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
     }
 
     AutoDrive_CopyPoint(&g_return_position, &rx_point);
-    if (AutoDrive_IsCanActive(&g_return_position) == 0U) {
+    if (AutoDrive_PointRawValid(&g_return_position) == 0U) {
         return;
     }
-
-    AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
-    g_autoDrive_state = AUTO_DRIVE_START;
-    g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
-    g_autoDrive_fail_flag = 0U;
+    AutoDrive_StartTarget(AUTO_DRIVE_GO_HOME_POSITION);
 }
 
 static u8 AutoDrive_StartFishPoint(const AutoDrive_PointRaw_t *point)
 {
     AutoDrive_CopyPoint(&g_fish_position, point);
-    if (AutoDrive_IsCanActive(&g_fish_position) == 0U) {
-        return AUTODRIVE_FISH_CMD_REJECT_DISTANCE;
-    }
-
-    AutoDrive_SetMode(AUTO_DRIVE_GO_FISISH_POSITION);
-    g_autoDrive_state = AUTO_DRIVE_START;
-    g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
-    g_autoDrive_fail_flag = 0U;
+    AutoDrive_StartTarget(AUTO_DRIVE_GO_FISISH_POSITION);
     return AUTODRIVE_FISH_CMD_STARTED;
 }
 
@@ -748,14 +754,11 @@ static u8 AutoDrive_StartReturnFromConfig(u8 reason)
     if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
         return 0U;
     }
-    if (AutoDrive_IsCanActive(&g_autodrv_cfg.ret_point) == 0U) {
+    AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
+    if (AutoDrive_PointRawValid(&g_return_position) == 0U) {
         return 0U;
     }
-
-    AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
-    AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
-    g_autoDrive_state = AUTO_DRIVE_START;
-    g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
+    AutoDrive_StartTarget(AUTO_DRIVE_GO_HOME_POSITION);
     return 1U;
 }
 
@@ -1488,6 +1491,7 @@ void AutoDrive_GetDebugSnapshot(AutoDrive_DebugSnapshot_t *snapshot)
     snapshot->last_reason = g_last_diag_reason;
     snapshot->gps_ready = AutoDrive_GpsReady();
     snapshot->sat_count = AutoDrive_GetSatCount();
+    snapshot->heading_ready = MainLoop_IsHeadingReady();
     snapshot->current_point.lon_ew = 0U;
     snapshot->current_point.lon_whole = 0U;
     snapshot->current_point.lon_frac = 0U;
