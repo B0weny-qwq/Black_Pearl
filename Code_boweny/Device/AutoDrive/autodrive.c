@@ -50,8 +50,11 @@
 #define AUTODRIVE_COS_LAT_MAX_DEG          90U
 
 /* ==================== 启航前原地对准放行条件 ==================== */
-/* 对准放行容差，单位 0.01 度；300 表示目标航向 +/-3.00 度。 */
-#define AUTODRIVE_ALIGN_EXIT_ERROR_CD      300
+/* 对准放行容差，单位 0.01 度；800 表示目标航向 +/-8.00 度。 */
+#define AUTODRIVE_ALIGN_EXIT_ERROR_CD      800
+/* 原地对准超过约 5s 后，12 度内也允许起步，避免卡在原地持续找方向。 */
+#define AUTODRIVE_ALIGN_SOFT_EXIT_ERROR_CD 1200
+#define AUTODRIVE_ALIGN_SOFT_EXIT_TICKS    500U
 
 static u8 g_autoDrive_switch = 0U;
 static u8 g_autoDrive_state = AUTO_DRIVE_IDLE;
@@ -85,6 +88,7 @@ static u32 g_last_poll_tick_ms = 0UL;
 static u32 g_last_link_tick_ms = 0UL;
 static u8 g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
 static u8 g_return_switch_started = 0U;
+static u16 g_autodrive_align_ticks = 0U;
 
 static u16 AutoDrive_ReadU16Wire(const u8 *data_m)
 {
@@ -408,6 +412,18 @@ static void AutoDrive_ResetApproachTracker(void)
     g_autodrive_base_speed = AUTODRIVE_CRUISE_BASE_SPEED;
 }
 
+static void AutoDrive_ResetAlignTracker(void)
+{
+    g_autodrive_align_ticks = 0U;
+}
+
+static void AutoDrive_TickAlignTracker(void)
+{
+    if (g_autodrive_align_ticks < AUTODRIVE_ALIGN_SOFT_EXIT_TICKS) {
+        g_autodrive_align_ticks++;
+    }
+}
+
 static int16 AutoDrive_Abs16(int16 value)
 {
     return (value >= 0) ? value : (int16)(-value);
@@ -448,7 +464,12 @@ static u8 AutoDrive_AlignTargetReached(void)
         return 0U;
     }
 
-    if (AutoDrive_Abs16(heading_error_cd) <= (int16)AUTODRIVE_ALIGN_EXIT_ERROR_CD) {
+    heading_error_cd = AutoDrive_Abs16(heading_error_cd);
+    if (heading_error_cd <= (int16)AUTODRIVE_ALIGN_EXIT_ERROR_CD) {
+        return 1U;
+    }
+    if ((g_autodrive_align_ticks >= AUTODRIVE_ALIGN_SOFT_EXIT_TICKS) &&
+        (heading_error_cd <= (int16)AUTODRIVE_ALIGN_SOFT_EXIT_ERROR_CD)) {
         return 1U;
     }
     return 0U;
@@ -602,6 +623,7 @@ void AutoDrive_StopMotion(void)
 {
     g_autodrive_target_heading_valid = 0U;
     AutoDrive_ResetApproachTracker();
+    AutoDrive_ResetAlignTracker();
     ShipControl_StopGpsNav();
 }
 
@@ -1268,6 +1290,7 @@ void AutoDrive_Init(void)
     g_autodrive_target_heading_cd = 0U;
     g_autodrive_target_heading_valid = 0U;
     AutoDrive_ResetApproachTracker();
+    AutoDrive_ResetAlignTracker();
 
     AutoDrive_StopMotion();
 }
@@ -1362,6 +1385,7 @@ void AutoDrive_Poll(void)
         }
 
         ShipControl_ResetYawHoldController();
+        AutoDrive_ResetAlignTracker();
         g_last_run_update_seq = gps->update_sequence;
         g_autoDrive_state = AUTO_DRIVE_GET_DIRECTION;
         (void)AutoDrive_ApplyAlignHeadingHold();
@@ -1389,17 +1413,15 @@ void AutoDrive_Poll(void)
                 AutoDrive_StopMotion();
                 break;
             }
-            if (AutoDrive_UpdateTargetHeading(&g_now_position, target_point) != 0U) {
-                AutoDrive_CopyPoint(&g_last_position, &g_now_position);
-                g_last_run_update_seq = gps->update_sequence;
-            }
         }
 
         if (AutoDrive_ApplyAlignHeadingHold() == 0U) {
             break;
         }
+        AutoDrive_TickAlignTracker();
         if (AutoDrive_AlignTargetReached() != 0U) {
             ShipControl_ResetYawHoldController();
+            AutoDrive_ResetAlignTracker();
             g_autoDrive_state = AUTO_DRIVE_RUNING;
             (void)AutoDrive_ApplyHeadingHold(g_autodrive_base_speed);
         }
