@@ -962,10 +962,6 @@ int16 MainLoop_GetGyroZDps100(void)
 
 void MainLoop_RunOnce(void)
 {
-#if ENABLE_GPS_MODULE
-    GPS_Poll();
-#endif
-
 #if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP
     Wireless_Poll();
 #if ENABLE_SHIP_PROTOCOL_SCHED && SHIP_PROTOCOL_POLL_ENABLE
@@ -975,6 +971,10 @@ void MainLoop_RunOnce(void)
     ShipProtocol_Poll();
 #endif
     Wireless_SearchSignalPoll();
+#endif
+
+#if ENABLE_GPS_MODULE
+    GPS_Poll();
 #endif
 
 #if ENABLE_MAG_MODULE && ENABLE_MAG_STANDALONE_POLL

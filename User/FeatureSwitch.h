@@ -567,6 +567,7 @@
  * @brief  配对发送次数
  */
 #define SHIP_PAIR_SEND_TIMES           10U
+#define SHIP_PAIR_LISTEN_AFTER_EACH_REQ 1U
 
 /**
  * @brief  默认等待 tick
@@ -603,7 +604,7 @@
  * @brief  开机手动控制是否等待航向传感器 ready
  * @details 1 表示最短等待结束后仍需 MainLoop_IsHeadingReady() 成立才放行。
  */
-#define SHIP_MANUAL_BOOT_WAIT_HEADING  1U
+#define SHIP_MANUAL_BOOT_WAIT_HEADING  0U
 
 /**
  * @brief  工作接收重开 tick

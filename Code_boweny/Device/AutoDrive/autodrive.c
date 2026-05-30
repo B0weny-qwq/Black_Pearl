@@ -598,6 +598,9 @@ u8 AutoDrive_IsCanActive(const AutoDrive_PointRaw_t *point)
     if (AutoDrive_GetReadyCurrentPoint(&current_point) == 0U) {
         return 0U;
     }
+    if (MainLoop_IsHeadingReady() == 0U) {
+        return 0U;
+    }
 
     distance = AutoDrive_GetDistanceNowToDestination((const u8 *)point,
                                                      (const u8 *)&current_point);
