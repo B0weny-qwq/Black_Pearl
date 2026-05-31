@@ -13,7 +13,11 @@
 #include "..\Code_boweny\Function\AHRS\HeadingEstimator.h"
 #include "..\Code_boweny\Function\Log\Log.h"
 
-#if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP
+#ifndef MAINLOOP_WIRELESS_BOOT_SELF_TEST
+#define MAINLOOP_WIRELESS_BOOT_SELF_TEST 0U
+#endif
+
+#if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP && MAINLOOP_WIRELESS_BOOT_SELF_TEST
 static void Wireless_MinimalTestUnit(void)
 {
     s8 rc;
@@ -24,6 +28,26 @@ static void Wireless_MinimalTestUnit(void)
         LOGE("WL", "minimal test fail rc=%d", rc);
     }
 }
+#endif
+
+#if ENABLE_MAG_MODULE || ENABLE_IMU_MODULE
+typedef enum
+{
+    SENSOR_BOOT_WAIT_PAIR = 0,
+    SENSOR_BOOT_I2C_PREPARE,
+    SENSOR_BOOT_MAG_INIT,
+    SENSOR_BOOT_IMU_START,
+    SENSOR_BOOT_IMU_WAIT_READY,
+    SENSOR_BOOT_READY,
+    SENSOR_BOOT_FAILED
+} SensorBootState_t;
+
+static SensorBootState_t g_sensor_boot_state = SENSOR_BOOT_WAIT_PAIR;
+static u8 g_sensor_boot_started = 0U;
+
+static void MainLoop_StartSensorBootIfPaired(void);
+static void MainLoop_ServiceSensorBoot(void);
+static u8 MainLoop_SensorsReady(void);
 #endif
 
 #if ENABLE_MAG_MODULE
@@ -56,12 +80,12 @@ static void Wireless_MinimalTestUnit(void)
 #define MAG_COMPASS_RAW_OFFSET_CD      0L
 #endif
 #ifndef MAG_COMPASS_DIRECTION_SIGN
-/* Current board mount makes raw compass angle run opposite to phone compass. */
-#define MAG_COMPASS_DIRECTION_SIGN     (-1L)
+/* Current measured heading direction matches real clockwise rotation after sign correction. */
+#define MAG_COMPASS_DIRECTION_SIGN     (1L)
 #endif
 #ifndef MAG_COMPASS_INSTALL_OFFSET_CD
-/* Boat bow points true north while raw compass shows 219.3 deg. */
-#define MAG_COMPASS_INSTALL_OFFSET_CD  21930L
+/* Old corrected north read 287.0 deg; same-direction total offset is 67.7 deg. */
+#define MAG_COMPASS_INSTALL_OFFSET_CD  6770L
 #endif
 #ifndef MAG_COMPASS_DECLINATION_CD
 #define MAG_COMPASS_DECLINATION_CD     0L
@@ -896,10 +920,115 @@ void MainLoop_Bootstrap(void)
     g_heading_ready_snapshot = 0U;
 #endif
 
-#if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP
+#if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP && MAINLOOP_WIRELESS_BOOT_SELF_TEST
     Wireless_MinimalTestUnit();
 #endif
 }
+
+#if ENABLE_MAG_MODULE || ENABLE_IMU_MODULE
+static void MainLoop_StartSensorBootIfPaired(void)
+{
+#if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP && ENABLE_SHIP_PROTOCOL_SCHED
+    if (ShipProtocol_IsPaired() == 0U) {
+        return;
+    }
+#endif
+
+    if (g_sensor_boot_started != 0U) {
+        return;
+    }
+
+    g_sensor_boot_started = 1U;
+    g_sensor_boot_state = SENSOR_BOOT_I2C_PREPARE;
+    LOGI("SYS", "sensor boot start after rc pair");
+}
+
+static u8 MainLoop_SensorsReady(void)
+{
+    return ((g_sensor_boot_started != 0U) &&
+            (g_sensor_boot_state == SENSOR_BOOT_READY)) ? 1U : 0U;
+}
+
+static void MainLoop_ServiceSensorBoot(void)
+{
+    if (g_sensor_boot_started == 0U) {
+        return;
+    }
+
+    switch (g_sensor_boot_state) {
+    case SENSOR_BOOT_I2C_PREPARE:
+        Sensor_I2C_prepare();
+        g_qmi8658_ready = 0U;
+        AHRS_Reset();
+#if ENABLE_IMU_MODULE && ENABLE_IMU_AHRS_POLL
+        Heading_Init(&g_heading);
+        g_heading_rel_cd_snapshot = 0;
+        g_heading_ready_snapshot = 0U;
+#endif
+        g_sensor_boot_state = SENSOR_BOOT_MAG_INIT;
+        return;
+
+    case SENSOR_BOOT_MAG_INIT:
+#if ENABLE_MAG_MODULE
+        if (QMC6309_Init() == 0) {
+            LOGI("SYS", "mag init ready");
+        } else {
+            LOGE("SYS", "mag init failed");
+            g_sensor_boot_state = SENSOR_BOOT_FAILED;
+            return;
+        }
+#endif
+        g_sensor_boot_state = SENSOR_BOOT_IMU_START;
+        return;
+
+    case SENSOR_BOOT_IMU_START:
+#if ENABLE_IMU_MODULE
+#if QMI8658_INIT_NONBLOCKING
+        QMI8658_RequestReinit();
+        g_qmi8658_ready = 0U;
+        g_sensor_boot_state = SENSOR_BOOT_IMU_WAIT_READY;
+#else
+        g_qmi8658_ready = (QMI8658_Init() == 0) ? 1U : 0U;
+        if (g_qmi8658_ready != 0U) {
+            LOGI("SYS", "imu init ready");
+            g_sensor_boot_state = SENSOR_BOOT_READY;
+        } else {
+            LOGE("SYS", "imu init failed");
+            g_sensor_boot_state = SENSOR_BOOT_FAILED;
+        }
+#endif
+#else
+        g_qmi8658_ready = 1U;
+        g_sensor_boot_state = SENSOR_BOOT_READY;
+#endif
+        return;
+
+    case SENSOR_BOOT_IMU_WAIT_READY:
+#if ENABLE_IMU_MODULE
+        if (IMU_ServicePoll() != 0U) {
+            LOGI("SYS", "imu init ready");
+            g_sensor_boot_state = SENSOR_BOOT_READY;
+        } else if (QMI8658_GetState() == QMI8658_STATE_FAILED) {
+            g_sensor_boot_state = SENSOR_BOOT_FAILED;
+            LOGE("SYS", "imu init failed");
+        }
+#else
+        g_sensor_boot_state = SENSOR_BOOT_READY;
+#endif
+        return;
+
+    case SENSOR_BOOT_READY:
+        return;
+
+    case SENSOR_BOOT_FAILED:
+        return;
+
+    case SENSOR_BOOT_WAIT_PAIR:
+    default:
+        return;
+    }
+}
+#endif
 
 u8 MainLoop_IsHeadingReady(void)
 {
@@ -977,12 +1106,19 @@ void MainLoop_RunOnce(void)
     Wireless_SearchSignalPoll();
 #endif
 
+#if ENABLE_MAG_MODULE || ENABLE_IMU_MODULE
+    MainLoop_StartSensorBootIfPaired();
+    MainLoop_ServiceSensorBoot();
+#endif
+
 #if ENABLE_MAG_MODULE && ENABLE_MAG_STANDALONE_POLL
-    MAG_StandalonePoll();
+    if (MainLoop_SensorsReady() != 0U) {
+        MAG_StandalonePoll();
+    }
 #endif
 
 #if ENABLE_IMU_MODULE
-    if (IMU_ServicePoll() != 0U) {
+    if ((MainLoop_SensorsReady() != 0U) && (IMU_ServicePoll() != 0U)) {
 #if ENABLE_IMU_AHRS_POLL
         IMU_AhrsPoll();
 #elif ENABLE_IMU_BASIC_POLL

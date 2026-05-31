@@ -142,8 +142,8 @@ static s8 Wireless_SetRxMode(void)
     s8 rc;
 
 #if !WIRELESS_FRONTEND_BYPASS_TEST
-    /* Enable the TX frontend when the legacy transmitter path is used.
-     * Keep RX_EN/TX_EN sequencing in sync with LT8920_TxData(). */
+    /* RX mode must never leave the frontend PA enabled. */
+    WirelessPort_SetTxEn(0U);
     WirelessPort_SetRxEn(1U);
     WirelessPort_DelayUs(5U);
 #endif
@@ -318,6 +318,34 @@ s8 Wireless_Init(void)
     g_wireless_state.scan_has_signal = 1U;
     g_wireless_state.antenna_rssi_ant1 = 0U;
     g_wireless_state.antenna_rssi_ant2 = 0U;
+#elif (WIRELESS_FORCE_ANT_MODE == WIRELESS_FORCE_ANT_1)
+    rc = Wireless_SetAntenna(WIRELESS_ANT1);
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        g_wireless_state.initialized = 0U;
+        g_wireless_state.ready = 0U;
+        (void)Wireless_SetIdleMode();
+        LOGE(WIRELESS_TAG, "force ant1 fail rc=%d", rc);
+        return rc;
+    }
+    g_wireless_state.scan_has_signal = 1U;
+    g_wireless_state.antenna_rssi_ant1 = 0U;
+    g_wireless_state.antenna_rssi_ant2 = 0U;
+    LOGI(WIRELESS_TAG, "skip scan, force ANT1");
+#elif (WIRELESS_FORCE_ANT_MODE == WIRELESS_FORCE_ANT_2)
+    rc = Wireless_SetAntenna(WIRELESS_ANT2);
+    if (rc != SUCCESS) {
+        g_wireless_state.last_error = rc;
+        g_wireless_state.initialized = 0U;
+        g_wireless_state.ready = 0U;
+        (void)Wireless_SetIdleMode();
+        LOGE(WIRELESS_TAG, "force ant2 fail rc=%d", rc);
+        return rc;
+    }
+    g_wireless_state.scan_has_signal = 1U;
+    g_wireless_state.antenna_rssi_ant1 = 0U;
+    g_wireless_state.antenna_rssi_ant2 = 0U;
+    LOGI(WIRELESS_TAG, "skip scan, force ANT2");
 #else
     rc = Wireless_RescanAntenna();
     if (rc != SUCCESS) {

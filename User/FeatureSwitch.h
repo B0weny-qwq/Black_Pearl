@@ -308,7 +308,7 @@
  * - 0U：关闭 GPS 诊断刷屏
  * - 1U：打印 GPS 解析与状态细节
  */
-#define GPS_DIAG_LOG_ENABLE            0U
+#define GPS_DIAG_LOG_ENABLE            1U
 /** @} */
 
 /* 传感器总线 */
@@ -394,9 +394,9 @@
 
 /**
  * @brief  QMI8658 初始化是否非阻塞
- * @details 当前关闭，使用阻塞式 bring-up，便于稳定复现。
+ * @details 当前开启，配对完成后由主循环状态机推进，避免阻塞遥控油门。
  */
-#define QMI8658_INIT_NONBLOCKING       0
+#define QMI8658_INIT_NONBLOCKING       1
 /** @} */
 
 /* 无线硬件 */
@@ -595,15 +595,15 @@
 
 /**
  * @brief  开机后手动油门最短阻塞时间
- * @details 主循环和传感器照常运行，仅 0x11 手动电机控制在该窗口内不下发。
+ * @details 当前设为 0，配对后 0x11 手动油门立即下发。
  */
-#define SHIP_MANUAL_BOOT_BLOCK_MS      3000UL
+#define SHIP_MANUAL_BOOT_BLOCK_MS      0UL
 
 /**
  * @brief  开机手动控制是否等待航向传感器 ready
- * @details 1 表示最短等待结束后仍需 MainLoop_IsHeadingReady() 成立才放行。
+ * @details 当前设为 0，手动开环不等航向；自稳和巡航仍由 MainLoop_IsHeadingReady() 门控。
  */
-#define SHIP_MANUAL_BOOT_WAIT_HEADING  1U
+#define SHIP_MANUAL_BOOT_WAIT_HEADING  0U
 
 /**
  * @brief  工作接收重开 tick

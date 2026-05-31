@@ -8,6 +8,7 @@
 #include "config.h"
 
 void SYS_Init(void);
+void Sensor_I2C_prepare(void);
 extern u8 g_qmi8658_ready;
 
 #endif

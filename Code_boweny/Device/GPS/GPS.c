@@ -49,9 +49,15 @@ static u16  g_gps_fifo_head = 0;
 static u16  g_gps_fifo_tail = 0;
 static u16  g_gps_fifo_count = 0;
 #if (GPS_DIAG_LOG_ENABLE != 0U)
+#define GPS_DIAG_RAW_PREVIEW_LEN   16U
 static u32  g_gps_diag_rx_bytes = 0UL;
 static u32  g_gps_diag_last_ms = 0UL;
 static u8   g_gps_diag_logged_once = 0U;
+static u8   g_gps_diag_raw_preview[GPS_DIAG_RAW_PREVIEW_LEN];
+static u8   g_gps_diag_raw_count = 0U;
+static u16  g_gps_diag_dollar_count = 0U;
+static u16  g_gps_diag_cr_count = 0U;
+static u16  g_gps_diag_lf_count = 0U;
 #endif
 
 static void GPS_ClearState(void);
@@ -91,6 +97,9 @@ static void GPS_DiagLogPoll(void);
 static void GPS_DiagSentenceSummary(const char *sentence, char *out, u8 out_len);
 static void GPS_DiagLogSentence(const char *sentence, u8 result);
 static void GPS_DiagLogParseFail(char *sentence, const char *reason);
+static void GPS_DiagCaptureByte(u8 dat);
+static char GPS_DiagHexNibble(u8 value);
+static void GPS_DiagBuildRawPreview(char *out, u8 out_len);
 #endif
 
 static void GPS_ClearState(void)
@@ -123,6 +132,10 @@ static void GPS_ClearParser(void)
     g_gps_diag_rx_bytes = 0UL;
     g_gps_diag_last_ms = 0UL;
     g_gps_diag_logged_once = 0U;
+    g_gps_diag_raw_count = 0U;
+    g_gps_diag_dollar_count = 0U;
+    g_gps_diag_cr_count = 0U;
+    g_gps_diag_lf_count = 0U;
 #endif
 
     for (i = 0; i < (u16)GPS_SENTENCE_BUFFER_SIZE; i++) {
@@ -143,15 +156,67 @@ static void GPS_RawEchoByte(u8 dat)
 }
 
 #if (GPS_DIAG_LOG_ENABLE != 0U)
+static void GPS_DiagCaptureByte(u8 dat)
+{
+    if (g_gps_diag_raw_count < GPS_DIAG_RAW_PREVIEW_LEN) {
+        g_gps_diag_raw_preview[g_gps_diag_raw_count] = dat;
+        g_gps_diag_raw_count++;
+    }
+    if (dat == (u8)'$') {
+        g_gps_diag_dollar_count++;
+    } else if (dat == (u8)'\r') {
+        g_gps_diag_cr_count++;
+    } else if (dat == (u8)'\n') {
+        g_gps_diag_lf_count++;
+    } else {
+        /* Keep only lightweight counters in the 8-bit polling path. */
+    }
+}
+
+static char GPS_DiagHexNibble(u8 value)
+{
+    value &= 0x0FU;
+    if (value < 10U) {
+        return (char)('0' + value);
+    }
+    return (char)('A' + (value - 10U));
+}
+
+static void GPS_DiagBuildRawPreview(char *out, u8 out_len)
+{
+    u8 i;
+    u8 pos;
+    u8 dat;
+
+    if ((out == 0) || (out_len == 0U)) {
+        return;
+    }
+    pos = 0U;
+    for (i = 0U; i < g_gps_diag_raw_count; i++) {
+        if ((u8)(pos + 3U) >= out_len) {
+            break;
+        }
+        dat = g_gps_diag_raw_preview[i];
+        out[pos++] = GPS_DiagHexNibble((u8)(dat >> 4));
+        out[pos++] = GPS_DiagHexNibble(dat);
+        if (i != (u8)(g_gps_diag_raw_count - 1U)) {
+            out[pos++] = ' ';
+        }
+    }
+    out[pos] = 0;
+}
+
 static void GPS_DiagLogPoll(void)
 {
     u32 now_ms;
+    char raw_preview[(GPS_DIAG_RAW_PREVIEW_LEN * 3U) + 1U];
 
     now_ms = Task_GetTickMs();
     if ((g_gps_diag_logged_once == 0U) ||
         ((now_ms - g_gps_diag_last_ms) >= GPS_DIAG_LOG_MS)) {
         g_gps_diag_logged_once = 1U;
         g_gps_diag_last_ms = now_ms;
+        GPS_DiagBuildRawPreview(raw_preview, (u8)sizeof(raw_preview));
         LOGI("GPS",
              "diag uart init=%u rx_cnt=%u read=%u fifo=%u bytes=%lu",
              (u16)g_gps_initialized,
@@ -173,6 +238,12 @@ static void GPS_DiagLogPoll(void)
              (u16)g_gps_state.satellites_used,
              (u16)g_gps_state.satellites_view,
              (u32)g_gps_state.update_sequence);
+        LOGI("GPS",
+             "diag raw $=%u cr=%u lf=%u first=%s",
+             (u16)g_gps_diag_dollar_count,
+             (u16)g_gps_diag_cr_count,
+             (u16)g_gps_diag_lf_count,
+             raw_preview);
     }
 }
 
@@ -292,6 +363,7 @@ static void GPS_DrainUart2Buffer(void)
             GPS_RawEchoByte(RX2_Buffer[g_gps_uart_read_index]);
             GPS_FifoPush(RX2_Buffer[g_gps_uart_read_index]);
 #if (GPS_DIAG_LOG_ENABLE != 0U)
+            GPS_DiagCaptureByte(RX2_Buffer[g_gps_uart_read_index]);
             g_gps_diag_rx_bytes++;
 #endif
             g_gps_uart_read_index++;
@@ -304,6 +376,7 @@ static void GPS_DrainUart2Buffer(void)
         GPS_RawEchoByte(RX2_Buffer[g_gps_uart_read_index]);
         GPS_FifoPush(RX2_Buffer[g_gps_uart_read_index]);
 #if (GPS_DIAG_LOG_ENABLE != 0U)
+        GPS_DiagCaptureByte(RX2_Buffer[g_gps_uart_read_index]);
         g_gps_diag_rx_bytes++;
 #endif
         g_gps_uart_read_index++;
