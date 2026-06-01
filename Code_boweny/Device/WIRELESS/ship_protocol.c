@@ -90,7 +90,7 @@
 #define SHIP_CRUISE_KEY_SPEED          760
 #define SHIP_CRUISE_STEER_START_MAX    8
 #define SHIP_CRUISE_GYRO_START_MAX_DPS 8
-#define SHIP_NORTH_CALIB_LONG_PRESS_MS 1500UL
+#define SHIP_NORTH_CALIB_DOUBLE_CLICK_MS 1000UL
 #define SHIP_POWER_LEVEL_0             0U
 #define SHIP_POWER_LEVEL_1             1U
 #define SHIP_POWER_LEVEL_2             2U
@@ -190,9 +190,9 @@ typedef struct
     u8 manual_boot_block_logged;   /**< 手动输入启动阻塞日志是否已输出。 */
     u8 manual_boot_ready_logged;   /**< 手动输入启动就绪日志是否已输出。 */
     u32 rc_input_last_log_ms;      /**< 遥控输入日志限频时间戳。 */
-    u8 d_key_down;                 /**< D 键当前是否处于按下状态。 */
-    u8 d_key_triggered;            /**< D 键长按触发是否已经消费。 */
-    u32 d_key_down_start_ms;       /**< D 键按下起始时间，用于长按检测。 */
+    u8 d_key_pressed;              /**< D key is currently pressed. */
+    u8 d_key_click_waiting;        /**< Waiting for second D key click. */
+    u32 d_key_first_click_ms;      /**< First D key click time for double-click detection. */
 } ShipRuntime_t;
 
 /**
@@ -556,7 +556,7 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
         SHIP_VIEWER_LOG0(SHIP_TAG, "key action=C noop");
         break;
     case SHIP_KEY_D_UNUSED:
-        SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D wait-longpress");
+        SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D wait-double-click");
         break;
     case SHIP_KEY_E_RESERVED:
         if (cruise_active != 0U) {
@@ -636,27 +636,33 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
     }
 }
 
-/* D 键用长按触发北向校准，短按仍保持无业务动作。 */
+/* D key starts north calibration only on two presses within 1s. */
 static void ShipProtocol_ServiceNorthCalibKey(u8 key, u32 now_ms)
 {
     if (key == SHIP_KEY_D_UNUSED) {
-        if (g_ship_rt.d_key_down == 0U) {
-            g_ship_rt.d_key_down = 1U;
-            g_ship_rt.d_key_triggered = 0U;
-            g_ship_rt.d_key_down_start_ms = now_ms;
-        } else if ((g_ship_rt.d_key_triggered == 0U) &&
-                   ((now_ms - g_ship_rt.d_key_down_start_ms) >= SHIP_NORTH_CALIB_LONG_PRESS_MS)) {
-            g_ship_rt.d_key_triggered = 1U;
-            if (NorthCalib_RequestStart() != 0U) {
-                SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D north-calib-start");
+        if (g_ship_rt.d_key_pressed == 0U) {
+            g_ship_rt.d_key_pressed = 1U;
+            if ((g_ship_rt.d_key_click_waiting != 0U) &&
+                ((now_ms - g_ship_rt.d_key_first_click_ms) <= SHIP_NORTH_CALIB_DOUBLE_CLICK_MS)) {
+                g_ship_rt.d_key_click_waiting = 0U;
+                g_ship_rt.d_key_first_click_ms = 0UL;
+                if (NorthCalib_RequestStart() != 0U) {
+                    SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D north-calib-start");
+                } else {
+                    SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D north-calib-reject");
+                }
             } else {
-                SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D north-calib-reject");
+                g_ship_rt.d_key_click_waiting = 1U;
+                g_ship_rt.d_key_first_click_ms = now_ms;
             }
         }
     } else {
-        g_ship_rt.d_key_down = 0U;
-        g_ship_rt.d_key_triggered = 0U;
-        g_ship_rt.d_key_down_start_ms = 0UL;
+        g_ship_rt.d_key_pressed = 0U;
+        if ((g_ship_rt.d_key_click_waiting != 0U) &&
+            ((now_ms - g_ship_rt.d_key_first_click_ms) > SHIP_NORTH_CALIB_DOUBLE_CLICK_MS)) {
+            g_ship_rt.d_key_click_waiting = 0U;
+            g_ship_rt.d_key_first_click_ms = 0UL;
+        }
     }
 }
 
@@ -2037,9 +2043,9 @@ static void ShipProtocol_InitRuntime(void)
     g_ship_rt.manual_boot_block_logged = 0U;
     g_ship_rt.manual_boot_ready_logged = 0U;
     g_ship_rt.rc_input_last_log_ms = 0UL;
-    g_ship_rt.d_key_down = 0U;
-    g_ship_rt.d_key_triggered = 0U;
-    g_ship_rt.d_key_down_start_ms = 0UL;
+    g_ship_rt.d_key_pressed = 0U;
+    g_ship_rt.d_key_click_waiting = 0U;
+    g_ship_rt.d_key_first_click_ms = 0UL;
     g_ship_power_sample_times = 0U;
     g_lowpower_check_times = 0U;
     ShipControl_Init();
