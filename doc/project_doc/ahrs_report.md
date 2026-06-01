@@ -119,3 +119,12 @@ quaternion
 2. 记录不同磁环境下的 `mv=0 / MAG_VALID` 表现，确认门控阈值。
 3. 如果需要长期绝对航向，再把 GPS 作为低频参考接入。
 4. 只有在姿态链稳定后，再把控制闭环接入。
+> 当前版本说明：
+> 本报告用于解释 AHRS 与 HeadingEstimator 的演进背景。
+> 当前真实职责边界以 `AHRS.c`、`HeadingEstimator.c`、`MainLoop.c` 和 `NorthCalib.c` 为准。
+>
+> 当前架构边界补充：
+> - `AHRS` 输出原始融合姿态与原始融合航向基准。
+> - `HeadingEstimator` 只负责轻量航向融合，不直接管理返航或电机。
+> - `NorthCalib` 在更上层维护导航北向偏移。
+> - `MainLoop_GetHeadingDeg100()` 才是当前统一导航航向出口。

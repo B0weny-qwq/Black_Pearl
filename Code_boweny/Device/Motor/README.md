@@ -73,4 +73,5 @@ Motor_StopAll();
 - 本模块使用 `PWMA`，不占用 Timer0/Timer1/Timer2，也不修改 Driver 层源码。
 - 若启用 `APP_PWMA_Output` 或其他使用 `PWMA CH3/CH4` 的示例，会与本模块冲突。
 - 若实测前进/后退方向与船体定义相反，应优先在上层运动语义里调整，不要直接改 Driver 层 PWM API。
-- 当前上层真实调用者包括 `Code_boweny/Device/WIRELESS/ship_protocol.c` 和 `Code_boweny/Device/AutoDrive/autodrive.c`；如果后续修改速度标度或中点口径，这两条链路的日志和文档都要同步更新。
+- 当前最终主调用者应是 `Code_boweny/Device/Control/ShipControl.c`；无线协议、AutoDrive、NorthCalib 只通过 `ShipControl` 间接驱动电机。
+- 如果后续修改速度标度或中点口径，需要同步核对 `ShipControl`、上位机日志、`README.md` 和 `doc/project_doc/total.md`。

@@ -2,6 +2,12 @@
 
 本文档记录项目日志系统的设计和使用说明，供后续维护参考。
 
+当前说明边界：
+
+- 本文偏器件/实现层说明，真实对外日志口径还受 `tools/ship_log_viewer/README.md`、`Code_boweny/Function/Log/README.md` 和各模块日志约定影响。
+- 当前根目录源码路径已不是文末旧示例里的 `Device/inc`、`Device/src` 结构，应以实际仓库路径为准。
+- `WIRELESS`、`GPS`、`AHRS`、`ShipControl`、`NorthCalib` 等模块的日志字段会被串口日志查看器和现场测试文档引用；修改标签、字段名或单位时，必须同步 `tools/ship_log_viewer/`、模块 README、`doc/project_doc/date.md` 与 `doc/project_doc/total.md`。
+
 ---
 
 ## 1. 系统概述
@@ -145,8 +151,8 @@ LOGI("TEST", "value=%d.%d", whole, frac);  // 输出 3.140
 
 | 文件 | 说明 |
 |------|------|
-| `Device/inc/log.h` | 头文件，API 声明 |
-| `Device/src/log.c` | 实现文件 |
+| `Code_boweny/Function/Log/Log.h` | 头文件，API 声明 |
+| `Code_boweny/Function/Log/Log.c` | 实现文件 |
 | `User/System_init.c` | UART1 初始化 |
 
 ---
@@ -231,3 +237,7 @@ void log_push(char *msg) {
 | 日期 | 版本 | 说明 |
 |------|------|------|
 | 2026-04-22 | v1.0 | 初版文档 |
+> 当前版本说明：
+> 本文主要记录日志系统实现层设计。
+> 当前对外日志行为还受 `Code_boweny/Function/Log/README.md`、
+> `tools/ship_log_viewer/README.md` 以及各模块日志约定共同约束。

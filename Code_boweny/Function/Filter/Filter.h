@@ -9,6 +9,11 @@
  * 为陀螺仪和地磁计三轴原始数据提供独立的软件低通滤波器。内部使用
  * Q8 定点状态和一阶 IIR 算法，不依赖浮点运算。
  *
+ * 当前边界：
+ * - 本模块只处理三轴原始采样平滑；
+ * - AHRS/HeadingEstimator 负责把平滑后的数据变成姿态和航向；
+ * - `NorthCalib` 和 `ShipControl` 不直接依赖本模块状态。
+ *
  * @note    输入和输出均为 int16 原始传感器量纲。
  * @note    空指针或无效帧返回 -1，且不会推进内部滤波状态。
  *
@@ -19,6 +24,13 @@
 #define __FILTER_H__
 
 #include "config.h"
+
+/**
+ * @note 当前职责边界：
+ * - 本模块只做三轴原始采样平滑，不负责姿态/航向解算；
+ * - `AHRS` 与 `HeadingEstimator` 负责消费滤波结果并完成融合；
+ * - 本模块不保存导航状态，也不直接驱动电机或控制器。
+ */
 
 #define FILTER_LPF_STATE_Q       8  /**< 内部滤波状态的小数位数，Q8 格式。 */
 #define FILTER_GYRO_LPF_SHIFT    2  /**< 陀螺仪低通平滑强度，值越大响应越慢。 */

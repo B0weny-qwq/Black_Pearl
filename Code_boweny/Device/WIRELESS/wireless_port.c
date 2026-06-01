@@ -1,19 +1,30 @@
 /**
  * @file    wireless_port.c
- * @brief   ����ģ��弶�˿�����ʵ�֡�
+ * @brief   无线模块板级端口适配实现。
  * @author  boweny
  * @date    2026-05-06
  * @version v1.1
  *
  * @details
- * ���ļ����й��� LT8920/KCT8206L ����� GPIO��SPI����λ������ѡ��
- * RXEN/TXEN ����ʱ�ӿڡ�оƬ��ֻͨ�����ļ�����Ӳ�����ţ�����
- * ҵ��Э�����ֱ�Ӳ��� `Pxx` �˿ڡ�
+ * 本文件集中管理 LT8920/KCT8206L 所需的 GPIO、SPI、复位、天线选择、
+ * RXEN/TXEN 和延时接口。芯片层只通过本文件访问硬件引脚，避免
+ * 业务协议代码直接操作 `Pxx` 端口。
  *
  * @note
- * Ĭ�������Ե�ǰ Black Pearl v1.1 Ӳ��Ϊ׼��
- * SCLK=P3.2��MISO=P3.3��MOSI=P3.4��CS=P3.5��
- * RST=P5.0��ANT_SEL=P5.1��RXEN=P1.3��TXEN=P5.4��
+ * 默认引脚以当前 Black Pearl v1.1 硬件为准：
+ * SCLK=P3.2、MISO=P3.3、MOSI=P3.4、CS=P3.5、
+ * RST=P5.0、ANT_SEL=P5.1、RXEN=P1.3、TXEN=P5.4。
+ *
+ * 当前关系边界：
+ * - `System_init` 只负责基础 GPIO/SPI 路由初始化；
+ * - `lt8920.c` 与 `wireless.c` 通过本层访问片选、复位、前端使能和 SPI；
+ * - `ship_protocol.c` 只能通过无线驱动层工作，不应直接改这里的引脚电平。
+ */
+/**
+ * @note 当前职责边界：
+ * - 本文件只负责 LT8920/KCT8206L 的板级引脚、电平、SPI 与延时适配。
+ * - `System_init` 负责基础外设可用性，本文件负责无线专用执行细节。
+ * - `ship_protocol.c` 不应跨过 `wireless.c/lt8920.c` 直接操作这些引脚。
  */
 #include "wireless_port.h"
 #include "..\..\..\Driver\inc\STC32G_Delay.h"
@@ -41,6 +52,7 @@ s8 WirelessPort_Init(void)
     SPI_InitTypeDef spi_init;
 #endif
 
+    /* SPI 引脚复用和部分端口控制寄存器位于扩展 SFR 空间。 */
     EAXSFR();
 
 #if !WIRELESS_FRONTEND_BYPASS_TEST
@@ -63,6 +75,7 @@ s8 WirelessPort_Init(void)
     P5_SPEED_HIGH(GPIO_Pin_1 | GPIO_Pin_4);
 #endif
 
+    /* 打开射频收发前，先把前端置入明确的空闲状态。 */
     WirelessPort_SetCs(1U);
     WirelessPort_SetRst(1U);
 #if !WIRELESS_FRONTEND_BYPASS_TEST
@@ -98,6 +111,7 @@ s8 WirelessPort_Deinit(void)
         return SUCCESS;
     }
 
+    /* 无线栈未工作时保持前端关闭。 */
     WirelessPort_SetTxEn(0U);
     WirelessPort_SetRxEn(0U);
     WirelessPort_SetCs(1U);

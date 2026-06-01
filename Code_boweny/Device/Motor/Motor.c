@@ -1,9 +1,17 @@
 /**
  * @file    Motor.c
- * @brief   Dual DC motor PWM driver for PWMA3/PWMA4 complementary outputs.
+ * @brief   板级双直流电机 PWM 执行层。
  * @author  boweny
  * @date    2026-04-27
- * @version v1.0
+ * @version v1.1
+ *
+ * @details
+ * 本文件只负责把带符号的左右电机速度命令转换为当前硬件板级所需的
+ * PWMA3/PWMA4 互补输出形式。
+ *
+ * @note 当前职责边界：
+ * - ShipControl 负责给出最终左右电机目标。
+ * - Motor.c 负责限幅、映射并将目标写入 PWM 硬件。
  */
 
 #include "Motor.h"
@@ -87,20 +95,16 @@ static void Motor_RightOutputEnable(u8 enable)
 
 static void Motor_LeftSetForwardPolarity(void)
 {
-    /* Left motor wiring is fixed on the board:
-     * PWM3N -> MLA -> HIN, PWM3P -> MLB -> LIN#
-     * To get a real complementary pair at the pins, HIN must see the
-     * active-high phase while LIN# sees the active-low phase. */
+    /* 左电机接线固定为 PWM3N->MLA->HIN、PWM3P->MLB->LIN#；
+     * 为得到真实互补输出，HIN 接收高有效相位，LIN# 接收低有效相位。 */
     PWMA_CC3P_LowValid();
     PWMA_CC3NP_LowValid();
 }
 
 static void Motor_RightSetForwardPolarity(void)
 {
-    /* Right motor wiring is mirrored on the board:
-     * PWM4P -> MRB -> HIN, PWM4N -> MRA -> LIN#
-     * Keep both outputs in high-valid polarity so the P/N hardware
-     * complement maps directly to HIN/LIN# active levels. */
+    /* 右电机接线与左侧镜像：PWM4P->MRB->HIN、PWM4N->MRA->LIN#；
+     * 两路保持高有效，使 P/N 硬件互补直接映射到 HIN/LIN# 有效电平。 */
     PWMA_CC4P_HighValid();
     PWMA_CC4NP_HighValid();
 }
@@ -161,8 +165,7 @@ void Motor_Init(void)
     pwm_init.PWM_MainOutEnable = DISABLE;
     pwm_init.PWM_CEN_Enable = DISABLE;
 
-    /* Configure both P/N outputs as a complementary pair up front so
-     * PWM3/4 do not start from a half-configured state. */
+    /* 先把 P/N 输出成对配置为互补模式，避免 PWM3/4 从半配置状态启动。 */
     pwm_init.PWM_EnoSelect = ENO3P | ENO3N;
     PWM_Configuration(PWM3, &pwm_init);
     pwm_init.PWM_EnoSelect = ENO4P | ENO4N;
@@ -248,11 +251,11 @@ void Motor_GetPwmSnapshot(Motor_PwmSnapshot_t *snapshot)
 
     snapshot->period = MOTOR_PWM_PERIOD;
 
-    /* Left motor: PWM3N -> MLA, PWM3P -> MLB, both low-valid. */
+    /* 左电机：PWM3N -> MLA，PWM3P -> MLB，两路低有效。 */
     snapshot->mla_duty = g_motor_pwm_duty.PWM3_Duty;
     snapshot->mlb_duty = (u16)(MOTOR_PWM_PERIOD - g_motor_pwm_duty.PWM3_Duty);
 
-    /* Right motor: PWM4N -> MRA, PWM4P -> MRB, both high-valid. */
+    /* 右电机：PWM4N -> MRA，PWM4P -> MRB，两路高有效。 */
     snapshot->mra_duty = (u16)(MOTOR_PWM_PERIOD - g_motor_pwm_duty.PWM4_Duty);
     snapshot->mrb_duty = g_motor_pwm_duty.PWM4_Duty;
 }

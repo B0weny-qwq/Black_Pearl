@@ -1,3 +1,16 @@
+/**
+ * @file    HeadingEstimator.c
+ * @brief   轻量级原始航向融合器实现。
+ *
+ * @details
+ * 该文件将陀螺积分航向与静止条件下的磁力计观测做轻量融合，
+ * 输出上层可复用的原始融合航向基准。
+ *
+ * @note 当前职责边界：
+ * - 本文件只生成原始融合航向基准。
+ * - NorthCalib 是否叠加由更上层决定。
+ * - GPS 路径规划和电机输出不在本文件内实现。
+ */
 #include "HeadingEstimator.h"
 
 #define HEADING_FLOAT_ABS(value) \
@@ -199,9 +212,8 @@ void Heading_Update(HeadingEstimator_t *h,
                 mag_used = 1U;
             }
         } else {
-            /* While moving, keep the north reference by gyro integration only.
-             * GPS updates steer the target course; magnetometer samples are
-             * observed but not fused until the boat is stationary again. */
+            /* 船体运动时只依靠陀螺积分保持北向参考；
+             * GPS 负责调整目标航线，磁力计样本只观测不融合，直到船体再次静止。 */
             h->static_mag_ref_valid = 0U;
         }
 

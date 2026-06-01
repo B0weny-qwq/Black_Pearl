@@ -23,6 +23,12 @@
 - `ENABLE_IMU_AHRS_POLL = 1`
 - `ENABLE_IMU_BASIC_POLL = 0`
 
+当前关系边界：
+
+- `QMI8658_Service()` 只负责把 IMU 拉到 ready 并维护数据就绪标志。
+- `MainLoop/IMU_AhrsPoll()` 负责在运行期读取 `QMI8658_ReadAll()`，再交给 `AHRS_UpdateRaw6Axis()`。
+- `HeadingEstimator`、`NorthCalib`、`ShipControl` 都不会直接访问 IMU 寄存器。
+
 ## 当前接口
 
 兼容保留：
@@ -111,3 +117,4 @@ sequenceDiagram
 - `STATUSINT` 只保留为可选实验模式，不是当前主路径
 - 本驱动不使用 DMA
 - 软件 I2C 与硬件 I2C 当前都固定在 `P1.4/P1.5`
+- 北向校准不会直接使用本模块寄存器；它只消费 `MainLoop_GetRawHeadingDeg100()` 或 `MainLoop_GetHeadingDeg100()` 的上层航向输出

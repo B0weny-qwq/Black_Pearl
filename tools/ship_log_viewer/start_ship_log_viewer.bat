@@ -1,4 +1,7 @@
 @echo off
+rem @file start_ship_log_viewer.bat
+rem @brief 本地船端串口日志查看器的一键启动入口。
+rem @details 优先使用 Windows py 启动器，其次使用 python，最终执行同目录的 Python 启动脚本。
 setlocal
 cd /d "%~dp0"
 set "VIEWER_SCRIPT=%~dp0start_ship_log_viewer.py"

@@ -22,6 +22,13 @@
  * @see     Code_boweny/Device/GPS/GPS.h
  */
 
+/**
+ * @note 当前架构职责边界：
+ * - GPS.c 只负责 UART2 字节接收、NMEA 语句解析和 GPS 状态缓存。
+ * - ship_protocol.c 可读取本模块状态用于遥测打包。
+ * - AutoDrive / NorthCalib 可复用这里输出的位置与航向信息。
+ * - 导航策略、航向校准和电机输出不在本文件内实现。
+ */
 #include "GPS.h"
 #include "STC32G_NVIC.h"
 #include "STC32G_UART.h"
@@ -169,7 +176,7 @@ static void GPS_DiagCaptureByte(u8 dat)
     } else if (dat == (u8)'\n') {
         g_gps_diag_lf_count++;
     } else {
-        /* Keep only lightweight counters in the 8-bit polling path. */
+        /* 8 位轮询路径只保留轻量计数，避免拖慢串口接收。 */
     }
 }
 

@@ -1,3 +1,15 @@
+/**
+ * @note 当前职责边界：
+ * - 本文件负责 QMI8658 寄存器访问、启动诊断和原始数据采集。
+ * - 滤波与姿态融合由更上层 Filter/AHRS 模块处理。
+ * - 本文件不直接决定导航航向、返航状态或电机输出。
+ */
+/**
+ * @file    QMI8658.c
+ * @brief   QMI8658 IMU 设备驱动实现
+ * @author  boweny
+ * @date    2026-05-31
+ */
 #include "..\..\..\User\Config.h"
 #include "..\..\..\User\Task.h"
 #include "..\..\..\Driver\inc\STC32G_I2C.h"
@@ -12,27 +24,27 @@
 
 typedef struct
 {
-    QMI8658_State_t state;
-    u8 data_ready;
-    u8 init_retry;
-    u8 selected_id;
-    u8 last_status0;
-    u8 last_statusint;
-    u32 due_ms;
-    u32 ready_deadline_ms;
+    QMI8658_State_t state; /**< 对外 IMU 数据与诊断状态快照。 */
+    u8 data_ready;         /**< 最新一帧 IMU 数据是否可被上层读取。 */
+    u8 init_retry;         /**< 初始化重试次数。 */
+    u8 selected_id;        /**< 当前选中的 I2C 器件 ID/地址标识。 */
+    u8 last_status0;       /**< 最近一次读取的 STATUS0 寄存器值。 */
+    u8 last_statusint;     /**< 最近一次读取的 STATUSINT 寄存器值。 */
+    u32 due_ms;            /**< 下一次轮询或状态推进的时间戳。 */
+    u32 ready_deadline_ms; /**< 等待传感器 ready 的截止时间戳。 */
 } QMI8658_Context_t;
 
 typedef struct
 {
-    u8 saw_reset_ready;
-    u8 saw_status_nonzero;
-    u8 saw_timestamp_nonzero;
-    u8 saw_temp_nonzero;
-    u8 saw_acc_nonzero;
-    u8 saw_gyro_nonzero;
-    u8 final_status0;
-    u32 last_timestamp;
-    int16 last_temp;
+    u8 saw_reset_ready;       /**< 诊断窗口内是否看到复位完成。 */
+    u8 saw_status_nonzero;    /**< 诊断窗口内 STATUS 是否出现非零。 */
+    u8 saw_timestamp_nonzero; /**< 诊断窗口内时间戳是否开始递增。 */
+    u8 saw_temp_nonzero;      /**< 诊断窗口内温度读数是否非零。 */
+    u8 saw_acc_nonzero;       /**< 诊断窗口内加速度读数是否非零。 */
+    u8 saw_gyro_nonzero;      /**< 诊断窗口内陀螺读数是否非零。 */
+    u8 final_status0;         /**< 诊断结束时保留的 STATUS0 值。 */
+    u32 last_timestamp;       /**< 诊断窗口内最后一次时间戳读数。 */
+    int16 last_temp;          /**< 诊断窗口内最后一次温度读数。 */
 } QMI8658_DiagResult_t;
 
 #define QMI8658_DIAG_CTRL7_ACC_ONLY            0x01U

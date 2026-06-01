@@ -6,6 +6,12 @@
  * 本模块统一拥有最终电机输出权，负责仲裁手动开环、手动航向自稳、
  * E 键定速巡航和 GPS 航向保持请求。无线协议和自动驾驶模块只提交
  * 输入或目标航向，不直接写电机。
+ *
+ * 当前航向口径约束：
+ * - 手动 yaw 自稳、E 键定速巡航和 GPS 导航都应读取
+ *   `MainLoop_GetHeadingDeg100()` 的统一航向；
+ * - 该统一航向已经包含 `NorthCalib` 的 `north_offset_cd`；
+ * - 本模块不自行保存北向校准参数，也不额外叠加第二套航向修正。
  */
 
 #ifndef __SHIP_CONTROL_H__
@@ -84,6 +90,7 @@ void ShipControl_RequestCruise(u16 heading_cd, int16 base_speed);
  *
  * @details
  * 对准阶段基础速度为 0，仅输出受限差速用于原地转向。
+ * `target_heading_cd` 的误差计算仍基于 `MainLoop_GetHeadingDeg100()`。
  */
 void ShipControl_RequestGpsAlign(u16 target_heading_cd);
 
@@ -92,6 +99,10 @@ void ShipControl_RequestGpsAlign(u16 target_heading_cd);
  *
  * @param target_heading_cd AutoDrive 计算出的目标航向，单位 0.01 度。
  * @param base_speed        导航基础速度，正值前进，负值后退。
+ *
+ * @note
+ * 当前 AutoDrive 只负责目标航向规划；真正的当前船头角由
+ * `MainLoop_GetHeadingDeg100()` 提供，并已叠加北向校准 offset。
  */
 void ShipControl_RequestGpsNav(u16 target_heading_cd, int16 base_speed);
 

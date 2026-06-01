@@ -1,8 +1,30 @@
+/**
+ * @file    autodrive.c
+ * @brief   返航、钓点巡航与目标航向规划。
+ *
+ * @details
+ * AutoDrive 当前只负责：
+ * - 解析/缓存 `0x13/0x14/0x15` 旧协议点位与自动返航配置；
+ * - 在 GPS 新点到来时计算目标距离与 `target_heading_cd`；
+ * - 根据距离切换对准、巡航、减速和到点判定；
+ * - 把目标航向和基础速度提交给 `ShipControl_RequestGpsNav()`。
+ *
+ * AutoDrive 不再自行实现第二套 yaw PID，也不直接决定左右电机极性。
+ * 真实控制输出统一由 `ShipControl` 与 `MainLoop_GetHeadingDeg100()` 所代表的
+ * 公共航向链路完成。
+ */
+/**
+ * @note 当前职责边界：
+ * - AutoDrive 负责目标点、返航条件、距离判断和目标航向规划。
+ * - 最终左右电机目标仍由 ShipControl 统一决策。
+ * - 统一导航航向入口来自 MainLoop_GetHeadingDeg100()。
+ */
 #include "autodrive.h"
 
 #include "autodrive_cfg.h"
 #include "..\GPS\GPS.h"
 #include "..\Control\ShipControl.h"
+#include "..\..\Function\Log\Log.h"
 #include "..\..\..\User\MainLoop.h"
 #include "..\..\..\User\Task.h"
 
@@ -61,7 +83,7 @@ static AutoDrive_PointRaw_t g_now_position;
 static AutoDrive_PointRaw_t g_last_position;
 static AutoDrive_PointRaw_t g_return_position;
 static AutoDrive_PointRaw_t g_fish_position;
-/* Session RAM table: keep saved fish points until AutoDrive_Init() on reset/power-on. */
+/* 本次上电会话 RAM 表：保存钓点直到复位或重新上电触发 AutoDrive_Init()。 */
 static AutoDrive_FishPointStore_t g_fish_points;
 static u8 g_last_fish_cmd_index = 0U;
 static u8 g_last_fish_save_result = AUTODRIVE_FISH_SAVE_NONE;
@@ -82,10 +104,114 @@ static u32 g_last_poll_tick_ms = 0UL;
 static u32 g_last_link_tick_ms = 0UL;
 static u8 g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
 
+static u16 AutoDrive_GetStartHeadingDeg(void);
 static u16 AutoDrive_ReadU16Wire(const u8 *data_m)
 {
-    /* The controller protocol sends 0x13/0x14/0x15 point fields big-endian. */
+    /* 遥控器协议中的 0x13/0x14/0x15 点位字段按大端字节序发送。 */
     return (u16)(((u16)data_m[0] << 8) | data_m[1]);
+}
+
+static int32 AutoDrive_PointLonMinute1e4(const AutoDrive_PointRaw_t *point)
+{
+    int32 value;
+
+    if (point == 0) {
+        return 0L;
+    }
+    value = (int32)((u32)(point->lon_whole / 100U) *
+                    (AUTODRIVE_MINUTES_PER_DEG * AUTODRIVE_MINUTE_SCALE));
+    value += (int32)((u32)(point->lon_whole % 100U) * AUTODRIVE_MINUTE_SCALE);
+    value += (int32)point->lon_frac;
+    if (point->lon_ew == 'W') {
+        value = -value;
+    }
+    return value;
+}
+
+static int32 AutoDrive_PointLatMinute1e4(const AutoDrive_PointRaw_t *point)
+{
+    int32 value;
+
+    if (point == 0) {
+        return 0L;
+    }
+    value = (int32)((u32)(point->lat_whole / 100U) *
+                    (AUTODRIVE_MINUTES_PER_DEG * AUTODRIVE_MINUTE_SCALE));
+    value += (int32)((u32)(point->lat_whole % 100U) * AUTODRIVE_MINUTE_SCALE);
+    value += (int32)point->lat_frac;
+    if (point->lat_ns == 'S') {
+        value = -value;
+    }
+    return value;
+}
+
+static u16 AutoDrive_LonScaleQ10FromLatMinute1e4(int32 lat_min1e4)
+{
+    u32 abs_min;
+    u32 deg;
+
+    abs_min = (lat_min1e4 < 0L) ? (u32)(-lat_min1e4) : (u32)lat_min1e4;
+    deg = abs_min / (AUTODRIVE_MINUTES_PER_DEG * AUTODRIVE_MINUTE_SCALE);
+    if (deg < 10UL) {
+        return 1008U;
+    }
+    if (deg < 20UL) {
+        return 962U;
+    }
+    if (deg < 30UL) {
+        return 887U;
+    }
+    if (deg < 40UL) {
+        return 784U;
+    }
+    if (deg < 50UL) {
+        return 658U;
+    }
+    if (deg < 60UL) {
+        return 512U;
+    }
+    return 350U;
+}
+
+static u32 AutoDrive_ScaledLonDiffMinute1e4(const AutoDrive_PointRaw_t *now,
+                                            const AutoDrive_PointRaw_t *des)
+{
+    int32 lon_now;
+    int32 lon_des;
+    int32 lat_now;
+    int32 diff;
+    u16 scale_q10;
+
+    lon_now = AutoDrive_PointLonMinute1e4(now);
+    lon_des = AutoDrive_PointLonMinute1e4(des);
+    lat_now = AutoDrive_PointLatMinute1e4(now);
+    diff = lon_des - lon_now;
+    if (diff < 0L) {
+        diff = -diff;
+    }
+    scale_q10 = AutoDrive_LonScaleQ10FromLatMinute1e4(lat_now);
+    return (((u32)diff * (u32)scale_q10) + (AUTODRIVE_ATAN_Q10 >> 1)) >> 10;
+}
+
+static u32 AutoDrive_LatDiffMinute1e4(const AutoDrive_PointRaw_t *now,
+                                      const AutoDrive_PointRaw_t *des)
+{
+    int32 lat_now;
+    int32 lat_des;
+    int32 diff;
+
+    lat_now = AutoDrive_PointLatMinute1e4(now);
+    lat_des = AutoDrive_PointLatMinute1e4(des);
+    diff = lat_des - lat_now;
+    if (diff < 0L) {
+        diff = -diff;
+    }
+    return (u32)diff;
+}
+
+static u32 AutoDrive_Minute1e4ToMeters(u32 minute1e4)
+{
+    return (minute1e4 * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
 }
 
 static void AutoDrive_PointFromLegacyWire(AutoDrive_PointRaw_t *point,
@@ -167,8 +293,7 @@ static void AutoDrive_ClearFishPoints(void)
 {
     u8 i;
 
-    /* Do not call this from arrive/stop paths; a saved point remains reusable
-     * for the whole power-on session. */
+    /* 到达/停止路径不要调用本函数；已保存钓点在整个上电会话内都应可复用。 */
     for (i = 0U; i < AUTODRIVE_FISH_POINT_COUNT; i++) {
         AutoDrive_ClearPoint(&g_fish_points.point[i]);
     }
@@ -501,6 +626,12 @@ static u8 AutoDrive_UpdateTargetHeading(const AutoDrive_PointRaw_t *current_poin
     }
     g_autodrive_target_heading_cd = (u16)(g_destination_angle * 100U);
     g_autodrive_target_heading_valid = 1U;
+    log_info((u8 *)"AD",
+             (u8 *)"bearing dir=%u quad=%u tgt=%u cur=%u",
+             (u16)target_direction,
+             (u16)target_angle,
+             (u16)g_destination_angle,
+             (u16)AutoDrive_GetStartHeadingDeg());
     return 1U;
 }
 
@@ -795,147 +926,73 @@ u8 AutoDrive_GetDirectionNowToDestination(const u8 *nowpositionData,
 {
     const AutoDrive_PointRaw_t *nowposition;
     const AutoDrive_PointRaw_t *desposition;
-    u8 direction;
+    int32 lon_diff;
+    int32 lat_diff;
 
     nowposition = (const AutoDrive_PointRaw_t *)nowpositionData;
     desposition = (const AutoDrive_PointRaw_t *)despositionData;
-    direction = 0U;
 
-    if ((nowposition->lon_whole > desposition->lon_whole) ||
-        ((nowposition->lon_whole == desposition->lon_whole) &&
-         (nowposition->lon_frac > desposition->lon_frac))) {
-        direction = POSITION_WEST;
-        if ((nowposition->lat_whole > desposition->lat_whole) ||
-            ((nowposition->lat_whole == desposition->lat_whole) &&
-             (nowposition->lat_frac > desposition->lat_frac))) {
-            direction = POSITION_WEST_SOUTH;
-        } else if ((nowposition->lat_whole < desposition->lat_whole) ||
-                   ((nowposition->lat_whole == desposition->lat_whole) &&
-                    (nowposition->lat_frac < desposition->lat_frac))) {
-            direction = POSITION_WEST_NORTH;
+    lon_diff = AutoDrive_PointLonMinute1e4(desposition) -
+               AutoDrive_PointLonMinute1e4(nowposition);
+    lat_diff = AutoDrive_PointLatMinute1e4(desposition) -
+               AutoDrive_PointLatMinute1e4(nowposition);
+
+    if (lon_diff > 0L) {
+        if (lat_diff > 0L) {
+            return POSITION_EAST_NORTH;
         }
+        if (lat_diff < 0L) {
+            return POSITION_EAST_SOUTH;
+        }
+        return POSITION_EAST;
+    }
+    if (lon_diff < 0L) {
+        if (lat_diff > 0L) {
+            return POSITION_WEST_NORTH;
+        }
+        if (lat_diff < 0L) {
+            return POSITION_WEST_SOUTH;
+        }
+        return POSITION_WEST;
     }
 
-    if ((nowposition->lon_whole < desposition->lon_whole) ||
-        ((nowposition->lon_whole == desposition->lon_whole) &&
-         (nowposition->lon_frac < desposition->lon_frac))) {
-        direction = POSITION_EAST;
-        if ((nowposition->lat_whole > desposition->lat_whole) ||
-            ((nowposition->lat_whole == desposition->lat_whole) &&
-             (nowposition->lat_frac > desposition->lat_frac))) {
-            direction = POSITION_EAST_SOUTH;
-        } else if ((nowposition->lat_whole < desposition->lat_whole) ||
-                   ((nowposition->lat_whole == desposition->lat_whole) &&
-                    (nowposition->lat_frac < desposition->lat_frac))) {
-            direction = POSITION_EAST_NORTH;
-        }
+    if (lat_diff < 0L) {
+        return POSITION_SOUTH;
     }
-
-    if (direction == 0U) {
-        if ((nowposition->lat_whole > desposition->lat_whole) ||
-            ((nowposition->lat_whole == desposition->lat_whole) &&
-             (nowposition->lat_frac > desposition->lat_frac))) {
-            direction = POSITION_SOUTH;
-        } else {
-            direction = POSITION_NORTH;
-        }
-    }
-
-    return direction;
+    return POSITION_NORTH;
 }
 
 static u32 AutoDrive_CalDistanceLon(const AutoDrive_PointRaw_t *now,
                                     const AutoDrive_PointRaw_t *des)
 {
-    u16 dd1;
-    u16 dd2;
-    u32 sec1;
-    u32 sec2;
-    u16 ddiff;
-    u32 sec_diff;
+    int32 lon_now;
+    int32 lon_des;
+    int32 diff;
 
-    dd1 = now->lon_whole / 100U;
-    dd2 = des->lon_whole / 100U;
-    sec1 = ((u32)(now->lon_whole % 100U) * AUTODRIVE_MINUTE_SCALE) + (u32)now->lon_frac;
-    sec2 = ((u32)(des->lon_whole % 100U) * AUTODRIVE_MINUTE_SCALE) + (u32)des->lon_frac;
-
-    if (dd1 == dd2) {
-        sec_diff = AutoDrive_Abs32Diff(sec1, sec2);
-        return (sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
+    lon_now = AutoDrive_PointLonMinute1e4(now);
+    lon_des = AutoDrive_PointLonMinute1e4(des);
+    diff = lon_des - lon_now;
+    if (diff < 0L) {
+        diff = -diff;
     }
+    return AutoDrive_Minute1e4ToMeters((u32)diff);
+}
 
-    if (dd1 > dd2) {
-        ddiff = (u16)(dd1 - dd2);
-        if (sec1 > sec2) {
-            sec_diff = sec1 - sec2;
-        } else {
-            ddiff -= 1U;
-            sec1 += (AUTODRIVE_MINUTES_PER_DEG * AUTODRIVE_MINUTE_SCALE);
-            sec_diff = sec1 - sec2;
-        }
-    } else {
-        ddiff = (u16)(dd2 - dd1);
-        if (sec2 > sec1) {
-            sec_diff = sec2 - sec1;
-        } else {
-            ddiff -= 1U;
-            sec2 += (AUTODRIVE_MINUTES_PER_DEG * AUTODRIVE_MINUTE_SCALE);
-            sec_diff = sec2 - sec1;
-        }
-    }
+static u32 AutoDrive_CalDistanceLonScaled(const AutoDrive_PointRaw_t *now,
+                                          const AutoDrive_PointRaw_t *des)
+{
+    u32 lon_m;
+    u16 scale_q10;
 
-    if (ddiff != 0U) {
-        return ((u32)ddiff * AUTODRIVE_METERS_PER_DEG) +
-               ((sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE);
-    }
-    return (sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
+    lon_m = AutoDrive_CalDistanceLon(now, des);
+    scale_q10 = AutoDrive_LonScaleQ10FromLatMinute1e4(AutoDrive_PointLatMinute1e4(now));
+    return ((lon_m * (u32)scale_q10) + (AUTODRIVE_ATAN_Q10 >> 1)) >> 10;
 }
 
 static u32 AutoDrive_CalDistanceLat(const AutoDrive_PointRaw_t *now,
                                     const AutoDrive_PointRaw_t *des)
 {
-    u16 dd1;
-    u16 dd2;
-    u32 sec1;
-    u32 sec2;
-    u16 ddiff;
-    u32 sec_diff;
-
-    dd1 = now->lat_whole / 100U;
-    dd2 = des->lat_whole / 100U;
-    sec1 = ((u32)(now->lat_whole % 100U) * AUTODRIVE_MINUTE_SCALE) + (u32)now->lat_frac;
-    sec2 = ((u32)(des->lat_whole % 100U) * AUTODRIVE_MINUTE_SCALE) + (u32)des->lat_frac;
-
-    if (dd1 == dd2) {
-        sec_diff = AutoDrive_Abs32Diff(sec1, sec2);
-        return (sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
-    }
-
-    if (dd1 > dd2) {
-        ddiff = (u16)(dd1 - dd2);
-        if (sec1 > sec2) {
-            sec_diff = sec1 - sec2;
-        } else {
-            ddiff -= 1U;
-            sec1 += (AUTODRIVE_MINUTES_PER_DEG * AUTODRIVE_MINUTE_SCALE);
-            sec_diff = sec1 - sec2;
-        }
-    } else {
-        ddiff = (u16)(dd2 - dd1);
-        if (sec2 > sec1) {
-            sec_diff = sec2 - sec1;
-        } else {
-            ddiff -= 1U;
-            sec2 += (AUTODRIVE_MINUTES_PER_DEG * AUTODRIVE_MINUTE_SCALE);
-            sec_diff = sec2 - sec1;
-        }
-    }
-
-    if (ddiff != 0U) {
-        return ((u32)ddiff * AUTODRIVE_METERS_PER_DEG) +
-               ((sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE);
-    }
-    return (sec_diff * AUTODRIVE_METERS_PER_MINUTE) / AUTODRIVE_MINUTE_SCALE;
+    return AutoDrive_Minute1e4ToMeters(AutoDrive_LatDiffMinute1e4(now, des));
 }
 
 u16 AutoDrive_GetAngelNowToDestination(const u8 *nowpositionData,
@@ -951,8 +1008,8 @@ u16 AutoDrive_GetAngelNowToDestination(const u8 *nowpositionData,
     nowposition = (const AutoDrive_PointRaw_t *)nowpositionData;
     desposition = (const AutoDrive_PointRaw_t *)despositionData;
 
-    distance_width = AutoDrive_CalDistanceLon(nowposition, desposition);
-    distance_height = AutoDrive_CalDistanceLat(nowposition, desposition);
+    distance_width = AutoDrive_ScaledLonDiffMinute1e4(nowposition, desposition);
+    distance_height = AutoDrive_LatDiffMinute1e4(nowposition, desposition);
 
     if (distance_width == 0UL) {
         if (distance_height == 0UL) {
@@ -985,7 +1042,7 @@ u16 AutoDrive_GetDistanceNowToDestination(const u8 *nowpositionData,
     nowposition = (const AutoDrive_PointRaw_t *)nowpositionData;
     desposition = (const AutoDrive_PointRaw_t *)despositionData;
 
-    distance_width = AutoDrive_CalDistanceLon(nowposition, desposition);
+    distance_width = AutoDrive_CalDistanceLonScaled(nowposition, desposition);
     distance_height = AutoDrive_CalDistanceLat(nowposition, desposition);
 
     if (distance_width >= distance_height) {

@@ -18,6 +18,12 @@
  * @see     Code_boweny/Function/Filter/Filter.h
  */
 
+/**
+ * @note 当前职责边界：
+ * - 本文件只提供通用三轴低通滤波能力。
+ * - AHRS、传感器驱动等上层模块可复用其输出。
+ * - 本文件不负责姿态融合、航向修正或导航决策。
+ */
 #include "Filter.h"
 
 #define FILTER_LPF_SCALE            ((int32)1L << FILTER_LPF_STATE_Q)
@@ -26,10 +32,10 @@
 
 typedef struct
 {
-    int32 state_x;
-    int32 state_y;
-    int32 state_z;
-    u8 initialized;
+    int32 state_x;    /**< X 轴 Q8 滤波内部状态。 */
+    int32 state_y;    /**< Y 轴 Q8 滤波内部状态。 */
+    int32 state_z;    /**< Z 轴 Q8 滤波内部状态。 */
+    u8 initialized;   /**< 首帧灌入标志，1=已有有效状态。 */
 } Filter_LowPass3Axis;
 
 static Filter_LowPass3Axis filter_gyro_ctx;

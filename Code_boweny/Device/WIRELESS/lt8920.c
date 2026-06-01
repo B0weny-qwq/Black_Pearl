@@ -14,6 +14,12 @@
  * 本层不解析业务协议，不决定配对状态；业务调度由 `ship_protocol.c`
  * 完成。修改寄存器顺序前必须先对照 `Wireless_other`。
  */
+/**
+ * @note 当前职责边界：
+ * - 本文件只负责 LT8920 芯片寄存器、FIFO 和模式切换驱动。
+ * - wireless.c 在此基础上管理链路状态。
+ * - ship_protocol.c 负责业务协议找帧、配对与调度。
+ */
 #include "lt8920.h"
 
 #include "wireless.h"
@@ -21,10 +27,10 @@
 
 typedef struct
 {
-    u8 reg;
-    u8 high;
-    u8 low;
-    u16 verify_mask;
+    u8 reg;          /**< LT8920 寄存器地址。 */
+    u8 high;         /**< 写入寄存器的高 8 位数据。 */
+    u8 low;          /**< 写入寄存器的低 8 位数据。 */
+    u16 verify_mask; /**< 回读校验掩码，屏蔽只读/自清位。 */
 } LT8920_RegInit_t;
 
 static const LT8920_RegInit_t g_lt8920_default_regs[] =

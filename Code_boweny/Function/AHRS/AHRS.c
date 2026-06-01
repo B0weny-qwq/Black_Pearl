@@ -1,13 +1,18 @@
 /**
  * @file    AHRS.c
- * @brief   Quaternion AHRS implementation
+ * @brief   四元数 AHRS 原始姿态解算实现。
  * @author  boweny
  * @date    2026-05-11
- * @version v1.2
+ * @version v1.3
  *
- * Internal state uses a float quaternion. External outputs stay on the
- * existing deg*100 / deg/s*100 interface so MainLoop logs and the host
- * viewer do not need to change.
+ * @details
+ * 内部状态使用 float 四元数保存，对外继续保持 deg*100 / deg/s*100
+ * 整数接口，避免 MainLoop、日志和上位机工具链接口再改动。
+ *
+ * @note 当前模块职责边界：
+ * - 本文件负责根据 IMU 和可选磁力计数据估计原始 roll/pitch/yaw。
+ * - 本文件不叠加 NorthCalib，也不处理 GPS 导出的北向偏移。
+ * - MainLoop 读取 AHRS 状态后，再由上层导航航向链路决定是否追加修正。
  */
 
 #include "AHRS.h"
@@ -24,52 +29,52 @@
 
 typedef struct
 {
-    int32 x;
-    int32 y;
-    int32 z;
-    u8 initialized;
+    int32 x;        /**< X 轴低通内部状态。 */
+    int32 y;        /**< Y 轴低通内部状态。 */
+    int32 z;        /**< Z 轴低通内部状态。 */
+    u8 initialized; /**< 首帧灌入标志，1=已有有效滤波状态。 */
 } AHRS_Lpf3_t;
 
 typedef struct
 {
-    float q0;
-    float q1;
-    float q2;
-    float q3;
+    float q0; /**< 姿态四元数标量分量。 */
+    float q1; /**< 姿态四元数 X 分量。 */
+    float q2; /**< 姿态四元数 Y 分量。 */
+    float q3; /**< 姿态四元数 Z 分量。 */
 
-    float integral_x;
-    float integral_y;
-    float integral_z;
+    float integral_x; /**< Mahony X 轴积分修正项。 */
+    float integral_y; /**< Mahony Y 轴积分修正项。 */
+    float integral_z; /**< Mahony Z 轴积分修正项。 */
 
-    float mag_x;
-    float mag_y;
-    float mag_z;
-    float yaw_gyro_deg100;
-    int16 yaw_mag_deg100;
+    float mag_x;            /**< 最新有效磁力计 X 轴归一化输入。 */
+    float mag_y;            /**< 最新有效磁力计 Y 轴归一化输入。 */
+    float mag_z;            /**< 最新有效磁力计 Z 轴归一化输入。 */
+    float yaw_gyro_deg100;  /**< 仅陀螺积分偏航角，单位 0.01 deg。 */
+    int16 yaw_mag_deg100;   /**< 磁力计诊断偏航角，单位 0.01 deg。 */
 
-    u32 acc_ref_sum;
-    u16 acc_ref_count;
-    u16 acc_1g_ref;
-    u16 acc_ref_invalid_still_count;
+    u32 acc_ref_sum;                 /**< 静止阶段 1g 模长累计和。 */
+    u16 acc_ref_count;               /**< 1g 参考累计样本数。 */
+    u16 acc_1g_ref;                  /**< 建立后的 1g 加速度模长参考。 */
+    u16 acc_ref_invalid_still_count; /**< 静止但加速度异常的连续计数。 */
 
-    int32 gyro_bias_sum_x;
-    int32 gyro_bias_sum_y;
-    int32 gyro_bias_sum_z;
-    int32 gyro_bias_q8_x;
-    int32 gyro_bias_q8_y;
-    int32 gyro_bias_q8_z;
-    u16 gyro_bias_count;
-    int16 gyro_bias_x;
-    int16 gyro_bias_y;
-    int16 gyro_bias_z;
-    u8 gyro_bias_ready;
+    int32 gyro_bias_sum_x; /**< X 轴陀螺零偏采样累计和。 */
+    int32 gyro_bias_sum_y; /**< Y 轴陀螺零偏采样累计和。 */
+    int32 gyro_bias_sum_z; /**< Z 轴陀螺零偏采样累计和。 */
+    int32 gyro_bias_q8_x;  /**< X 轴在线零偏跟踪状态，Q8 格式。 */
+    int32 gyro_bias_q8_y;  /**< Y 轴在线零偏跟踪状态，Q8 格式。 */
+    int32 gyro_bias_q8_z;  /**< Z 轴在线零偏跟踪状态，Q8 格式。 */
+    u16 gyro_bias_count;   /**< 陀螺零偏初始采样计数。 */
+    int16 gyro_bias_x;     /**< X 轴陀螺零偏，原始计数单位。 */
+    int16 gyro_bias_y;     /**< Y 轴陀螺零偏，原始计数单位。 */
+    int16 gyro_bias_z;     /**< Z 轴陀螺零偏，原始计数单位。 */
+    u8 gyro_bias_ready;    /**< 陀螺零偏是否已经建立。 */
 
-    AHRS_Lpf3_t gyro_lpf;
-    AHRS_Lpf3_t mag_lpf;
+    AHRS_Lpf3_t gyro_lpf; /**< 陀螺三轴低通滤波状态。 */
+    AHRS_Lpf3_t mag_lpf;  /**< 磁力计三轴低通滤波状态。 */
 
-    AHRS_State_t state;
-    u8 mag_valid;
-    u8 ready;
+    AHRS_State_t state; /**< 对外只读 AHRS 状态快照。 */
+    u8 mag_valid;       /**< 当前缓存磁力计观测是否有效。 */
+    u8 ready;           /**< AHRS 是否已经具备可用姿态输出。 */
 } AHRS_Context_t;
 
 static AHRS_Context_t xdata ahrs_ctx;

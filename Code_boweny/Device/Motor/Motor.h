@@ -9,6 +9,11 @@
  * 基于 STC32G PWMA 通道 3/4 驱动左右两路直流电机，提供初始化、
  * 单电机调速、双电机调速、停止和速度查询接口。
  *
+ * 当前调用边界：
+ * - `ShipControl` 统一拥有最终电机输出权；
+ * - 无线协议、AutoDrive、NorthCalib 不应绕过 `ShipControl` 直接长期写电机；
+ * - 本模块不关心 yaw-hold、GPS 导航或北向校准，只负责执行速度命令。
+ *
  * @hardware
  * - 左电机：PWM3N_2 -> MLA -> P2.5，PWM3P_2 -> MLB -> P2.4
  * - 右电机：PWM4N_2 -> MRA -> P2.7，PWM4P_2 -> MRB -> P2.6
@@ -43,11 +48,11 @@ typedef enum
 
 typedef struct
 {
-    u16 mla_duty;
-    u16 mlb_duty;
-    u16 mra_duty;
-    u16 mrb_duty;
-    u16 period;
+    u16 mla_duty;    /**< 左电机 A 相 PWM 占空计数。 */
+    u16 mlb_duty;    /**< 左电机 B 相 PWM 占空计数。 */
+    u16 mra_duty;    /**< 右电机 A 相 PWM 占空计数。 */
+    u16 mrb_duty;    /**< 右电机 B 相 PWM 占空计数。 */
+    u16 period;      /**< PWM 周期计数，用于解析占空比。 */
 } Motor_PwmSnapshot_t;
 
 /**
@@ -69,6 +74,9 @@ void Motor_SetSpeed(Motor_Id_t motor, int16 speed);
  * @param[in]  left_speed   左电机目标速度。
  * @param[in]  right_speed  右电机目标速度。
  * @return     none
+ *
+ * @note
+ * 当前主路径由 `ShipControl_Tick()` 和 `ShipControl_Stop()` 等入口调用本接口。
  */
 void Motor_SetBothSpeed(int16 left_speed, int16 right_speed);
 

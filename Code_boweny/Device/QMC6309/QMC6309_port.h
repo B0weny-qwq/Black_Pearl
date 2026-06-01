@@ -9,6 +9,11 @@
  * 当前 QMC6309 端口层复用 QMI8658 的软/硬 I2C 后端实现，
  * 对上层地磁驱动暴露统一的初始化、延时、总线恢复和寄存器读写接口。
  *
+ * 当前关系边界：
+ * - `System_init/Sensor_I2C_prepare()` 负责恢复共享 I2C 引脚和路由；
+ * - 本层只负责在该总线上访问 QMC6309；
+ * - AHRS、HeadingEstimator、NorthCalib 不直接操作本层接口。
+ *
  * @note
  * 若后续磁力计改为独立总线，只修改本层，不修改 `QMC6309.c` 业务逻辑。
  *
@@ -61,6 +66,10 @@ u8 QMC6309Port_BusNeedsRecover(void);
 /**
  * @brief   执行总线恢复。
  * @return  无。
+ *
+ * @note
+ * 当前总线恢复逻辑与 `QMI8658Port_BusRecover()` 保持同源，避免两颗传感器
+ * 对共享 I2C 的恢复策略不一致。
  */
 void QMC6309Port_BusRecover(void);
 

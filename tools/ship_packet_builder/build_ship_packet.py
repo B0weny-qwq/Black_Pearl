@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Build legacy ship protocol frames for GPS point storage and auto-drive testing.
+@file build_ship_packet.py
+@brief 构造旧版船端无线协议帧，用于 GPS 点位写入和自动航行测试。
 
-Supported commands:
-- 0x13 return-home
-- 0x14 goto-point
-- 0x15 return-switch (+ saved return point)
+支持的命令：
+- 0x13 返航
+- 0x14 前往指定点
+- 0x15 返航开关（可携带保存的返航点）
 
-The wire format matches the legacy ship firmware:
+线缆/无线帧格式与旧版船端固件保持一致：
 AA | len | cmd | payload... | xor | BB
 
-For GPS point payloads, each 16-bit field is encoded as raw legacy bytes:
-low-byte first, high-byte second.
+GPS 点位载荷中的每个 16 位字段按旧协议原始字节编码：低字节在前，高字节在后。
 """
 
 from __future__ import annotations

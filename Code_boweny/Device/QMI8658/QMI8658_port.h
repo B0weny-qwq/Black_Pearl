@@ -9,6 +9,11 @@
  * 本文件封装 QMI8658 所需的延时、总线恢复和寄存器读写接口，
  * 并对外暴露统一的软/硬 I2C 错误码定义。
  *
+ * 当前关系边界：
+ * - `System_init/Sensor_I2C_prepare()` 负责恢复共享 I2C 引脚和路由；
+ * - 本层只负责在该总线上完成 QMI8658 的读写与总线恢复；
+ * - `QMI8658.c` 以上的 AHRS / MainLoop / NorthCalib 不直接碰这里的底层细节。
+ *
  * @see     Code_boweny/Device/QMI8658/QMI8658_port.c
  */
 
@@ -61,6 +66,10 @@ u8 QMI8658Port_BusNeedsRecover(void);
 /**
  * @brief   执行总线恢复。
  * @return  无。
+ *
+ * @note
+ * 当前 QMC6309 与 QMI8658 共享同一条传感器 I2C，总线恢复策略需要与
+ * `Sensor_I2C_prepare()` 和 `QMC6309_port` 保持一致。
  */
 void QMI8658Port_BusRecover(void);
 

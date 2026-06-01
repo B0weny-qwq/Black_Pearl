@@ -2,8 +2,8 @@
  * @file    total.md
  * @brief   Black Pearl v1.1 当前工程总览
  * @author  boweny
- * @date    2026-05-23
- * @version v1.7.67
+ * @date    2026-06-01
+ * @version v1.7.70
  */
 
 # Black Pearl v1.1 当前工程总览
@@ -21,6 +21,8 @@
 - `AutoDrive` 并非独立主循环入口，而是隐藏在 `ShipProtocol_RunScheduler()` 内初始化与轮询；`0x13/0x14/0x15`、低电返航和链路超时都会走到这条链。当前 `AutoDrive` 只负责 GPS 点位规划、目标航向和到点判断，电机自稳输出必须交给 yaw-hold PID 公共链路。
 - 返航/钓点巡航的 `target_heading_cd` 不是启动时固定一次的角度；`AUTO_DRIVE_RUNING` 状态下每当 `gps->update_sequence` 变化，都会用最新当前 GPS 点和目标点重新计算目标航向，随后继续提交给 `ShipControl_RequestGpsNav(target_heading_cd, base_speed)`。GPS 未更新的 10ms 控制周期内只沿用上一帧目标航向。
 - 当前 GPS 定点巡航的当前船头角必须来自 `MainLoop_GetHeadingDeg100()` 的融合绝对航向；磁力计已按实测 `MAG_COMPASS_DIRECTION_SIGN=-1`、`MAG_COMPASS_INSTALL_OFFSET_CD=21930` 修正正北零点与旋转方向，上位机“船头朝向”应显示 `HDG fused` 才能证明航向链已 ready。
+- D 键 GPS 北向校准当前已接入正式链路：`ship_protocol.c` 负责长按检测，`NorthCalib.c` 负责 `CHECK_READY -> ALIGN_NORTH -> RUN_STRAIGHT -> CALC -> SAVE` 状态机，`MainLoop_GetHeadingDeg100()` 统一叠加 `north_offset_cd`，EEPROM 使用 `0x000200/0x000400` A/B 双槽保存。
+- `Code_boweny/` 与 `User/` 当前按中文 Doxygen 口径维护：文件头使用 `@file/@brief/@details`，公开结构体和内部运行态结构体字段采用字段后置中文注释；改结构体、状态机或日志字段时必须同步模块 README、`date.md` 和相关日志工具说明。
 
 ## 2. 当前开关
 
@@ -49,16 +51,16 @@
 #define SHIP_YAW_HOLD_LOG_PERIOD_MS    1000UL
 #define SHIP_YAW_HOLD_OUTPUT_LIMIT     1000
 #define SHIP_YAW_HOLD_FULL_ERROR_CD    1000
-#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 250
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 320
 #define SHIP_YAW_HOLD_OUTPUT_SIGN      1
 #define SHIP_MANUAL_YAW_HOLD_DIFF_PERCENT 20U
 #define SHIP_YAW_HOLD_DERATE_START_CD  1000
 #define SHIP_YAW_HOLD_DERATE_FULL_CD   2000
 #define SHIP_YAW_HOLD_DERATE_MIN_BASE  500
-#define SHIP_YAW_HOLD_KP_Q10           512
+#define SHIP_YAW_HOLD_KP_Q10           384
 #define SHIP_YAW_HOLD_DEADBAND_CD      50
-#define SHIP_YAW_HOLD_KI_Q10           128
-#define SHIP_YAW_HOLD_KD_Q10           64
+#define SHIP_YAW_HOLD_KI_Q10           0
+#define SHIP_YAW_HOLD_KD_Q10           96
 #define SHIP_MOT_LOG_PERIOD_MS         200U
 #define SHIP_RC_INPUT_LOG_PERIOD_MS    500U
 ```
@@ -67,23 +69,35 @@
 - `SHIP_PROTOCOL_COMPAT_ENABLE=0` 表示当前使用调度器链路 `ShipProtocol_RunScheduler()`，不是额外兼容轮询入口。
 - `SHIP_MANUAL_CONTROL_PERIOD_MS=10UL` 是内部手动控制目标刷新周期；`SHIP_MOT_LOG_PERIOD_MS` 和 `SHIP_RC_INPUT_LOG_PERIOD_MS` 是独立日志周期，二者不能作为控制节拍。
 - `SHIP_YAW_HOLD_MANUAL_ENABLE=1` 是当前应用行为与旧版纯开环手动控制的主要差异点；当前直线自稳触发条件是左右电机预期差速小于最大单侧输入的 `20%`，且油门为前进。
-- `SHIP_YAW_HOLD_OUTPUT_LIMIT=1000` 与 `Motor_SetSpeed()` 满量程统一；`SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 表示 10.00° 偏航达到满控制输入；`SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=250` 表示满输出时差速最多为当前基础油门的 25%，并继续受电机上限余量限制。
+- `SHIP_YAW_HOLD_OUTPUT_LIMIT=1000` 与 `Motor_SetSpeed()` 满量程统一；`SHIP_YAW_HOLD_FULL_ERROR_CD=1000` 表示 10.00° 偏航达到满控制输入；`SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE=320` 表示满输出时差速最多为当前基础油门的 32%，并继续受电机上限余量限制。
 - `SHIP_YAW_HOLD_DERATE_START_CD=1000` / `SHIP_YAW_HOLD_DERATE_FULL_CD=2000` 表示 yaw 自稳基础速度在偏航误差 `10.00°` 后才开始降额，`20.00°` 后达到满降额，满降额基础速度上限为 `500`。
 - `SHIP_YAW_HOLD_OUTPUT_SIGN=1` 是当前实船已验证的左右极性方向；后续返航、钓点巡航和任何自稳输出都必须复用这个公共参数，不允许在其他模块单独翻转。
-- `SHIP_YAW_HOLD_KP_Q10=512`、`SHIP_YAW_HOLD_KI_Q10=128`、`SHIP_YAW_HOLD_KD_Q10=64` 是当前 yaw-hold PID 参数，`SHIP_YAW_HOLD_DEADBAND_CD=50` 用于压住 0.50° 内的小抖动，`SHIP_YAW_HOLD_LOG_PERIOD_MS=1000UL` 用于限制控制层 yaw-hold 诊断输出频率。
+- `SHIP_YAW_HOLD_KP_Q10=384`、`SHIP_YAW_HOLD_KI_Q10=0`、`SHIP_YAW_HOLD_KD_Q10=96` 是当前 yaw-hold PID 参数，`SHIP_YAW_HOLD_DEADBAND_CD=50` 用于压住 0.50° 内的小抖动，`SHIP_YAW_HOLD_LOG_PERIOD_MS=1000UL` 用于限制控制层 yaw-hold 诊断输出频率。
 
 ## 3. 启动顺序
 
 ```text
 SYS_Init()
-  -> APP_config()
+  -> GPIO_config()
+  -> Switch_config()
+  -> Timer_config()
+  -> ADC_config()
+  -> UART_config()
+  -> I2C_config()
   -> log_init()
   -> Wireless_Init()
   -> GPS_Init()
+
+main()
+  -> MainLoop_Bootstrap()
+     -> NorthCalib_Init()
+     -> 其它主循环快照初始化
+
+MainLoop 运行期首次进入配对/传感器启动链后
   -> Sensor_I2C_prepare()
-  -> AHRS_Reset()
   -> QMC6309_Init()
-  -> QMI8658_Init()
+  -> QMI8658_RequestReinit() / QMI8658_Service()
+  -> AHRS_Reset()
 ```
 
 ## 4. 主循环
@@ -120,7 +134,7 @@ MainLoop_RunOnce()
 
 ## 6. 存储与已知差异
 
-- 当前无外置 EEPROM；自动返航配置通过 `AutoDriveCfg_Save()` 写入 STC flash/EEPROM 区，地址为 `0x0001F800`。
+- 当前无外置 EEPROM；自动返航配置通过 `AutoDriveCfg_Save()` 写入 STC flash/EEPROM 区，地址为 `0x0001F800`；D 键北向校准记录单独写入 `0x000200/0x000400` A/B 双槽。
 - `0x15` 短包行为比旧版更防御：短包只保存开关，只有完整 `1 + 10` 字节时才更新返航点；正常旧遥控器完整帧不受影响。
 - 自稳路径是工程级公共能力，不是手动遥控专用能力；手动直线自稳、定速巡航、GPS 返航、GPS 钓点巡航都必须共用 `ShipControl` / yaw-hold PID 输出链。
 - 当前文档按工作区真实状态记录；如果后续要发布“严格旧版应用行为”，需要先关闭 `SHIP_YAW_HOLD_MANUAL_ENABLE` 或移除手动自稳门控，再更新本文档。
@@ -129,6 +143,7 @@ MainLoop_RunOnce()
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-31 | `v1.7.68` | 新增 D 键 GPS 北向校准链路：`NorthCalib` 负责状态机和 EEPROM A/B 双槽，`MainLoop_GetHeadingDeg100()` 统一叠加 `north_offset_cd`，README/模块文档同步到当前真实关系。 |
 | 2026-05-18 | `v1.7.65` | 同步 GPS 定点巡航角度策略：`target_heading_cd` 随 GPS 新坐标实时重算，GPS 未更新时沿用上一帧目标角；当前船头角来自融合绝对航向 `MainLoop_GetHeadingDeg100()`，并记录磁罗盘方向/零点修正。 |
 | 2026-05-16 | `v1.7.64` | 明确工程级自稳约束：所有自稳模式、返航循迹和钓点巡航都必须走 yaw-hold PID 公共路线；AutoDrive 只负责 GPS 规划目标航向和到点判断，不允许另写定时左/右转或第二套左右极性。 |
 | 2026-05-15 | `v1.7.63` | 修正手动 yaw 自稳单位和量程，并恢复 10ms 手动控制连续刷新；日志打印与内部控制更新解耦；无遥控油门时不再启动空闲 yaw-hold，避免上电自转和遥控阶梯卡顿。 |

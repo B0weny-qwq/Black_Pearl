@@ -120,6 +120,15 @@ main()
 - `GPS_Poll()` 放在主循环前部，优先处理串口流，降低丢帧风险
 - `update_sequence` 仅在新的有效主状态提交后递增
 - GPS 详细诊断日志受 `GPS_DIAG_LOG_ENABLE` 控制
+- D 键北向校准由 `NorthCalib.c` 复用 `GPS_GetState()` 的 `lat_deg1e7/lon_deg1e7/update_sequence` 计算 10m 航迹角；GPS 模块本身仍只负责解析和提供只读状态，校准参数由 AutoDrive/NorthCalib 层写入 STC EEPROM A/B 双槽
+- D 键校准的现场测试、日志字段、失败原因和对接边界见 `doc/project_doc/gps_north_calibration_d_key_test_plan.md`
+
+## 当前职责边界
+
+- `GPS.c` 只负责 `UART2 -> FIFO -> NMEA Parser -> GPS_State_t` 这条接收解析链
+- `NorthCalib.c` 只读取 GPS 状态做北向校准，不反向改写 GPS 模块内部状态
+- `ShipControl` 与 `AutoDrive` 只消费解析结果做导航和执行决策，不在 GPS 模块内实现策略分支
+- 无线 `0x12` 状态回传复用 `GPS_State_t` 字段，但协议打包仍归 `ship_protocol.c` 负责
 
 ## 运行时序图
 
@@ -174,6 +183,7 @@ sequenceDiagram
 
 - `Code_boweny/Device/GPS/GPS.h`
 - `Code_boweny/Device/GPS/GPS.c`
+- `Code_boweny/Device/AutoDrive/NorthCalib.c`
 - `doc/build_doc/README_GPS.md`
 - `doc/project_doc/total.md`
 - `doc/project_doc/date.md`
@@ -182,4 +192,6 @@ sequenceDiagram
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-05-31 | v1.2 | 补充当前职责边界：明确 GPS 只负责解析与状态缓存，北向校准/控制策略/协议打包位于上层模块 |
+| 2026-05-31 | v1.1 | 说明 GPS 状态被 D 键北向校准复用：用起终点经纬度和 update_sequence 计算 GPS 航迹角，校准参数仍由 AutoDrive/NorthCalib 层保存 |
 | 2026-04-24 | v1.0 | 新建 GPS 模块，接入 UART2(P1.0/P1.1)，实现 NMEA 状态机解析、定点状态输出与失败前不落状态的安全更新 |

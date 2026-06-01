@@ -11,6 +11,11 @@
  * 通过 `AHRS_UpdateRawMag()` 和 `HeadingEstimator` 参与航向估计主链，
  * 同时也保留独立读数与寄存器诊断能力。
  *
+ * 当前依赖边界：
+ * - 本模块不直接输出最终导航航向；
+ * - AHRS/HeadingEstimator 负责把三轴磁数据变成 `yaw_mag_deg`；
+ * - `NorthCalib` 的 `north_offset_cd` 不在本模块实现。
+ *
  * @hardware
  * - 总线: 复用传感器 I2C 后端
  * - 默认引脚: P1.4=SDA / P1.5=SCL
@@ -54,6 +59,10 @@ s8 QMC6309_ReadXYZ(int16 *x, int16 *y, int16 *z);
  * @param[out] y  Y 轴输出指针。
  * @param[out] z  Z 轴输出指针。
  * @return     SUCCESS=成功，其他值表示读数失败或滤波输入无效。
+ *
+ * @note
+ * 当前主路径由 `MainLoop/IMU_AhrsPoll()` 调用本接口，再把结果交给
+ * `AHRS_UpdateRawMag()`。
  */
 s8 QMC6309_ReadXYZFiltered(int16 *x, int16 *y, int16 *z);
 

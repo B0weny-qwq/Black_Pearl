@@ -17,6 +17,12 @@
  * @see     Code_boweny/Function/Log/Log.h
  */
 
+/**
+ * @note 当前职责边界：
+ * - 本文件只负责 UART1 文本日志格式化与输出。
+ * - 业务模块通过 LOGI/LOGW/LOGE 等接口调用，不应在此耦合业务状态机。
+ * - AHRS_TEST_ONLY 仅用于裁剪日志噪声，不改变业务控制链路。
+ */
 #include "..\..\..\User\config.h"
 #include "Log.h"
 
@@ -180,7 +186,7 @@ void log_init(void)
     PrintString1("\r\n");
     log_printf("[SYS] I: ============== Black Pearl v1.1 ==============");
     log_printf("[SYS] I:   MCU : STC32G  Fosc=%luHz", (u32)MAIN_Fosc);
-    /* Keep the banner tied to the latest firmware build for field diagnosis. */
+    /* 横幅固定输出当前固件构建信息，便于现场日志定位版本。 */
     log_printf("[SYS] I:   Author : boweny  Build : %s %s", __DATE__, __TIME__);
     log_printf("[SYS] I: LOG Ready. Use LOGI/LOGW/LOGE/LOGD/log_printf");
     PrintString1("\r\n");

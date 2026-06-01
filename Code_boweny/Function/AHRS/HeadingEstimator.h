@@ -10,11 +10,23 @@
  * 不融合磁力计，只记录磁力计观测值，避免水面运动和磁干扰导致
  * 航向突跳。
  *
+ * 当前边界：
+ * - 本模块输出的是原始融合航向；
+ * - `NorthCalib` 的 `north_offset_cd` 不在此处保存或叠加；
+ * - 导航统一航向由 `MainLoop_GetHeadingDeg100()` 在外层完成修正。
+ *
  * @note 角度单位默认使用度，`Deg100` 系列接口返回 0.01 度单位。
  * @note 当前接口使用浮点数，调用频率和计算开销由上层任务调度控制。
  */
 
 #include "config.h"
+
+/**
+ * @note 当前职责边界：
+ * - `HeadingEstimator` 只输出原始融合航向与相关调试状态；
+ * - `NorthCalib` 的导航北向偏移不在本模块内保存或叠加；
+ * - 系统统一导航航向由 `MainLoop_GetHeadingDeg100()` 在上层组合生成。
+ */
 
 /**
  * @def HEADING_USE_INTERNAL_BIAS
@@ -76,52 +88,52 @@
 typedef struct
 {
     /** 当前融合后的绝对航向，范围约束为 [0, 360)，单位：deg。 */
-    float heading_deg;
+    float heading_deg;             /**< 当前融合后的绝对航向，范围 [0, 360)，单位 deg。 */
 
     /** 相对航向零点，调用 Heading_ResetZero() 时记录，单位：deg。 */
-    float heading_zero_deg;
+    float heading_zero_deg;        /**< 相对航向零点，调用 Heading_ResetZero() 时记录，单位 deg。 */
 
     /** Z 轴陀螺零偏，单位：deg/s。 */
-    float gyro_z_bias_dps;
+    float gyro_z_bias_dps;         /**< Z 轴陀螺零偏，单位 deg/s。 */
 
     /** 仅由陀螺积分得到的航向，单位：deg。 */
-    float yaw_gyro_deg;
+    float yaw_gyro_deg;            /**< 仅由陀螺积分得到的航向，单位 deg。 */
 
     /** 最近一次归一化后的磁力计航向观测，单位：deg。 */
-    float yaw_mag_deg;
+    float yaw_mag_deg;             /**< 最近一次归一化后的磁力计航向观测，单位 deg。 */
 
     /** 本次更新中由陀螺预测得到的航向，单位：deg。 */
-    float heading_pred_deg;
+    float heading_pred_deg;        /**< 本次更新中由陀螺预测得到的航向，单位 deg。 */
 
     /** 磁力计观测与预测航向之间的误差，范围约束为 [-180, 180)，单位：deg。 */
-    float heading_err_deg;
+    float heading_err_deg;         /**< 磁力计观测与预测航向之间的误差，范围 [-180, 180)，单位 deg。 */
 
     /** 静止状态下建立的磁力计参考航向，单位：deg。 */
-    float static_mag_ref_deg;
+    float static_mag_ref_deg;      /**< 静止状态下建立的磁力计参考航向，单位 deg。 */
 
     /** 磁力计融合置信度；当前实现中使用 0 或 1 表示本次是否融合。 */
-    float mag_confidence;
+    float mag_confidence;          /**< 磁力计融合置信度，当前使用 0/1 表示本次是否融合。 */
 
     /** 上一次被接受的磁力计航向样本，单位：deg。 */
-    float last_yaw_mag_deg;
+    float last_yaw_mag_deg;        /**< 上一次被接受的磁力计航向样本，单位 deg。 */
 
     /** 原始磁力计输入是否有效。 */
-    u8 mag_valid;
+    u8 mag_valid;                  /**< 原始磁力计输入是否有效。 */
 
     /** 本次更新是否实际使用磁力计修正航向。 */
-    u8 mag_used;
+    u8 mag_used;                   /**< 本次更新是否实际使用磁力计修正航向。 */
 
     /** 上层传入的静止标志。 */
-    u8 static_flag;
+    u8 static_flag;                /**< 上层传入的静止标志。 */
 
     /** 静止磁力计参考航向是否已经建立。 */
-    u8 static_mag_ref_valid;
+    u8 static_mag_ref_valid;       /**< 静止磁力计参考航向是否已经建立。 */
 
     /** 本次更新传入的原始磁力计有效标志。 */
-    u8 raw_mag_valid;
+    u8 raw_mag_valid;              /**< 本次更新传入的原始磁力计有效标志。 */
 
     /** 上一次磁力计样本是否通过跳变门限检查。 */
-    u8 last_mag_sample_valid;
+    u8 last_mag_sample_valid;      /**< 上一次磁力计样本是否通过跳变门限检查。 */
 } HeadingEstimator_t;
 
 /**

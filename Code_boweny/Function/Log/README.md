@@ -68,6 +68,7 @@ void MyTask(void)
 - STC32G 无 FPU，`vsprintf()` 不应使用 `%f`。
 - 如需输出小数，请先手动转换为整数和小数部分。
 - 单条日志超过 127 字符会被截断，不会造成缓冲区越界。
+- 当前日志被 `WIRELESS`、`GPS`、`QMI8658`、`QMC6309`、`AHRS`、`ShipControl`、`NorthCalib` 等模块共用；若修改日志格式，需要同步核对上位机 `tools/ship_log_viewer/` 的正则与显示逻辑。
 
 ## API
 

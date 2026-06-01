@@ -23,6 +23,12 @@
  * @see     Code_boweny/Device/WIRELESS/wireless.c
  */
 
+/**
+ * @note 当前架构职责边界：
+ * - wireless.h 对上层暴露无线链路管理接口。
+ * - 芯片寄存器/FIFO 细节由 lt8920.h 和 wireless_port.* 适配。
+ * - 业务协议帧调度仍由 ship_protocol.c 持有。
+ */
 #ifndef __WIRELESS_H__
 #define __WIRELESS_H__
 

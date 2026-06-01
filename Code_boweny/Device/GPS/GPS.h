@@ -22,6 +22,12 @@
  * @note
  * 调用顺序：`GPS_Init()` -> 主循环高频调用 `GPS_Poll()` -> `GPS_GetState()`。
  *
+ * @note
+ * 当前职责边界：
+ * - 本模块只负责 UART2 字节接收、NMEA 解析与只读状态缓存；
+ * - `NorthCalib` 可复用 `GPS_GetState()` 中的经纬度与 `update_sequence` 做北向校准；
+ * - 导航策略、返航逻辑和目标点决策不在本模块内实现。
+ *
  * @see     Code_boweny/Device/GPS/GPS.c
  */
 

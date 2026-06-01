@@ -1,8 +1,8 @@
-# AutoDrive 自动返航与点位巡航说明
+# AutoDrive 自动返航、钓点巡航与北向校准说明
 
-`Code_boweny/Device/AutoDrive/` 是当前根目录工程里的旧版自动驾驶兼容层。
+`Code_boweny/Device/AutoDrive/` 是当前根目录工程里的自动返航/钓点巡航层。
 它不是独立主循环入口，而是由 `Code_boweny/Device/WIRELESS/ship_protocol.c`
-在协议调度中初始化、喂狗和轮询。
+在协议调度中初始化、保活和轮询；D 键北向校准也与它位于同一目录下，但作为独立小模块存在。
 
 ## 当前接入位置
 
@@ -12,8 +12,10 @@
 ShipProtocol_RunScheduler()
   -> ShipProtocol_InitRuntime()
      -> AutoDrive_Init()
+     -> NorthCalib_Init()
   -> AutoDrive_LinkAliveTick()
   -> AutoDrive_Poll()
+  -> NorthCalib_Poll()
 
 合法协议帧:
   0x13 -> AutoDrive_SetReturnPositionRaw()
@@ -22,12 +24,20 @@ ShipProtocol_RunScheduler()
 
 低电 / 链路超时:
   -> AutoDrive_TriggerReturn()
+
+D 键长按:
+  -> NorthCalib_RequestStart()
+  -> ShipControl_RequestGpsAlign(0)
+  -> ShipControl_RequestGpsNav(0, low_speed)
+  -> EEPROM 保存 north_offset_cd
 ```
 
 说明：
 
 - `AutoDrive` 已进入当前主链，不是“预留未接入模块”。
-- 但它仍服从旧协议格式和当前门控条件，不是全自动导航系统。
+- 它仍服从旧协议格式和当前门控条件，不是全自动导航系统。
+- 航向基准由 `MainLoop_GetHeadingDeg100()` 统一输出；若做过 D 键校准，该接口会自动叠加 `north_offset_cd`。
+- D 键北向校准的现场测试和对接判据见 `doc/project_doc/gps_north_calibration_d_key_test_plan.md`。
 
 ## 当前对外接口
 
@@ -55,7 +65,42 @@ u8 AutoDrive_GetLastFishCommandIndex(void);
 
 void AutoDrive_LinkAliveTick(void);
 void AutoDrive_LinkAliveKick(void);
+
+void NorthCalib_Init(void);
+void NorthCalib_UpdateRemoteInput(u8 lr, u8 ud, u8 key, u32 now_ms);
+u8 NorthCalib_RequestStart(void);
+void NorthCalib_Poll(void);
+u8 NorthCalib_IsBusy(void);
+int16 NorthCalib_GetHeadingOffsetCd(void);
 ```
+
+## 当前 D 键北向校准
+
+`NorthCalib.c/.h` 负责 D 键 GPS 北向校准，属于自动驾驶相关的独立小模块，不改变 `AutoDrive` 去点/返航状态机。
+
+当前流程：
+
+```text
+长按 D 约 1.5s
+  -> CHECK_READY 检查 GPS、heading、遥控链路、AutoDrive/巡航空闲
+  -> ALIGN_NORTH 调 ShipControl_RequestGpsAlign(0)
+  -> RUN_STRAIGHT 调 ShipControl_RequestGpsNav(0, 500) 直跑约 10m
+  -> CALC 用 GPS 起终点航迹角 - 原始融合航向均值计算 north_offset_cd
+  -> SAVE 写入 STC EEPROM/IAP
+```
+
+运行时使用方式：
+
+- `MainLoop_GetRawHeadingDeg100()` 返回 AHRS 原始融合航向。
+- `MainLoop_GetHeadingDeg100()` 返回 `raw + NorthCalib_GetHeadingOffsetCd()` 后的航向，供手动 yaw 自稳、E 键定速巡航、GPS 自动巡航共用。
+- 直跑采样时以首个原始航向为参考累计最短角差，再还原平均值，避免跨 `0/360°` 或 `±180°` 时把样本算到反向。
+- 校准期间人工打杆、遥控超时、GPS/heading 不 ready、直跑距离不足或 yaw 不稳定都会失败并停船。
+- 校准 busy 时协议层会拒绝 `0x13/0x14/0x15` 自动巡航命令，并暂停低电自动返航触发，避免 AutoDrive 抢控制权。
+- 新 offset 与已保存 offset 相差超过 `45.00°` 时只临时应用并打印 `offset jump`，不覆盖 EEPROM。
+
+EEPROM 记录当前使用 A/B 双槽：`0x000200` 和 `0x000400`。单条记录包含 magic、version、`north_offset_cd`、confidence、sample distance、update count 和 checksum；加载时选择更新的有效槽，保存时写入另一个槽，写入失败不会擦掉旧有效记录。
+
+现场测试时优先按 `doc/project_doc/gps_north_calibration_d_key_test_plan.md` 执行。该文档已经把标准水面测试、人工接管退出、GPS 不 ready、AutoDrive busy 隔离、offset 跳变保护和重启加载复测拆开，方便硬件、上位机和后续维护人员对接。
 
 ## 当前状态机
 

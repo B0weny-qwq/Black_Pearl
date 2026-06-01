@@ -1,3 +1,8 @@
+/**
+ * @note 当前职责边界：
+ * - 本文件是当前工程功能开关、协议参数和联调阈值的集中配置源。
+ * - 需要调参时应优先修改这里，而不是在各业务模块散落重复常量。
+ */
 #ifndef __FEATURE_SWITCH_H
 #define __FEATURE_SWITCH_H
 
@@ -5,8 +10,8 @@
  * @file    FeatureSwitch.h
  * @brief   Black Pearl v1.1 功能开关与联调参数集中定义
  * @author  boweny
- * @date    2026-05-12
- * @version v1.7.59
+ * @date    2026-05-31
+ * @version v1.7.68
  *
  * @details
  * 本文件集中管理当前工程的功能开关、联调阈值和协议参数。
@@ -20,7 +25,8 @@
  * 当前工程 profile：
  * - Wireless + GPS + MAG + IMU + AHRS 运行
  * - 旧遥控器协议与 `0x12/0x13/0x14/0x15` 回传链路保持启用
- * - 船体手动 yaw 自稳开启，但保持保守 P-only 参数
+ * - 船体手动 yaw 自稳、E 键定速巡航、GPS 导航和 D 键北向校准共存
+ * - yaw-hold 当前不是 P-only，而是保守 `P + D`，`Ki=0`
  *
  * @note
  * 需要调参时，优先改本文件，不要在业务层到处散落重复常量。
@@ -114,7 +120,7 @@
 /**
  * @brief  yaw 自稳最大差速比例（permille）
  * @details
- * - 250 表示 PID 满输出时，单边差速修正最多为当前基础油门的 25%
+ * - 320 表示 PID 满输出时，单边差速修正最多为当前基础油门的 32%
  * - 可防止自稳态把单侧电机直接压死或拉满
  */
 #define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 320
@@ -235,7 +241,7 @@
  * - 1：磁力计单独刷屏，适合排查 QMC6309 本体
  * - 0：不独立刷屏，由 AHRS 内部低频读取
  */
-#define ENABLE_MAG_STANDALONE_POLL     1
+#define ENABLE_MAG_STANDALONE_POLL     0
 
 /**
  * @brief  AHRS 姿态轮询开关

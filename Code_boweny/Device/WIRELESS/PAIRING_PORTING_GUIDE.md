@@ -2,6 +2,12 @@
 
 本文档只覆盖 `App/Wireless` 里的“无线配对 + 进入工作信道”逻辑，目标是把当前 STC8 平台实现拆成可以迁移到任意 MCU/RTOS 的实现说明。
 
+当前说明边界：
+
+- 这份文档描述的是旧工程/旧平台的配对迁移思路，不直接等同于当前 `Black_Pearl_v1.1` 的完整无线业务实现。
+- 当前根目录真实代码入口应优先看 `Code_boweny/Device/WIRELESS/README.md`、`ship_protocol.h/.c`、`wireless.h/.c` 和 `wireless_port.*`。
+- 若本文与当前根目录代码行为冲突，以当前根目录源码和对应 README 为准。
+
 ## 1. 适用范围
 
 - 当前工程：`ship_Gps_V2.1_0314-115200`

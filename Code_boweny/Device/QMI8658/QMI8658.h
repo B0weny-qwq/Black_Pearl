@@ -11,6 +11,11 @@
  * 并通过 `QMI8658_Service()` + `MainLoop.c/IMU_AhrsPoll()` 进入
  * `AHRS + HeadingEstimator` 主链。
  *
+ * 当前依赖边界：
+ * - 本模块只输出原始 Acc/Gyro 数据和 ready 状态；
+ * - AHRS/HeadingEstimator 负责姿态与航向融合；
+ * - `MainLoop_GetHeadingDeg100()` 和 `NorthCalib` 的导航零点修正不在此模块内完成。
+ *
  * @note
  * 当前默认运行档由 `User/FeatureSwitch.h` 控制：
  * - `ENABLE_IMU_MODULE=1`
@@ -90,7 +95,7 @@
 #define QMI8658_GYRO_ODR_3760HZ     0x01
 #define QMI8658_GYRO_ODR_7520HZ     0x00
 
-/* Compatibility aliases kept for existing code paths. */
+/* 兼容旧调用路径保留的输出速率别名。 */
 #define QMI8658_ACC_ODR_29HZ        QMI8658_ACC_ODR_28HZ
 #define QMI8658_ACC_ODR_58HZ        QMI8658_ACC_ODR_56HZ
 #define QMI8658_ACC_ODR_117HZ       QMI8658_ACC_ODR_112HZ
@@ -118,7 +123,7 @@
 #define QMI8658_GYRO_RANGE_1024     0x60
 #define QMI8658_GYRO_RANGE_2048     0x70
 
-/* Compatibility aliases kept for existing code paths. */
+/* 兼容旧调用路径保留的量程别名。 */
 #define QMI8658_GYRO_RANGE_125      QMI8658_GYRO_RANGE_128
 #define QMI8658_GYRO_RANGE_250      QMI8658_GYRO_RANGE_256
 
@@ -187,7 +192,7 @@
 #define QMI8658_STATUSINT_AVAIL        0x01  /**< STATUSINT 可用位。 */
 #define QMI8658_STATUS0_A_DA           0x01  /**< STATUS0 加速度 ready 位。 */
 #define QMI8658_STATUS0_G_DA           0x02  /**< STATUS0 陀螺仪 ready 位。 */
-/* STATUS0 bit[7:2] reserved; temperature data follows accel/gyro refresh. */
+/* STATUS0 bit[7:2] 保留；温度数据跟随加速度/陀螺刷新。 */
 #define QMI8658_READ_FAIL_REINIT_COUNT 4U    /**< 连续读失败后请求重拉起阈值。 */
 
 #define QMI8658_ACC_IS_ZERO(x, y, z)     (((x) == 0) && ((y) == 0) && ((z) == 0))
@@ -250,6 +255,10 @@ QMI8658_State_t QMI8658_GetState(void);
 /**
  * @brief   查询是否有新的 IMU 数据就绪标志。
  * @return  1=有新数据，0=无新数据。
+ *
+ * @note
+ * 当前主路径由 `MainLoop/IMU_AhrsPoll()` 读取该标志并决定是否调用
+ * `QMI8658_ReadAll()` 推进 AHRS 主链。
  */
 u8 QMI8658_HasDataReady(void);
 

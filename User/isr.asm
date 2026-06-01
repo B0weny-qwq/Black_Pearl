@@ -1,3 +1,7 @@
+; @file isr.asm
+; @brief STC32G 中断向量跳转表。
+; @details 将固定中断入口地址跳转到 C/汇编层 ISR 符号；具体中断处理逻辑位于 Driver/isr 和相关模块。
+
         CSEG    AT  0123H           ;RTC_VECTOR
         JMP     RTC_VECTOR
         CSEG    AT  012BH           ;P0INT_VECTOR

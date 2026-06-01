@@ -1,3 +1,23 @@
+/**
+ * @file    QMI8658_port.c
+ * @brief   QMI8658 共享 I2C 端口适配实现。
+ *
+ * @details
+ * 本文件负责在 `P1.4/P1.5` 共享传感器总线上完成 QMI8658 的硬件/软件 I2C
+ * 访问、超时等待与总线恢复。
+ *
+ * 当前关系边界：
+ * - `System_init/Sensor_I2C_prepare()` 负责把引脚模式和 I2C 路由恢复到可用状态；
+ * - 本层在此基础上完成寄存器访问；
+ * - `QMI8658.c`、AHRS、MainLoop 和 NorthCalib 只消费上层状态与数据，不直接
+ *   依赖这里的寄存器时序细节。
+ */
+/**
+ * @note 当前职责边界：
+ * - 本文件只负责共享传感器 I2C 总线上的 QMI8658 端口访问与总线恢复。
+ * - `QMI8658.c` 在此基础上完成寄存器初始化和原始数据采集。
+ * - AHRS、MainLoop、NorthCalib 只消费上层状态，不直接依赖这里的时序细节。
+ */
 #include "..\..\..\User\Config.h"
 #include "QMI8658_port.h"
 #include "..\..\..\Driver\inc\STC32G_Delay.h"
@@ -20,10 +40,11 @@ static u8 QMI8658Port_HardSendMasterAck(u8 nack);
 static u8 QMI8658Port_HardStop(void);
 static void QMI8658Port_ConfigPins(void)
 {
+    /* 两个传感器共用 P1.4/P1.5 I2C 总线，保持开漏模式。 */
     EAXSFR();
     P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
     P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
-    /* Release SDA/SCL before switching the I2C function onto the pins. */
+    /* 切换 I2C 复用功能前先释放 SDA/SCL。 */
     P14 = 1;
     P15 = 1;
     I2C_SW(I2C_P14_P15);
@@ -33,6 +54,7 @@ static void QMI8658Port_HardI2cRestore(void)
 {
     I2C_InitTypeDef i2c_init;
 
+    /* 重新启用共享总线前先复位 STC 主机状态机。 */
     I2C_Function(DISABLE);
     I2C_Master();
     I2CMSST = 0x00U;

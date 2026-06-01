@@ -24,6 +24,9 @@
  * - `GPS_REPORT(0x12)` payload 保持老版 15 字节，不新增字段。
  * - `THROTTLE(0x11)` 空口仍保持老版 `lr/ud/key` 载荷，但应用层已加入
  *   轴滤波、差速映射和可选 yaw-hold 手动直线保持，不再等同旧版纯开环。
+ * - D 键长按由本模块检测并转交 `NorthCalib_RequestStart()`；校准期间也由本模块
+ *   把最新遥控输入提交给 `NorthCalib_UpdateRemoteInput()`，并隔离
+ *   `0x13/0x14/0x15` 与低电返航触发，避免和 AutoDrive 抢控制权。
  * - `A/C/D` 按键入口保留老版语义，其中 A 键灯控因当前 v1.1 板级引脚未确认，
  *   只保留日志提示，不在本层擅自绑定到未知引脚。
  *
@@ -89,6 +92,7 @@ s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len);
  * 每收到一帧合法协议数据都会按旧版业务回发一次 `SHIP_CMD_GPS_REPORT(0x12)`；
  * 收到 `SHIP_CMD_THROTTLE(0x11)` 时更新遥控输入，并交给 `ShipControl`
  * 统一仲裁手动开环、手动自稳、定速巡航和 GPS 航向保持。
+ * D 键北向校准相关的触发、busy 门控和遥控输入转发也在此调度器内完成。
  *
  * @warning
  * 当前工程保留 `0x13/0x14/0x15` 的旧版点位格式，并实际调用

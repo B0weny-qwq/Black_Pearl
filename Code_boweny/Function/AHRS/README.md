@@ -16,6 +16,7 @@
 - AHRS 启用
 - HeadingEstimator 启用
 - GPS 不进入 AHRS 主融合链
+- D 键北向校准也不进入 AHRS 主融合链；它属于 `AutoDrive/NorthCalib` 侧的导航零点修正。
 
 ## 当前主接口
 
@@ -63,6 +64,8 @@ MainLoop_RunOnce()
 
 - `IMU_ServicePoll()` 负责推进 `QMI8658_Service()` 状态机
 - `IMU_AhrsPoll()` 负责读取 IMU / MAG，并推进 `AHRS` 与 `HeadingEstimator`
+- `MainLoop_GetRawHeadingDeg100()` 读取 `HeadingEstimator` 的原始融合航向
+- `MainLoop_GetHeadingDeg100()` 在原始航向上叠加 `NorthCalib` 的 `north_offset_cd`
 
 ## 当前时序参数
 
@@ -110,6 +113,12 @@ HeadingEstimator 侧当前关键参数：
 - 用 `gyro_z_dps` 做短期 yaw / heading 积分
 - 用 `yaw_mag_deg` 做慢速磁修正
 - 管理 heading zero / relative yaw 输出
+
+它不负责：
+
+- 保存北向校准参数
+- 处理 EEPROM/IAP
+- 根据 GPS 航迹直接改写 heading 零点
 
 注意：
 
@@ -159,6 +168,7 @@ HeadingEstimator 侧当前关键参数：
 
 - 绝对 yaw 仍依赖磁环境
 - GPS 还没有进入 AHRS 主链
+- `north_offset_cd` 是 AHRS 外层的导航修正，不代表磁力计已经完成硬铁/软铁标定
 - HeadingEstimator 当前更偏工程调试可用，不是最终导航级航向系统
 - 如果磁环境差，`ym` 漂移并不一定等于 gyro 漂移
 

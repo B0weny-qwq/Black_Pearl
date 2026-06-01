@@ -127,6 +127,7 @@ MainLoop_RunOnce()
 
 - `Wireless_Poll()` 负责把 LT8920 收到的射频载荷推入软件队列。
 - `ShipProtocol_RunScheduler()` 负责从无线队列取 payload，并按旧协议找帧、分发、回 `0x12`；同时它也会内部执行 `AutoDrive_Init()`、`AutoDrive_LinkAliveTick()` 和 `AutoDrive_Poll()`。
+- 同一个调度器里还负责 D 键长按检测、`NorthCalib_RequestStart()` 触发，以及校准期间把最新 `lr/ud/key` 提交给 `NorthCalib_UpdateRemoteInput()`。
 - 手动开环、手动 yaw 自稳、E 键定速巡航和 GPS 航向保持的最终电机目标统一由 `ShipControl` 仲裁输出。
 - 同一主循环不要同时开启 `ShipProtocol_RunScheduler()` 和 `ShipProtocol_Poll()`，否则会重复消费无线队列。
 
@@ -210,6 +211,12 @@ AA 11 12 <15字节载荷> xor BB
 | `0x14` | `SET_DESTINATION` | 遥控器 -> 船 | 10 字节点位 | 按收到顺序保存/匹配 1..5 号钓点；每个有效坐标都会按当前目标尝试进入定点巡航 |
 | `0x15` | `SWITCH_AUTO_RETURN` | 遥控器 -> 船 | `switch + 可选 10 字节点位` | 更新 RAM 自动返航开关和返航点 |
 | `0x16` | `AUTODRIVE_DIAG` | 船 -> 遥控器/上位机 | 固定 36 字节 | 自动驾驶状态、原因、距离、当前点和目标点诊断上报 |
+
+补充：
+
+- D 键北向校准不是新的空口命令号，而是复用 `0x11` 里的 `key` 字段做长按检测。
+- 检测和门控在 `ship_protocol.c`，校准状态机在 `Code_boweny/Device/AutoDrive/NorthCalib.c`。
+- 校准成功后不会改空口协议，只会影响 `MainLoop_GetHeadingDeg100()` 的统一航向输出。
 
 遥控器命令对齐结论：
 

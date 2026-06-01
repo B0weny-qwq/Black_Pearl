@@ -9,6 +9,11 @@
  * 本文件封装 LT8920 无线芯片所需的 GPIO、SPI、延时和天线控制接口。
  * 上层无线驱动只依赖这些适配函数，不直接操作 STC32G 外设寄存器。
  *
+ * 当前关系边界：
+ * - `System_init` 只负责基础 GPIO/SPI 路由初始化；
+ * - `lt8920.c` 与 `wireless.c` 通过本层访问 CS/RST/RXEN/TXEN/ANT_SEL；
+ * - `ship_protocol.c` 不应直接改这些引脚电平。
+ *
  * @note
  * 本文件是板级适配层接口，主要供 lt8920.c 和 wireless.c 调用；业务层
  * 不应直接操作 CS/RST/RXEN/TXEN 等引脚。
@@ -20,6 +25,13 @@
 #define __WIRELESS_PORT_H__
 
 #include "config.h"
+
+/**
+ * @note 当前架构职责边界：
+ * - 本头文件只暴露 LT8920 板级 GPIO/SPI/延时适配接口。
+ * - `lt8920.c` 与 `wireless.c` 通过这里访问硬件引脚。
+ * - 业务协议层不应直接操作 CS/RST/RXEN/TXEN/ANT_SEL。
+ */
 
 #define WIRELESS_PORT_ANT1  0U  /**< 选择 1 号天线通道。 */
 #define WIRELESS_PORT_ANT2  1U  /**< 选择 2 号天线通道。 */

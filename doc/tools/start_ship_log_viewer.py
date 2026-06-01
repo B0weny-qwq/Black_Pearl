@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-One-click launcher for the local ship log viewer.
+@file start_ship_log_viewer.py
+@brief 本地船端串口日志查看器的一键启动脚本。
 
-It starts a local HTTP server from the repository root and opens the
-serial log viewer page in the default browser.
+从仓库根目录启动 HTTP 服务，并在默认浏览器中打开串口日志查看页面。
+该脚本服务于 doc/tools 目录下的旧版查看器入口。
 """
 
 from __future__ import annotations

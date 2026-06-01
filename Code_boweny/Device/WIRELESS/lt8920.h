@@ -17,6 +17,12 @@
  * @see     Code_boweny/Device/WIRELESS/lt8920.c
  */
 
+/**
+ * @note 当前架构职责边界：
+ * - 本头文件对外暴露 LT8920 芯片层接口。
+ * - 正常业务链路应优先通过 wireless.h 访问。
+ * - 直接调用本层接口时，需要自行处理 idle/RX/TX 与 FIFO 副作用。
+ */
 #ifndef __LT8920_H__
 #define __LT8920_H__
 

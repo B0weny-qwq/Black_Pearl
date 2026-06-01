@@ -1,4 +1,14 @@
-﻿#include "QMC6309.h"
+#include "QMC6309.h"
+/**
+ * @file QMC6309.c
+ * @brief QMC6309 三轴磁力计底层驱动。
+ * @details 通过端口层完成寄存器读写、芯片初始化和原始磁场采样。
+ *          本文件只维护传感器访问边界，航向融合、滤波策略和北向校准由上层模块处理。
+ * @note 当前职责边界：
+ * - 本文件负责 QMC6309 寄存器访问、上电初始化和原始磁力计读取。
+ * - 运行时滤波、航向融合和北向校准在更上层完成。
+ * - 本文件不直接参与 AutoDrive、ShipControl 或电机执行链路。
+ */
 #include "QMC6309_port.h"
 #include "Filter.h"
 #include "Log.h"

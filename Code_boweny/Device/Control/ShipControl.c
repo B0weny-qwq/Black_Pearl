@@ -8,6 +8,13 @@
  * PID、差速限幅、陀螺阻尼和输出斜率限制。
  */
 
+/**
+ * @note 当前架构职责边界：
+ * - ShipControl 是当前工程中唯一应负责最终左右电机目标决策的上层模块。
+ * - AutoDrive 负责目标航向和模式切换规划。
+ * - MainLoop 提供当前航向与运行时状态。
+ * - Motor.c 只负责执行已经确定的电机目标。
+ */
 #include "ShipControl.h"
 
 #include "..\Motor\Motor.h"
@@ -118,7 +125,7 @@
 #endif
 #ifndef SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE
 /* yaw 修正差速上限，千分比；400 表示基础速度的 40%。 */
-#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 400
+#define SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE 320
 #endif
 #ifndef SHIP_MANUAL_YAW_HOLD_DIFF_PERCENT
 /* 手动 yaw 自稳进入条件：左右电机差值占当前输入上限的百分比。 */
@@ -134,11 +141,11 @@
 #endif
 #ifndef SHIP_YAW_HOLD_DERATE_START_CD
 /* 开始降速的偏航误差，单位 0.01 度。 */
-#define SHIP_YAW_HOLD_DERATE_START_CD    300
+#define SHIP_YAW_HOLD_DERATE_START_CD    1000
 #endif
 #ifndef SHIP_YAW_HOLD_DERATE_FULL_CD
 /* 达到最大降速的偏航误差，单位 0.01 度。 */
-#define SHIP_YAW_HOLD_DERATE_FULL_CD     1000
+#define SHIP_YAW_HOLD_DERATE_FULL_CD     2000
 #endif
 #ifndef SHIP_YAW_HOLD_DERATE_MIN_BASE
 /* 大偏航满降速时允许保留的最低基础速度。 */
@@ -168,7 +175,7 @@
 /* ==================== 正常巡航 yaw PID ==================== */
 #ifndef SHIP_YAW_HOLD_KP_Q10
 /* 正常 yaw 自稳比例增益，Q10。 */
-#define SHIP_YAW_HOLD_KP_Q10             768
+#define SHIP_YAW_HOLD_KP_Q10             384
 #endif
 #ifndef SHIP_YAW_HOLD_KI_Q10
 /* 正常 yaw 自稳积分增益，当前关闭以避免水面延迟导致积分堆积。 */
@@ -176,7 +183,7 @@
 #endif
 #ifndef SHIP_YAW_HOLD_KD_Q10
 /* 正常 yaw 自稳微分增益，Q10。 */
-#define SHIP_YAW_HOLD_KD_Q10             0
+#define SHIP_YAW_HOLD_KD_Q10             96
 #endif
 
 /* ==================== GPS 启航前原地对准 PID ==================== */
@@ -232,46 +239,46 @@ typedef enum
  */
 typedef struct
 {
-    u8 initialized;
-    u8 motor_initialized;
-    u8 mode;
-    u8 lr;
-    u8 ud;
-    u8 key;
-    u8 manual_valid;
-    u8 manual_accelerator;
-    int32 filtered_lr_q8;
-    int32 filtered_ud_q8;
-    u32 manual_last_apply_ms;
-    u32 auto_last_apply_ms;
-    u32 manual_last_log_ms;
-    u8 center_stop_count;
-    u8 yaw_hold_active;
-    u16 yaw_hold_target_cd;
-    int16 yaw_hold_error_cd;
-    int16 yaw_hold_error_ctrl;
-    int16 yaw_hold_output;
-    int16 yaw_hold_last_yaw_speed;
-    u32 yaw_hold_last_update_ms;
-    u8 yaw_hold_stable_count;
-    u32 cruise_start_ms;
-    int16 left_speed;
-    int16 right_speed;
-    int16 throttle_speed;
-    int16 base_speed;
-    int16 steering_speed;
-    int16 yaw_diff_speed;
-    int16 manual_gate_diff;
-    int16 manual_gate_limit;
-    u8 manual_gate_state;
-    u32 manual_gate_last_log_ms;
-    u32 motor_last_log_ms;
-    int16 motor_last_log_left;
-    int16 motor_last_log_right;
-    u8 motor_last_log_mode;
-    u8 motor_last_log_motion;
-    u8 last_logged_mode;
-    ShipControl_Motion_t motion;
+    u8 initialized;                 /**< 控制层是否已初始化。 */
+    u8 motor_initialized;           /**< Motor PWM 层是否已确保初始化。 */
+    u8 mode;                        /**< 当前控制模式，见 ShipControl_Mode_t。 */
+    u8 lr;                          /**< 最近一次左右遥控通道原始值。 */
+    u8 ud;                          /**< 最近一次前后/油门遥控通道原始值。 */
+    u8 key;                         /**< 最近一次遥控按键值。 */
+    u8 manual_valid;                /**< 当前手动遥控输入是否有效。 */
+    u8 manual_accelerator;          /**< 手动油门门控是否允许输出。 */
+    int32 filtered_lr_q8;           /**< 左右通道滤波状态，Q8 格式。 */
+    int32 filtered_ud_q8;           /**< 前后通道滤波状态，Q8 格式。 */
+    u32 manual_last_apply_ms;       /**< 最近一次应用手动控制的时间戳。 */
+    u32 auto_last_apply_ms;         /**< 最近一次应用自动控制的时间戳。 */
+    u32 manual_last_log_ms;         /**< 手动控制日志限频时间戳。 */
+    u8 center_stop_count;           /**< 摇杆回中停机连续确认计数。 */
+    u8 yaw_hold_active;             /**< 航向保持是否处于闭环激活状态。 */
+    u16 yaw_hold_target_cd;         /**< 航向保持目标航向，单位 0.01 deg。 */
+    int16 yaw_hold_error_cd;        /**< 当前航向保持误差，单位 0.01 deg。 */
+    int16 yaw_hold_error_ctrl;      /**< 映射到 PID 输入域的航向误差。 */
+    int16 yaw_hold_output;          /**< 航向保持 PID 输出差速。 */
+    int16 yaw_hold_last_yaw_speed;  /**< 最近一次用于阻尼的偏航角速度。 */
+    u32 yaw_hold_last_update_ms;    /**< 航向保持最近更新时间戳。 */
+    u8 yaw_hold_stable_count;       /**< 航向保持稳定计数。 */
+    u32 cruise_start_ms;            /**< 巡航/自动段开始时间戳。 */
+    int16 left_speed;               /**< 当前左电机目标速度。 */
+    int16 right_speed;              /**< 当前右电机目标速度。 */
+    int16 throttle_speed;           /**< 由油门通道换算的速度分量。 */
+    int16 base_speed;               /**< 输出合成前的基础前进速度。 */
+    int16 steering_speed;           /**< 由左右通道换算的转向速度分量。 */
+    int16 yaw_diff_speed;           /**< 航向闭环生成的左右差速分量。 */
+    int16 manual_gate_diff;         /**< 手动油门门控当前偏差。 */
+    int16 manual_gate_limit;        /**< 手动油门门控允许阈值。 */
+    u8 manual_gate_state;           /**< 手动油门门控状态机状态。 */
+    u32 manual_gate_last_log_ms;    /**< 手动油门门控日志限频时间戳。 */
+    u32 motor_last_log_ms;          /**< 电机输出日志限频时间戳。 */
+    int16 motor_last_log_left;      /**< 上一次日志记录的左电机速度。 */
+    int16 motor_last_log_right;     /**< 上一次日志记录的右电机速度。 */
+    u8 motor_last_log_mode;         /**< 上一次日志记录的控制模式。 */
+    u8 motor_last_log_motion;       /**< 上一次日志记录的运动方向。 */
+    u8 last_logged_mode;            /**< 上一次输出模式切换日志的模式。 */
+    ShipControl_Motion_t motion;    /**< 当前运动方向判定结果。 */
 } ShipControl_Runtime_t;
 
 static ShipControl_Runtime_t xdata g_ship_ctrl;

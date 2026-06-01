@@ -1,7 +1,17 @@
-/*---------------------------------------------------------------------*/
-/* --- Web: www.STCAI.com ---------------------------------------------*/
-/*---------------------------------------------------------------------*/
-
+/**
+ * @file    System_init.c
+ * @brief   板级外设初始化与传感器总线准备实现。
+ *
+ * @details
+ * 当前启动阶段只负责底层外设 bring-up，不直接进入业务调度。
+ * 真实运行链路为：
+ * `main() -> SYS_Init() -> MainLoop_Bootstrap() -> MainLoop_RunOnce()`
+ *
+ * 其中：
+ * - `SYS_Init()` 初始化 GPIO、Timer0、ADC、UART1、I2C、日志、无线和 GPS；
+ * - `Sensor_I2C_prepare()` 在共享 I2C 访问前恢复 `P1.4/P1.5` 开漏与上拉；
+ * - AHRS、QMC6309、QMI8658、ShipProtocol、AutoDrive 都在后续主循环中推进。
+ */
 #include "config.h"
 #include "STC32G_GPIO.h"
 #include "STC32G_ADC.h"
@@ -88,6 +98,7 @@ void I2C_config(void)
 
 void Sensor_I2C_prepare(void)
 {
+    /* 共享传感器总线保护：QMC6309/QMI8658 初始化或恢复前先恢复开漏引脚和 I2C 路由。 */
     P1_MODE_OUT_OD(GPIO_Pin_4 | GPIO_Pin_5);
     P1_PULL_UP_ENABLE(GPIO_Pin_4 | GPIO_Pin_5);
     P14 = 1;
@@ -105,6 +116,7 @@ void Switch_config(void)
 
 void SYS_Init(void)
 {
+    /* STC32G I2C 寄存器位于扩展 SFR 空间，访问前必须打开 EAXFR。 */
     EAXSFR();
     GPIO_config();
     Switch_config();
@@ -128,5 +140,6 @@ void SYS_Init(void)
     GPS_Init();
 #endif
 
+    /* 运行态 ready 标志后续由 MainLoop 传感器启动逻辑消费。 */
     g_qmi8658_ready = 0;
 }

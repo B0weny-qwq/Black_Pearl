@@ -1,27 +1,26 @@
 /**
  * @file    ship_protocol.c
- * @brief   Ship-side legacy wireless business protocol.
+ * @brief   船端旧版无线业务协议实现。
  * @author  boweny
  * @date    2026-05-07
  * @version v1.2
  *
  * @details
- * This file implements the ship-side legacy wireless business protocol.
- * Frame format: AA | len | cmd | payload... | xor | BB.
- * len = 2 + payload_len; xor covers len, cmd, and all payload bytes.
+ * 本文件实现船端旧版无线业务协议，帧格式为：
+ * `AA | len | cmd | payload... | xor | BB`。
+ * 其中 `len = 2 + payload_len`，`xor` 覆盖 `len/cmd/payload`。
  *
- * Responsibilities:
- * - send pair requests on the fixed pair channel, then listen on the
- *   calculated work channel;
- * - parse 0x11 throttle/key frames and forward manual input to ShipControl;
- * - reply to accepted frames with one legacy 0x12 GPS/status packet;
- * - forward 0x13/0x14/0x15 point and switch commands to AutoDrive;
- * - monitor link timeout, battery level, and AutoDrive diagnostics.
+ * @note 当前职责边界：
+ * - 本文件负责配对调度、业务找帧和命令分发。
+ * - `0x11` 手动控制命令会转交给 ShipControl。
+ * - `0x13/0x14/0x15` 会转交给 AutoDrive。
+ * - `0x12` 状态上报会复用 GPS、MainLoop 和 NorthCalib 当前状态。
  */
 #include "ship_protocol.h"
 #include "wireless.h"
 #include "..\..\Device\GPS\GPS.h"
 #include "..\..\Device\AutoDrive\autodrive.h"
+#include "..\..\Device\AutoDrive\NorthCalib.h"
 #include "..\..\Device\Control\ShipControl.h"
 #include "..\..\Function\Log\Log.h"
 #include "..\..\..\User\MainLoop.h"
@@ -91,6 +90,7 @@
 #define SHIP_CRUISE_KEY_SPEED          760
 #define SHIP_CRUISE_STEER_START_MAX    8
 #define SHIP_CRUISE_GYRO_START_MAX_DPS 8
+#define SHIP_NORTH_CALIB_LONG_PRESS_MS 1500UL
 #define SHIP_POWER_LEVEL_0             0U
 #define SHIP_POWER_LEVEL_1             1U
 #define SHIP_POWER_LEVEL_2             2U
@@ -146,58 +146,67 @@
 
 typedef enum
 {
-    /* Initial delay before the first pairing burst. */
+    /** 首次配对突发前的启动等待状态。 */
     SHIP_STATE_BOOT_WAIT = 0,
-    /* Pair requests are being transmitted on SHIP_PAIR_CHANNEL_DEFAULT. */
+    /** 正在默认配对信道发送配对请求。 */
     SHIP_STATE_PAIR_SEND,
-    /* Work-channel receive mode: parse commands and report ship status. */
+    /** 工作信道接收状态：解析控制命令并回报船端状态。 */
     SHIP_STATE_WORK_RX
 } ShipState_t;
 
-/* Protocol runtime state.  This is intentionally kept as transport/business
- * state only; closed-loop control details belong to ShipControl/AutoDrive. */
+/**
+ * @brief 协议运行态。
+ *
+ * 这里只保存传输层和业务调度状态，闭环控制细节归 ShipControl/AutoDrive。
+ */
 typedef struct
 {
-    u8 lr;
-    u8 ud;
-    u8 key;
-    u8 last_key;
-    u8 valid;
-    u8 paired;
-    u8 work_rx_configured;
-    u8 work_state_logged;
-    u8 light_toggle_pending;
-    ShipState_t state;
-    u8 rf_channel[3];
-    u8 rf_send_key[2];
-    u16 pair_wait_rsp_time;
-    u16 wait_ticks;
-    u16 pair_left;
-    u16 pair_retry_count;
-    u16 work_rx_reopen_ticks;
-    u16 work_rx_reopen_total;
-    u32 pair_wait_start_ms;
-    u32 last_proto_rx_ms;
-    u32 last_throttle_rx_ms;
-    u8 pair_rsp_timeout_logged;
-    u8 rx_idle_warned;
-    u8 remote_online;
-    u8 throttle_online;
-    u8 throttle_recover_done;
-    u8 manual_boot_block_logged;
-    u8 manual_boot_ready_logged;
-    u32 rc_input_last_log_ms;
+    u8 lr;                         /**< 最近一次遥控左右通道值。 */
+    u8 ud;                         /**< 最近一次遥控前后/油门通道值。 */
+    u8 key;                        /**< 最近一次遥控按键值。 */
+    u8 last_key;                   /**< 上一帧按键值，用于边沿检测。 */
+    u8 valid;                      /**< 当前遥控输入快照是否有效。 */
+    u8 paired;                     /**< 是否已经完成旧遥控器配对。 */
+    u8 work_rx_configured;         /**< 工作信道 RX 参数是否已配置。 */
+    u8 work_state_logged;          /**< WORK_RX 状态是否已打印进入日志。 */
+    u8 light_toggle_pending;       /**< A 键灯光切换是否待处理。 */
+    ShipState_t state;             /**< 当前无线协议调度状态。 */
+    u8 rf_channel[3];              /**< 旧协议下发的 3 个工作信道。 */
+    u8 rf_send_key[2];             /**< 旧协议下发的同步 key。 */
+    u16 pair_wait_rsp_time;        /**< 配对等待响应时长，单位调度 tick。 */
+    u16 wait_ticks;                /**< 当前状态的通用等待 tick。 */
+    u16 pair_left;                 /**< 剩余配对请求发送次数。 */
+    u16 pair_retry_count;          /**< 配对重试累计次数。 */
+    u16 work_rx_reopen_ticks;      /**< 工作信道 RX 重开倒计时。 */
+    u16 work_rx_reopen_total;      /**< 工作信道 RX 重开累计次数。 */
+    u32 pair_wait_start_ms;        /**< 本轮等待配对响应的起始时间。 */
+    u32 last_proto_rx_ms;          /**< 最近一次收到有效协议帧的时间。 */
+    u32 last_throttle_rx_ms;       /**< 最近一次收到有效油门/摇杆帧的时间。 */
+    u8 pair_rsp_timeout_logged;    /**< 配对响应超时日志是否已输出。 */
+    u8 rx_idle_warned;             /**< RX 空闲告警日志是否已输出。 */
+    u8 remote_online;              /**< 遥控器链路在线标志。 */
+    u8 throttle_online;            /**< 油门/摇杆输入在线标志。 */
+    u8 throttle_recover_done;      /**< 油门输入恢复日志是否已输出。 */
+    u8 manual_boot_block_logged;   /**< 手动输入启动阻塞日志是否已输出。 */
+    u8 manual_boot_ready_logged;   /**< 手动输入启动就绪日志是否已输出。 */
+    u32 rc_input_last_log_ms;      /**< 遥控输入日志限频时间戳。 */
+    u8 d_key_down;                 /**< D 键当前是否处于按下状态。 */
+    u8 d_key_triggered;            /**< D 键长按触发是否已经消费。 */
+    u32 d_key_down_start_ms;       /**< D 键按下起始时间，用于长按检测。 */
 } ShipRuntime_t;
 
-/* Last known power sample.  report is the compact 0..4 value sent back to
- * the handheld; raw/millivolt fields are retained for diagnostics. */
+/**
+ * @brief 最近一次电量采样。
+ *
+ * report 是回传给遥控器的 0..4 压缩等级，raw/mV 字段用于诊断。
+ */
 typedef struct
 {
-    u16 raw;
-    u16 adc_mv;
-    u32 bat_mv;
-    u8 report;
-    u8 valid;
+    u16 raw;    /**< 原始 ADC 采样值。 */
+    u16 adc_mv; /**< ADC 输入端估算电压，单位 mV。 */
+    u32 bat_mv; /**< 电池端估算电压，单位 mV。 */
+    u8 report;  /**< 上报给遥控器的压缩电量等级，范围 0..4。 */
+    u8 valid;   /**< 当前电量样本是否有效。 */
 } ShipPowerSample_t;
 
 static ShipRuntime_t xdata g_ship_rt;
@@ -275,6 +284,7 @@ static void ShipProtocol_LogGotoPointUart(const u8 *frame,
                                           u8 xor_calc,
                                           u8 xor_recv,
                                           u8 nav_result);
+static void ShipProtocol_ServiceNorthCalibKey(u8 key, u32 now_ms);
 
 void ShipProtocol_ResetYawHoldController(void)
 {
@@ -292,15 +302,14 @@ static u32 ShipProtocol_ElapsedMs(u32 now_ms, u32 start_ms)
     return (u32)(now_ms - start_ms);
 }
 
-/* Compatibility wrapper used by older navigation code.  New code should call
- * ShipControl_RequestGpsNav() directly. */
+/** 兼容旧导航代码的包装入口；新代码应直接调用对应的 ShipControl 接口。 */
 u8 ShipProtocol_ApplyYawHoldTarget(u16 target_heading_cd, int16 base_speed)
 {
     ShipControl_RequestGpsNav(target_heading_cd, base_speed);
     return 1U;
 }
 
-/* Convert the legacy stick center value 100 to signed control input. */
+/** 将旧遥控器摇杆中心值 100 转换为带符号控制量。 */
 static int16 ShipProtocol_RawUdToInput(u8 front_back)
 {
     return (int16)((int16)front_back - (int16)SHIP_AXIS_CENTER);
@@ -311,14 +320,13 @@ static int16 ShipProtocol_RawLrToInput(u8 left_right)
     return (int16)((int16)left_right - (int16)SHIP_AXIS_CENTER);
 }
 
-/* True when the cached battery level has dropped to the lowest band. */
+/** 缓存电量已经跌入最低档时返回真。 */
 static u8 ShipProtocol_IsLowPower(void)
 {
     return (g_ship_power_level == SHIP_POWER_LEVEL_0) ? 1U : 0U;
 }
 
-/* Periodically sample battery level and request AutoDrive return when the
- * boat is idle, not already in AutoDrive, and power stays low long enough. */
+/** 周期采样电量；当船空闲、未处于 AutoDrive 且低电持续足够久时请求返航。 */
 static void ShipProtocol_LowPowerCheck(void)
 {
     ShipProtocol_ServicePowerSample();
@@ -327,6 +335,7 @@ static void ShipProtocol_LowPowerCheck(void)
     if (g_lowpower_check_times > SHIP_LOWPOWER_CHECK_TICKS) {
         g_lowpower_check_times = 0U;
         if (ShipProtocol_IsLowPower() &&
+            (NorthCalib_IsBusy() == 0U) &&
             (AutoDrive_GetMode() == AUTO_DRIVE_CLOSE) &&
             (ShipControl_GetManualAccelerator() < 10U)) {
             AutoDrive_TriggerReturnWithReason(AUTODRIVE_DIAG_REASON_LOW_POWER);
@@ -362,7 +371,7 @@ static const char *ShipProtocol_CmdName(u8 cmd)
 }
 #endif
 
-/* Rate-limit high-frequency RC input logs. */
+/** 对高频遥控输入日志做限频。 */
 static u8 ShipProtocol_ShouldLogRcInputSample(u32 now_ms)
 {
     if ((SHIP_RC_INPUT_LOG_PERIOD_MS == 0U) ||
@@ -517,8 +526,7 @@ static void ShipProtocol_LogLightPending(void)
 #endif
 }
 
-/* Decode one key edge.  Repeated key bytes are ignored so holding a button
- * does not retrigger cruise/lamp actions every throttle frame. */
+/** 解码一次按键边沿；重复按键字节会被忽略，避免长按在每帧油门数据中重复触发巡航/灯光动作。 */
 static void ShipProtocol_HandleKey(u8 front_back, u8 key)
 {
     u8 cruise_active;
@@ -548,7 +556,7 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
         SHIP_VIEWER_LOG0(SHIP_TAG, "key action=C noop");
         break;
     case SHIP_KEY_D_UNUSED:
-        SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D noop");
+        SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D wait-longpress");
         break;
     case SHIP_KEY_E_RESERVED:
         if (cruise_active != 0U) {
@@ -628,13 +636,37 @@ static void ShipProtocol_HandleKey(u8 front_back, u8 key)
     }
 }
 
-/* Convert ADC count to voltage at the MCU pin. */
+/* D 键用长按触发北向校准，短按仍保持无业务动作。 */
+static void ShipProtocol_ServiceNorthCalibKey(u8 key, u32 now_ms)
+{
+    if (key == SHIP_KEY_D_UNUSED) {
+        if (g_ship_rt.d_key_down == 0U) {
+            g_ship_rt.d_key_down = 1U;
+            g_ship_rt.d_key_triggered = 0U;
+            g_ship_rt.d_key_down_start_ms = now_ms;
+        } else if ((g_ship_rt.d_key_triggered == 0U) &&
+                   ((now_ms - g_ship_rt.d_key_down_start_ms) >= SHIP_NORTH_CALIB_LONG_PRESS_MS)) {
+            g_ship_rt.d_key_triggered = 1U;
+            if (NorthCalib_RequestStart() != 0U) {
+                SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D north-calib-start");
+            } else {
+                SHIP_VIEWER_LOG0(SHIP_TAG, "key action=D north-calib-reject");
+            }
+        }
+    } else {
+        g_ship_rt.d_key_down = 0U;
+        g_ship_rt.d_key_triggered = 0U;
+        g_ship_rt.d_key_down_start_ms = 0UL;
+    }
+}
+
+/** 将 ADC 原始计数转换为 MCU 引脚电压。 */
 static u16 ShipProtocol_AdcRawToMv(u16 adc_raw)
 {
     return (u16)(((u32)adc_raw * (u32)SHIP_ADC_REF_MV) / 4095UL);
 }
 
-/* Convert divider output voltage back to estimated battery voltage. */
+/** 将分压输出电压换算回估算电池电压。 */
 static u32 ShipProtocol_AdcMvToBatteryMv(u16 adc_mv)
 {
     if (SHIP_BAT_DIV_DEN == 0UL) {
@@ -643,7 +675,7 @@ static u32 ShipProtocol_AdcMvToBatteryMv(u16 adc_mv)
     return (((u32)adc_mv * (u32)SHIP_BAT_DIV_NUM) / (u32)SHIP_BAT_DIV_DEN);
 }
 
-/* Map raw ADC thresholds to the compact legacy power level 0..4. */
+/** 将 ADC 阈值映射为旧协议使用的 0..4 压缩电量等级。 */
 static u8 ShipProtocol_AdcRawToPowerLevel(u16 adc_raw)
 {
     if (adc_raw >= SHIP_BATT_ADC_FULL_RAW) {
@@ -693,7 +725,7 @@ static void ShipProtocol_ReadPowerSample(ShipPowerSample_t *sample)
     sample->valid = 1U;
 }
 
-/* Downsample battery reads to reduce ADC/log traffic in the 10 ms scheduler. */
+/** 对电量读取降采样，减少 10ms 调度器内的 ADC 和日志流量。 */
 static void ShipProtocol_ServicePowerSample(void)
 {
     if (g_ship_power_sample_times < SHIP_POWER_SAMPLE_DIVIDER) {
@@ -745,7 +777,7 @@ static void ShipProtocol_LogPowerSample(const ShipPowerSample_t *sample, u8 forc
 }
 #endif
 
-/* Legacy checksum: XOR all bytes from len through the last payload byte. */
+/** 旧协议校验：从 len 到最后一个 payload 字节逐字节异或。 */
 static u8 ShipProtocol_Xor(const u8 *buf, u8 len)
 {
     u8 i;
@@ -784,7 +816,7 @@ static u16 ShipProtocol_ReadU16Legacy(const u8 *buf)
     return (u16)(((u16)buf[0] << 8) | buf[1]);
 }
 
-/* Convert decimal degrees * 1e7 to the legacy ddmm.mmmm split format. */
+/** 将十进制度 * 1e7 转成旧协议 ddmm.mmmm 拆分格式。 */
 static void ShipProtocol_ToLegacyNmeaCoord(u32 abs_deg1e7, u16 *coord1, u16 *coord2)
 {
     u32 degrees;
@@ -801,23 +833,21 @@ static void ShipProtocol_ToLegacyNmeaCoord(u32 abs_deg1e7, u16 *coord1, u16 *coo
     *coord2 = (u16)(minutes_scaled1e4 % 10000UL);
 }
 
-/* Legacy protocol stores 16-bit fields in big-endian order. */
+/** 旧协议中的 16 位字段按大端字节序存放。 */
 static void ShipProtocol_WriteU16Legacy(u8 *dst, u16 value)
 {
     dst[0] = (u8)(value >> 8);
     dst[1] = (u8)(value & 0xFFU);
 }
 
-/* Legacy 0x12 GPS report is not raw struct bytes.
- * The handheld expects angle/lon1/lon2/lat1/lat2 in big-endian order. */
+/** 旧版 0x12 GPS 回包不是结构体裸拷贝，遥控器期望 angle/lon1/lon2/lat1/lat2 按大端写入。 */
 static void ShipProtocol_WriteU16GpsReportBE(u8 *dst, u16 value)
 {
     dst[0] = (u8)(value >> 8);
     dst[1] = (u8)(value & 0xFFU);
 }
 
-/* Serialize AutoDrive point in the exact 10-byte layout expected by the
- * handheld: lon dir, lon whole/frac, lat dir, lat whole/frac. */
+/** 按遥控器期望的 10 字节布局序列化 AutoDrive 点位：经度半球、经度整数/小数、纬度半球、纬度整数/小数。 */
 static void ShipProtocol_WritePointLegacy(u8 *dst, const AutoDrive_PointRaw_t *point)
 {
     if ((dst == 0) || (point == 0)) {
@@ -856,7 +886,7 @@ static void ShipProtocol_LogCoordBE(const u8 *buf, u8 len)
 }
 #endif
 
-/* Build one AA-BB business frame and send it on the selected RF channel. */
+/** 构造一帧 AA-BB 业务帧，并通过指定射频信道发送。 */
 static s8 ShipProtocol_SendFrame(u8 channel, u8 cmd, const u8 *payload, u8 payload_len, u8 log_frame)
 {
     u8 *frame;
@@ -911,7 +941,7 @@ static void ShipProtocol_CalcDefaultRf(u8 *channel, u8 *key0, u8 *key1)
  * previous cached value drifted from the current seed-derived value. */
 static u8 ShipProtocol_RefreshDefaultRfImpl(const char *stage, u8 log_mismatch)
 #else
-/* Recalculate and cache derived RF parameters. */
+/** 重新计算并缓存派生 RF 参数。 */
 static u8 ShipProtocol_RefreshDefaultRfImpl(void)
 #endif
 {
@@ -946,7 +976,7 @@ static u8 ShipProtocol_RefreshDefaultRfImpl(void)
     return channel;
 }
 
-/* Seed the runtime RF cache before the radio is configured. */
+/** 射频芯片配置前先填充运行态 RF 缓存。 */
 static void ShipProtocol_ApplyDefaultRf(void)
 {
     (void)ShipProtocol_RefreshDefaultRf(SHIP_REASON_C("default"), 0U);
@@ -978,7 +1008,7 @@ static s8 ShipProtocol_ApplyWorkSyncIdle(u8 log_rxdbg)
     return SUCCESS;
 }
 
-/* Put the radio back on the derived work channel in receive mode. */
+/** 将射频芯片切回派生出的工作信道接收模式。 */
 static s8 ShipProtocol_ApplyWorkRx(u8 log_rxdbg)
 {
     s8 rc;
@@ -1382,7 +1412,7 @@ static void ShipProtocol_SendGpsOnce(u8 log_this_tx)
     }
 }
 
-/* Send a compact AutoDrive diagnostic snapshot to the handheld/viewer. */
+/** 向遥控器或上位机发送紧凑的 AutoDrive 诊断快照。 */
 static void ShipProtocol_SendAutoDriveDiagOnce(u8 log_this_tx)
 {
 #if SHIP_AUTODRIVE_DIAG_ENABLE
@@ -1545,7 +1575,7 @@ static void ShipProtocol_LogAutoDriveSnapshot(const char *stage)
 }
 #endif
 
-/* Accept pair response only while the response window is open. */
+/** 只在响应窗口打开期间接受配对响应。 */
 static void ShipProtocol_HandlePairRsp(const u8 *payload, u8 payload_len)
 {
     if (g_ship_rt.pair_wait_rsp_time == 0U) {
@@ -1605,6 +1635,8 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
     now_ms = Task_GetTickMs();
     g_ship_rt.last_throttle_rx_ms = now_ms;
     g_ship_rt.throttle_recover_done = 0U;
+    NorthCalib_UpdateRemoteInput(g_ship_rt.lr, g_ship_rt.ud, g_ship_rt.key, now_ms);
+    ShipProtocol_ServiceNorthCalibKey(g_ship_rt.key, now_ms);
     log_this_sample = ShipProtocol_ShouldLogRcInputSample(now_ms);
     if (g_ship_rt.throttle_online == 0U) {
         g_ship_rt.throttle_online = 1U;
@@ -1651,6 +1683,12 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
 
     if (AutoDrive_IsBusy() != 0U) {
         ShipProtocol_HandleKey(g_ship_rt.ud, g_ship_rt.key);
+        AutoDrive_LinkAliveKick();
+        return log_this_sample;
+    }
+    if (NorthCalib_IsBusy() != 0U) {
+        /* 北向校准独占控制权：保活遥控链路，但吞掉其它按键边沿，避免中途切入巡航或灯控业务。 */
+        g_ship_rt.last_key = g_ship_rt.key;
         AutoDrive_LinkAliveKick();
         return log_this_sample;
     }
@@ -1709,6 +1747,10 @@ static void ShipProtocol_Dispatch(u8 cmd,
     case SHIP_CMD_GPS_REPORT:
         break;
     case SHIP_CMD_RETURN_HOME:
+        if (NorthCalib_IsBusy() != 0U) {
+            LOGW(SHIP_TAG, "cmd=0x13 ignored north-calib busy");
+            break;
+        }
         if (payload_len < AUTODRIVE_LEGACY_POINT_WIRE_LEN) {
             break;
         }
@@ -1718,6 +1760,10 @@ static void ShipProtocol_Dispatch(u8 cmd,
         ShipProtocol_LogAutoDriveSnapshot("after-0x13");
         break;
     case SHIP_CMD_GOTO_POINT:
+        if (NorthCalib_IsBusy() != 0U) {
+            LOGW(SHIP_TAG, "cmd=0x14 ignored north-calib busy");
+            break;
+        }
         if (payload_len < AUTODRIVE_LEGACY_POINT_WIRE_LEN) {
             break;
         }
@@ -1734,6 +1780,10 @@ static void ShipProtocol_Dispatch(u8 cmd,
         ShipProtocol_LogAutoDriveSnapshot("after-0x14");
         break;
     case SHIP_CMD_RETURN_SWITCH:
+        if (NorthCalib_IsBusy() != 0U) {
+            LOGW(SHIP_TAG, "cmd=0x15 ignored north-calib busy");
+            break;
+        }
         if (payload_len < 1U) {
             LOGW(SHIP_TAG, "return-switch short len=%u", (u16)payload_len);
             break;
@@ -1755,7 +1805,7 @@ static void ShipProtocol_Dispatch(u8 cmd,
     ShipProtocol_SendGpsOnce(log_gps_after_rsp);
 }
 
-/* Validate a complete AA-BB frame, update link state, and dispatch payload. */
+/** 校验完整 AA-BB 帧，更新链路状态并分发载荷。 */
 s8 ShipProtocol_ParseFrame(const u8 *frame, u8 frame_len)
 {
     u8 body_len;
@@ -1841,7 +1891,7 @@ static void ShipProtocol_ReceiveHandle(const u8 *rx_buf, u8 len)
                    (u16)((len > 6U) ? rx_buf[6] : 0U),
                    (u16)((len > 7U) ? rx_buf[7] : 0U));
 
-    /* Keep the legacy truncation behavior for oversized RF payloads. */
+    /* 保持旧协议对超长 RF 载荷的截断行为。 */
     if (len > SHIP_LEGACY_PROTO_MAX_LEN) {
         len = 10U;
     }
@@ -1935,7 +1985,7 @@ void ShipProtocol_Poll(void)
     } while (rc == SUCCESS);
 }
 
-/* Drain the wireless receive queue before each scheduler step. */
+/** 每次调度步骤前先清空无线接收队列。 */
 static void ShipProtocol_PollRxFrames(void)
 {
     u8 *frame;
@@ -1952,7 +2002,7 @@ static void ShipProtocol_PollRxFrames(void)
     } while (rc == SUCCESS);
 }
 
-/* Initialize local protocol state and the two downstream control modules. */
+/** 初始化本地协议状态以及下游两个控制模块。 */
 static void ShipProtocol_InitRuntime(void)
 {
     u8 seed[4];
@@ -1987,10 +2037,14 @@ static void ShipProtocol_InitRuntime(void)
     g_ship_rt.manual_boot_block_logged = 0U;
     g_ship_rt.manual_boot_ready_logged = 0U;
     g_ship_rt.rc_input_last_log_ms = 0UL;
+    g_ship_rt.d_key_down = 0U;
+    g_ship_rt.d_key_triggered = 0U;
+    g_ship_rt.d_key_down_start_ms = 0UL;
     g_ship_power_sample_times = 0U;
     g_lowpower_check_times = 0U;
     ShipControl_Init();
     AutoDrive_Init();
+    NorthCalib_Init();
 
     LOGI(SHIP_TAG,
          "scheduler init rev=%s wait=%u pair_send=%u pair_ch=0x%02X seed=%02X%02X%02X%02X",
@@ -2001,8 +2055,7 @@ static void ShipProtocol_InitRuntime(void)
          (u16)seed[0], (u16)seed[1], (u16)seed[2], (u16)seed[3]);
 }
 
-/* Scheduler state: send one pair request when the wait counter expires, then
- * arm the response window after the configured burst count. */
+/** 调度状态：等待计数到期后发送一次配对请求，并在配置的突发次数结束后打开响应窗口。 */
 static void ShipProtocol_StepPairSend(void)
 {
     s8 rc;
@@ -2044,8 +2097,7 @@ static void ShipProtocol_StepPairSend(void)
     }
 }
 
-/* Scheduler state: keep the radio in work-channel RX and periodically reopen
- * receive mode to recover from radio state drift. */
+/** 调度状态：保持工作信道 RX，并周期性重开接收模式以恢复射频状态漂移。 */
 static void ShipProtocol_StepWorkRx(void)
 {
     s8 rc;
@@ -2090,8 +2142,7 @@ static void ShipProtocol_StepWorkRx(void)
     }
 }
 
-/* Main 10 ms protocol scheduler.  It drains RX, maintains pairing/RX state,
- * checks link/battery timeouts, and ticks AutoDrive/ShipControl. */
+/** 主 10ms 协议调度器：清空 RX、维护配对/RX 状态、检查链路/电池超时，并推进 AutoDrive/ShipControl。 */
 void ShipProtocol_RunScheduler(void)
 {
     static u8 initialized = 0U;
@@ -2205,6 +2256,7 @@ void ShipProtocol_RunScheduler(void)
     }
 
     AutoDrive_Poll();
+    NorthCalib_Poll();
     ShipProtocol_ServiceAutoDriveDiag(now_ms);
     ShipControl_Tick(now_ms);
 }

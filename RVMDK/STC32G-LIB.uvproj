@@ -272,7 +272,7 @@
               <MiscControls></MiscControls>
               <Define></Define>
               <Undefine></Undefine>
-              <IncludePath>..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR;..\Code_boweny\Device\Control</IncludePath>
+              <IncludePath>..\Driver\inc;..\User;..\App\inc;..\Code_boweny\Function\Log;..\Code_boweny\Function\Filter;..\Code_boweny\Function\AHRS;..\Code_boweny\Function\PID;..\Code_boweny\Device\QMC6309;..\Code_boweny\Device\QMI8658;..\Code_boweny\Device\GPS;..\Code_boweny\Device\WIRELESS;..\Code_boweny\Device\MOTOR;..\Code_boweny\Device\Control;..\Code_boweny\Device\AutoDrive</IncludePath>
             </VariousControls>
           </C251>
           <Ax51>
@@ -607,23 +607,33 @@
               <FileType>1</FileType>
               <FilePath>..\Code_boweny\Device\AutoDrive\autodrive.c</FilePath>
             </File>
-            <File>
-              <FileName>autodrive_cfg.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Code_boweny\Device\AutoDrive\autodrive_cfg.c</FilePath>
-            </File>
-            <File>
-              <FileName>autodrive.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Code_boweny\Device\AutoDrive\autodrive.h</FilePath>
-            </File>
-            <File>
-              <FileName>autodrive_cfg.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\Code_boweny\Device\AutoDrive\autodrive_cfg.h</FilePath>
-            </File>
-          </Files>
-        </Group>
+              <File>
+                <FileName>autodrive_cfg.c</FileName>
+                <FileType>1</FileType>
+                <FilePath>..\Code_boweny\Device\AutoDrive\autodrive_cfg.c</FilePath>
+              </File>
+              <File>
+                <FileName>NorthCalib.c</FileName>
+                <FileType>1</FileType>
+                <FilePath>..\Code_boweny\Device\AutoDrive\NorthCalib.c</FilePath>
+              </File>
+              <File>
+                <FileName>autodrive.h</FileName>
+                <FileType>5</FileType>
+                <FilePath>..\Code_boweny\Device\AutoDrive\autodrive.h</FilePath>
+              </File>
+              <File>
+                <FileName>autodrive_cfg.h</FileName>
+                <FileType>5</FileType>
+                <FilePath>..\Code_boweny\Device\AutoDrive\autodrive_cfg.h</FilePath>
+              </File>
+              <File>
+                <FileName>NorthCalib.h</FileName>
+                <FileType>5</FileType>
+                <FilePath>..\Code_boweny\Device\AutoDrive\NorthCalib.h</FilePath>
+              </File>
+            </Files>
+          </Group>
         <Group>
           <GroupName>LOG</GroupName>
           <Files>

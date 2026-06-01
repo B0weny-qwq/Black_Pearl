@@ -1,0 +1,903 @@
+/**
+ * @file    NorthCalib.c
+ * @brief   D 键 GPS 北向校准状态机与 EEPROM 双槽保存。
+ *
+ * @details
+ * 本模块通过“先对准北向、再低速直跑、最后用 GPS 航迹角反推 north offset”
+ * 的方式修正航向零点。它不直接接管 AutoDrive 去点/返航状态机，只输出一个
+ * 统一给 MainLoop 航向接口使用的 `north_offset_cd`。
+ *
+ * 关键关系：
+ * - 触发入口：`ship_protocol.c` 检测 D 键长按后调用 `NorthCalib_RequestStart()`
+ * - 控制执行：复用 `ShipControl_RequestGpsAlign()` / `ShipControl_RequestGpsNav()`
+ * - 传感器来源：`GPS_GetState()` + `MainLoop_GetRawHeadingDeg100()`
+ * - 输出落点：`MainLoop_GetHeadingDeg100()`
+ */
+#include "NorthCalib.h"
+
+#include "autodrive.h"
+#include "..\GPS\GPS.h"
+#include "..\Control\ShipControl.h"
+#include "..\..\Function\Log\Log.h"
+#include "..\..\..\Driver\inc\STC32G_EEPROM.h"
+#include "..\..\..\User\MainLoop.h"
+#include "..\..\..\User\Task.h"
+
+#define NCAL_TAG                         "NCAL"
+
+/* ==================== 交互与状态机节拍 ==================== */
+/* 遥控输入超时保护，避免校准期间链路断开后继续跑船。 */
+#define NCAL_REMOTE_TIMEOUT_MS           SHIP_THROTTLE_TIMEOUT_MS
+/* 原地对北最大等待时间。 */
+#define NCAL_ALIGN_TIMEOUT_MS            8000UL
+/* 低速直跑最大等待时间，超过后按失败处理。 */
+#define NCAL_RUN_TIMEOUT_MS              30000UL
+/* 日志限频，避免 10ms 调度里刷屏。 */
+#define NCAL_LOG_PERIOD_MS               1000UL
+
+/* ==================== 校准质量门控 ==================== */
+#define NCAL_TARGET_HEADING_CD           0U
+#define NCAL_RUN_BASE_SPEED              500
+#define NCAL_TARGET_DISTANCE_M           10U
+#define NCAL_MIN_SAVE_DISTANCE_M         8U
+#define NCAL_MIN_SATELLITES              7U
+#define NCAL_ALIGN_EXIT_ERROR_CD         500
+#define NCAL_ALIGN_STABLE_TICKS          20U
+#define NCAL_YAW_UNSTABLE_DPS            45
+#define NCAL_YAW_UNSTABLE_LIMIT_TICKS    80U
+#define NCAL_HEADING_ERR_LIMIT_CD        1500
+#define NCAL_HEADING_ERR_LIMIT_TICKS     120U
+#define NCAL_OFFSET_SAVE_JUMP_LIMIT_CD   4500
+
+/* ==================== EEPROM 记录 ==================== */
+#define NCAL_EEPROM_SLOT_A_ADDR          0x000200UL
+#define NCAL_EEPROM_SLOT_B_ADDR          0x000400UL
+#define NCAL_EEPROM_SLOT_A               0U
+#define NCAL_EEPROM_SLOT_B               1U
+#define NCAL_RECORD_MAGIC                0x4E43414CUL /* "NCAL" */
+#define NCAL_RECORD_VERSION              1U
+#define NCAL_RECORD_SIZE                 16U
+
+typedef enum
+{
+    /** 空闲状态，没有校准流程运行。 */
+    NCAL_STATE_IDLE = 0,
+    /** 检查 GPS、航向、遥控链路和控制权。 */
+    NCAL_STATE_CHECK_READY,
+    /** 原地转向，直到修正航向稳定在真北附近。 */
+    NCAL_STATE_ALIGN_NORTH,
+    /** 低速直跑并累计原始航向样本。 */
+    NCAL_STATE_RUN_STRAIGHT,
+    /** 计算 GPS 航迹角并反推出新的北向偏移。 */
+    NCAL_STATE_CALC,
+    /** 将通过门控的偏移保存到 EEPROM。 */
+    NCAL_STATE_SAVE,
+    NCAL_STATE_DONE,
+    NCAL_STATE_FAILED
+} NorthCalib_State_t;
+
+typedef struct
+{
+    u32 magic;              /**< EEPROM 记录魔数，用于识别 NCAL 数据。 */
+    u8 version;             /**< EEPROM 记录格式版本。 */
+    int16 north_offset_cd;  /**< 保存的北向偏移，单位 0.01 deg。 */
+    u8 confidence;          /**< 保存时的校准置信度。 */
+    u16 sample_distance_m;  /**< 本次校准 GPS 采样距离，单位 m。 */
+    u16 update_count;       /**< EEPROM 记录更新序号。 */
+    u16 checksum;           /**< 记录校验和。 */
+} NorthCalib_Record_t;
+
+typedef struct
+{
+    u8 initialized;           /**< 北向校准模块是否已初始化。 */
+    u8 state;                 /**< 当前校准状态机状态，见 NorthCalib_State_t。 */
+    u8 fail_reason;           /**< 最近一次失败原因，见 NorthCalib_FailReason_t。 */
+    u8 lr;                    /**< 最近一次遥控左右通道值。 */
+    u8 ud;                    /**< 最近一次遥控前后/油门通道值。 */
+    u8 key;                   /**< 最近一次遥控按键值。 */
+    u32 last_remote_ms;       /**< 最近一次收到遥控输入的时间戳。 */
+    u32 state_start_ms;       /**< 当前状态进入时间戳。 */
+    u32 last_log_ms;          /**< 校准过程日志限频时间戳。 */
+    int32 start_lat;          /**< 直跑起点纬度，单位 deg*1e7。 */
+    int32 start_lon;          /**< 直跑起点经度，单位 deg*1e7。 */
+    int32 end_lat;            /**< 直跑终点纬度，单位 deg*1e7。 */
+    int32 end_lon;            /**< 直跑终点经度，单位 deg*1e7。 */
+    u32 last_sample_seq;      /**< 最近一次处理的 GPS 更新序号。 */
+    int16 heading_ref_cd;     /**< 对北阶段参考航向，单位 0.01 deg。 */
+    int32 heading_sum_cd;     /**< 直跑阶段原始航向累计和，单位 0.01 deg。 */
+    u16 heading_samples;      /**< 直跑阶段航向累计样本数。 */
+    u16 run_distance_m;       /**< 当前 GPS 航迹距离，单位 m。 */
+    u16 align_stable_ticks;   /**< 对北误差稳定连续 tick 数。 */
+    u16 yaw_unstable_ticks;   /**< 偏航角速度异常连续 tick 数。 */
+    u16 heading_err_bad_ticks; /**< 航向误差超限连续 tick 数。 */
+    int16 active_offset_cd;   /**< 当前生效的北向偏移，单位 0.01 deg。 */
+    int16 pending_offset_cd;  /**< 本轮计算待保存的北向偏移，单位 0.01 deg。 */
+    u8 has_saved_record;      /**< EEPROM 是否已有有效校准记录。 */
+    u8 active_record_slot;    /**< 当前生效 EEPROM 槽位。 */
+    u16 update_count;         /**< 成功保存校准记录的更新计数。 */
+} NorthCalib_Runtime_t;
+
+static NorthCalib_Runtime_t xdata g_ncal;
+
+static void NorthCalib_EnterState(u8 state);
+static u8 NorthCalib_GpsReady(const GPS_State_t *gps);
+static u8 NorthCalib_RemoteOnline(u32 now_ms);
+static u8 NorthCalib_ManualOverride(void);
+static int16 NorthCalib_WrapSignedCd(int32 angle_cd);
+static u16 NorthCalib_WrapUnsignedCd(int32 angle_cd);
+static u16 NorthCalib_BearingDeg100(int32 lat_from, int32 lon_from,
+                                    int32 lat_to, int32 lon_to);
+static u16 NorthCalib_DistanceMeters(int32 lat_from, int32 lon_from,
+                                     int32 lat_to, int32 lon_to);
+static void NorthCalib_LoadRecord(void);
+static u8 NorthCalib_LoadRecordFrom(u32 addr, NorthCalib_Record_t *record);
+static u8 NorthCalib_RecordValid(const NorthCalib_Record_t *record);
+static u8 NorthCalib_RecordNewer(u16 candidate_count, u16 current_count);
+static u32 NorthCalib_RecordSlotAddr(u8 slot);
+static u8 NorthCalib_NextSaveSlot(void);
+static u8 NorthCalib_SaveRecord(int16 offset_cd, u8 confidence, u16 distance_m);
+static u16 NorthCalib_RecordChecksum(const NorthCalib_Record_t *record);
+
+void NorthCalib_Init(void)
+{
+    if (g_ncal.initialized != 0U) {
+        return;
+    }
+
+    g_ncal.initialized = 1U;
+    g_ncal.state = NCAL_STATE_IDLE;
+    g_ncal.fail_reason = NORTH_CALIB_FAIL_NONE;
+    g_ncal.active_offset_cd = 0;
+    g_ncal.pending_offset_cd = 0;
+    g_ncal.has_saved_record = 0U;
+    g_ncal.active_record_slot = NCAL_EEPROM_SLOT_A;
+    g_ncal.update_count = 0U;
+    NorthCalib_LoadRecord();
+}
+
+void NorthCalib_UpdateRemoteInput(u8 lr, u8 ud, u8 key, u32 now_ms)
+{
+    if (g_ncal.initialized == 0U) {
+        NorthCalib_Init();
+    }
+
+    g_ncal.lr = lr;
+    g_ncal.ud = ud;
+    g_ncal.key = key;
+    g_ncal.last_remote_ms = now_ms;
+}
+
+u8 NorthCalib_RequestStart(void)
+{
+    if (g_ncal.initialized == 0U) {
+        NorthCalib_Init();
+    }
+
+    if (g_ncal.state != NCAL_STATE_IDLE) {
+        LOGW(NCAL_TAG, "start reject busy st=%u", (u16)g_ncal.state);
+        return 0U;
+    }
+
+    NorthCalib_EnterState(NCAL_STATE_CHECK_READY);
+    LOGI(NCAL_TAG, "start");
+    return 1U;
+}
+
+void NorthCalib_Poll(void)
+{
+    const GPS_State_t *gps;
+    u32 now_ms;
+    int16 heading_error_cd;
+    int16 yaw_dps;
+    int16 avg_heading_cd;
+    int16 offset_cd;
+    int16 old_offset_cd;
+    int16 raw_heading_signed_cd;
+    u16 raw_heading_cd;
+    u16 gps_course_cd;
+    u16 distance_m;
+    u8 confidence;
+
+    if (g_ncal.initialized == 0U) {
+        NorthCalib_Init();
+    }
+
+    now_ms = Task_GetTickMs();
+    gps = GPS_GetState();
+
+    switch (g_ncal.state) {
+    case NCAL_STATE_IDLE:
+        return;
+
+    case NCAL_STATE_CHECK_READY:
+        if (NorthCalib_RemoteOnline(now_ms) == 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_REMOTE_TIMEOUT);
+            return;
+        }
+        if (NorthCalib_GpsReady(gps) == 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_GPS_NOT_READY);
+            return;
+        }
+        if (MainLoop_IsHeadingReady() == 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_HEADING_NOT_READY);
+            return;
+        }
+        if (AutoDrive_IsBusy() != 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_AUTODRIVE_BUSY);
+            return;
+        }
+        if (ShipControl_IsAutoMode() != 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_AUTODRIVE_BUSY);
+            return;
+        }
+        ShipControl_ResetYawHoldController();
+        NorthCalib_EnterState(NCAL_STATE_ALIGN_NORTH);
+        return;
+
+    case NCAL_STATE_ALIGN_NORTH:
+        if ((NorthCalib_RemoteOnline(now_ms) == 0U) ||
+            (NorthCalib_ManualOverride() != 0U)) {
+            NorthCalib_Cancel((NorthCalib_RemoteOnline(now_ms) == 0U) ?
+                              NORTH_CALIB_FAIL_REMOTE_TIMEOUT :
+                              NORTH_CALIB_FAIL_MANUAL_OVERRIDE);
+            return;
+        }
+        if (NorthCalib_GpsReady(gps) == 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_GPS_NOT_READY);
+            return;
+        }
+        if (MainLoop_IsHeadingReady() == 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_HEADING_NOT_READY);
+            return;
+        }
+        ShipControl_RequestGpsAlign(NCAL_TARGET_HEADING_CD);
+        heading_error_cd =
+            NorthCalib_WrapSignedCd((int32)NCAL_TARGET_HEADING_CD -
+                                    (int32)MainLoop_GetHeadingDeg100());
+        if ((heading_error_cd <= (int16)NCAL_ALIGN_EXIT_ERROR_CD) &&
+            (heading_error_cd >= (int16)(-NCAL_ALIGN_EXIT_ERROR_CD))) {
+            if (g_ncal.align_stable_ticks < 255U) {
+                g_ncal.align_stable_ticks++;
+            }
+        } else {
+            g_ncal.align_stable_ticks = 0U;
+        }
+
+        if ((now_ms - g_ncal.last_log_ms) >= NCAL_LOG_PERIOD_MS) {
+            g_ncal.last_log_ms = now_ms;
+            LOGI(NCAL_TAG, "align heading=%u err=%d",
+                 MainLoop_GetHeadingDeg100(),
+                 heading_error_cd);
+        }
+
+        if (g_ncal.align_stable_ticks >= NCAL_ALIGN_STABLE_TICKS) {
+            g_ncal.start_lat = gps->lat_deg1e7;
+            g_ncal.start_lon = gps->lon_deg1e7;
+            g_ncal.last_sample_seq = gps->update_sequence;
+            g_ncal.heading_ref_cd = 0;
+            g_ncal.heading_sum_cd = 0L;
+            g_ncal.heading_samples = 0U;
+            g_ncal.run_distance_m = 0U;
+            g_ncal.yaw_unstable_ticks = 0U;
+            g_ncal.heading_err_bad_ticks = 0U;
+            ShipControl_ResetYawHoldController();
+            NorthCalib_EnterState(NCAL_STATE_RUN_STRAIGHT);
+            return;
+        }
+
+        if ((now_ms - g_ncal.state_start_ms) >= NCAL_ALIGN_TIMEOUT_MS) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_TIMEOUT);
+        }
+        return;
+
+    case NCAL_STATE_RUN_STRAIGHT:
+        if ((NorthCalib_RemoteOnline(now_ms) == 0U) ||
+            (NorthCalib_ManualOverride() != 0U)) {
+            NorthCalib_Cancel((NorthCalib_RemoteOnline(now_ms) == 0U) ?
+                              NORTH_CALIB_FAIL_REMOTE_TIMEOUT :
+                              NORTH_CALIB_FAIL_MANUAL_OVERRIDE);
+            return;
+        }
+        if (NorthCalib_GpsReady(gps) == 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_GPS_NOT_READY);
+            return;
+        }
+        if (MainLoop_IsHeadingReady() == 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_HEADING_NOT_READY);
+            return;
+        }
+
+        ShipControl_RequestGpsNav(NCAL_TARGET_HEADING_CD, NCAL_RUN_BASE_SPEED);
+        raw_heading_cd = MainLoop_GetRawHeadingDeg100();
+        raw_heading_signed_cd =
+            NorthCalib_WrapSignedCd((int32)raw_heading_cd);
+        if (g_ncal.heading_samples == 0U) {
+            g_ncal.heading_ref_cd = raw_heading_signed_cd;
+        }
+        /* 以首个样本为参考累计最短角差，避免跨 0/360 或 +/-180 度时平均到反向。 */
+        g_ncal.heading_sum_cd +=
+            (int32)NorthCalib_WrapSignedCd((int32)raw_heading_signed_cd -
+                                           (int32)g_ncal.heading_ref_cd);
+        if (g_ncal.heading_samples < 65535U) {
+            g_ncal.heading_samples++;
+        }
+
+        yaw_dps = (int16)(MainLoop_GetGyroZDps100() / 100);
+        if ((yaw_dps > (int16)NCAL_YAW_UNSTABLE_DPS) ||
+            (yaw_dps < (int16)(-NCAL_YAW_UNSTABLE_DPS))) {
+            g_ncal.yaw_unstable_ticks++;
+        }
+
+        heading_error_cd =
+            NorthCalib_WrapSignedCd((int32)NCAL_TARGET_HEADING_CD -
+                                    (int32)MainLoop_GetHeadingDeg100());
+        if ((heading_error_cd > (int16)NCAL_HEADING_ERR_LIMIT_CD) ||
+            (heading_error_cd < (int16)(-NCAL_HEADING_ERR_LIMIT_CD))) {
+            g_ncal.heading_err_bad_ticks++;
+        }
+
+        if (gps->update_sequence != g_ncal.last_sample_seq) {
+            g_ncal.last_sample_seq = gps->update_sequence;
+            g_ncal.end_lat = gps->lat_deg1e7;
+            g_ncal.end_lon = gps->lon_deg1e7;
+            g_ncal.run_distance_m =
+                NorthCalib_DistanceMeters(g_ncal.start_lat,
+                                          g_ncal.start_lon,
+                                          g_ncal.end_lat,
+                                          g_ncal.end_lon);
+        }
+
+        if ((now_ms - g_ncal.last_log_ms) >= NCAL_LOG_PERIOD_MS) {
+            g_ncal.last_log_ms = now_ms;
+            LOGI(NCAL_TAG, "run dist=%u heading=%u gps=%ld/%ld",
+                 g_ncal.run_distance_m,
+                 MainLoop_GetHeadingDeg100(),
+                 (long)gps->lat_deg1e7,
+                 (long)gps->lon_deg1e7);
+        }
+
+        if (g_ncal.yaw_unstable_ticks > NCAL_YAW_UNSTABLE_LIMIT_TICKS) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_YAW_UNSTABLE);
+            return;
+        }
+        if (g_ncal.heading_err_bad_ticks > NCAL_HEADING_ERR_LIMIT_TICKS) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_YAW_UNSTABLE);
+            return;
+        }
+        if (g_ncal.run_distance_m >= NCAL_TARGET_DISTANCE_M) {
+            NorthCalib_EnterState(NCAL_STATE_CALC);
+            return;
+        }
+        if ((now_ms - g_ncal.state_start_ms) >= NCAL_RUN_TIMEOUT_MS) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_TIMEOUT);
+        }
+        return;
+
+    case NCAL_STATE_CALC:
+        distance_m = g_ncal.run_distance_m;
+        if ((distance_m < NCAL_MIN_SAVE_DISTANCE_M) ||
+            (g_ncal.heading_samples == 0U)) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_DISTANCE_SHORT);
+            return;
+        }
+        gps_course_cd = NorthCalib_BearingDeg100(g_ncal.start_lat,
+                                                 g_ncal.start_lon,
+                                                 g_ncal.end_lat,
+                                                 g_ncal.end_lon);
+        avg_heading_cd =
+            NorthCalib_WrapSignedCd((int32)g_ncal.heading_ref_cd +
+                                    (g_ncal.heading_sum_cd /
+                                     (int32)g_ncal.heading_samples));
+        offset_cd = NorthCalib_WrapSignedCd((int32)gps_course_cd -
+                                            (int32)avg_heading_cd);
+        old_offset_cd = g_ncal.active_offset_cd;
+        LOGI(NCAL_TAG, "calc course=%u avg_heading=%d offset=%d old=%d",
+             gps_course_cd,
+             avg_heading_cd,
+             offset_cd,
+             old_offset_cd);
+        heading_error_cd =
+            NorthCalib_WrapSignedCd((int32)offset_cd - (int32)old_offset_cd);
+        if ((g_ncal.has_saved_record != 0U) &&
+            ((heading_error_cd > (int16)NCAL_OFFSET_SAVE_JUMP_LIMIT_CD) ||
+             (heading_error_cd < (int16)(-NCAL_OFFSET_SAVE_JUMP_LIMIT_CD)))) {
+            g_ncal.active_offset_cd = offset_cd;
+            g_ncal.pending_offset_cd = offset_cd;
+            LOGW(NCAL_TAG, "offset jump temp offset=%d old=%d",
+                 offset_cd,
+                 old_offset_cd);
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_OFFSET_JUMP);
+            return;
+        }
+        g_ncal.pending_offset_cd = offset_cd;
+        NorthCalib_EnterState(NCAL_STATE_SAVE);
+        return;
+
+    case NCAL_STATE_SAVE:
+        distance_m = g_ncal.run_distance_m;
+        confidence = 80U;
+        if (distance_m >= NCAL_TARGET_DISTANCE_M) {
+            confidence = 90U;
+        }
+        if (NorthCalib_SaveRecord(g_ncal.pending_offset_cd,
+                                  confidence,
+                                  distance_m) == 0U) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_EEPROM);
+            return;
+        }
+        g_ncal.active_offset_cd = g_ncal.pending_offset_cd;
+        LOGI(NCAL_TAG, "save ok offset=%d conf=%u dist=%u",
+             g_ncal.active_offset_cd,
+             (u16)confidence,
+             distance_m);
+        ShipControl_Stop(SHIP_CONTROL_STOP_REASON_GPS_NAV_STOP);
+        NorthCalib_EnterState(NCAL_STATE_DONE);
+        return;
+
+    case NCAL_STATE_DONE:
+        NorthCalib_EnterState(NCAL_STATE_IDLE);
+        return;
+
+    case NCAL_STATE_FAILED:
+        NorthCalib_EnterState(NCAL_STATE_IDLE);
+        return;
+
+    default:
+        NorthCalib_Cancel(NORTH_CALIB_FAIL_TIMEOUT);
+        return;
+    }
+}
+
+void NorthCalib_Cancel(u8 reason)
+{
+    g_ncal.fail_reason = reason;
+    ShipControl_Stop(SHIP_CONTROL_STOP_REASON_GPS_NAV_STOP);
+    LOGW(NCAL_TAG, "fail reason=%u", (u16)reason);
+    NorthCalib_EnterState(NCAL_STATE_FAILED);
+}
+
+u8 NorthCalib_IsBusy(void)
+{
+    if (g_ncal.initialized == 0U) {
+        NorthCalib_Init();
+    }
+    return (g_ncal.state != NCAL_STATE_IDLE) ? 1U : 0U;
+}
+
+int16 NorthCalib_GetHeadingOffsetCd(void)
+{
+    if (g_ncal.initialized == 0U) {
+        NorthCalib_Init();
+    }
+    return g_ncal.active_offset_cd;
+}
+
+static void NorthCalib_EnterState(u8 state)
+{
+    g_ncal.state = state;
+    g_ncal.state_start_ms = Task_GetTickMs();
+    g_ncal.last_log_ms = 0UL;
+    if (state == NCAL_STATE_ALIGN_NORTH) {
+        g_ncal.align_stable_ticks = 0U;
+    }
+}
+
+static u8 NorthCalib_GpsReady(const GPS_State_t *gps)
+{
+    u8 sat_count;
+
+    if (gps == 0) {
+        return 0U;
+    }
+    sat_count = (gps->satellites_used_gsa > 0U) ?
+                gps->satellites_used_gsa :
+                gps->satellites_used;
+    if (gps->fix_valid == 0U) {
+        return 0U;
+    }
+    if (sat_count < NCAL_MIN_SATELLITES) {
+        return 0U;
+    }
+    if ((gps->lat_deg1e7 == 0L) || (gps->lon_deg1e7 == 0L)) {
+        return 0U;
+    }
+    return 1U;
+}
+
+static u8 NorthCalib_RemoteOnline(u32 now_ms)
+{
+    if (g_ncal.last_remote_ms == 0UL) {
+        return 0U;
+    }
+    return ((now_ms - g_ncal.last_remote_ms) < NCAL_REMOTE_TIMEOUT_MS) ? 1U : 0U;
+}
+
+static u8 NorthCalib_ManualOverride(void)
+{
+    int16 throttle_input;
+    int16 steering_input;
+
+    throttle_input = (int16)((int16)g_ncal.ud - 100);
+    steering_input = (int16)((int16)g_ncal.lr - 100);
+    if ((throttle_input > 15) || (throttle_input < -15) ||
+        (steering_input > 15) || (steering_input < -15)) {
+        return 1U;
+    }
+    return 0U;
+}
+
+static int16 NorthCalib_WrapSignedCd(int32 angle_cd)
+{
+    while (angle_cd >= 18000L) {
+        angle_cd -= 36000L;
+    }
+    while (angle_cd < -18000L) {
+        angle_cd += 36000L;
+    }
+    return (int16)angle_cd;
+}
+
+static u16 NorthCalib_WrapUnsignedCd(int32 angle_cd)
+{
+    while (angle_cd >= 36000L) {
+        angle_cd -= 36000L;
+    }
+    while (angle_cd < 0L) {
+        angle_cd += 36000L;
+    }
+    return (u16)angle_cd;
+}
+
+static u32 NorthCalib_Abs32(int32 value)
+{
+    return (value < 0L) ? (u32)(-value) : (u32)value;
+}
+
+static u16 NorthCalib_LonScaleQ10(int32 lat_deg1e7)
+{
+    u32 abs_lat;
+    u32 deg;
+
+    abs_lat = NorthCalib_Abs32(lat_deg1e7);
+    deg = abs_lat / 10000000UL;
+    if (deg < 10UL) {
+        return 1008U;
+    }
+    if (deg < 20UL) {
+        return 962U;
+    }
+    if (deg < 30UL) {
+        return 887U;
+    }
+    if (deg < 40UL) {
+        return 784U;
+    }
+    if (deg < 50UL) {
+        return 658U;
+    }
+    if (deg < 60UL) {
+        return 512U;
+    }
+    return 350U;
+}
+
+static u16 NorthCalib_AtanDeg100(u32 z_q10)
+{
+    u32 z;
+    u32 curve;
+    u32 angle_deg100;
+
+    z = z_q10;
+    if (z > 1024UL) {
+        z = 1024UL;
+    }
+
+    curve = 4500UL + ((1564UL * (1024UL - z)) / 1024UL);
+    angle_deg100 = (z * curve) / 1024UL;
+    return (u16)angle_deg100;
+}
+
+static u16 NorthCalib_BearingDeg100(int32 lat_from, int32 lon_from,
+                                    int32 lat_to, int32 lon_to)
+{
+    int32 dlat;
+    int32 dlon;
+    u32 abs_lat;
+    u32 abs_lon;
+    u32 width;
+    u32 height;
+    u32 z_q10;
+    u16 angle;
+    u16 bearing;
+
+    dlat = lat_to - lat_from;
+    dlon = lon_to - lon_from;
+    abs_lat = NorthCalib_Abs32(dlat);
+    abs_lon = NorthCalib_Abs32(dlon);
+    width = ((abs_lon * (u32)NorthCalib_LonScaleQ10(lat_from)) + 512UL) >> 10;
+    height = abs_lat;
+
+    if ((width == 0UL) && (height == 0UL)) {
+        return 0U;
+    }
+    if (width == 0UL) {
+        return (dlat >= 0L) ? 0U : 18000U;
+    }
+    if (height == 0UL) {
+        return (dlon >= 0L) ? 9000U : 27000U;
+    }
+
+    if (height <= width) {
+        z_q10 = ((height << 10) + (width >> 1)) / width;
+        angle = NorthCalib_AtanDeg100(z_q10);
+        if ((dlon >= 0L) && (dlat >= 0L)) {
+            bearing = (u16)(9000U - angle);
+        } else if ((dlon >= 0L) && (dlat < 0L)) {
+            bearing = (u16)(9000U + angle);
+        } else if ((dlon < 0L) && (dlat < 0L)) {
+            bearing = (u16)(27000U - angle);
+        } else {
+            bearing = (u16)(27000U + angle);
+        }
+    } else {
+        z_q10 = ((width << 10) + (height >> 1)) / height;
+        angle = NorthCalib_AtanDeg100(z_q10);
+        if ((dlon >= 0L) && (dlat >= 0L)) {
+            bearing = angle;
+        } else if ((dlon >= 0L) && (dlat < 0L)) {
+            bearing = (u16)(18000U - angle);
+        } else if ((dlon < 0L) && (dlat < 0L)) {
+            bearing = (u16)(18000U + angle);
+        } else {
+            bearing = (u16)(36000U - angle);
+        }
+    }
+
+    return NorthCalib_WrapUnsignedCd((int32)bearing);
+}
+
+static u16 NorthCalib_DistanceMeters(int32 lat_from, int32 lon_from,
+                                     int32 lat_to, int32 lon_to)
+{
+    u32 dlat;
+    u32 dlon;
+    u32 width_m;
+    u32 height_m;
+    u32 max_m;
+    u32 min_m;
+    u32 distance_m;
+
+    dlat = NorthCalib_Abs32(lat_to - lat_from);
+    dlon = NorthCalib_Abs32(lon_to - lon_from);
+    height_m = (dlat * 111130UL) / 10000000UL;
+    width_m = (dlon * 111130UL) / 10000000UL;
+    width_m = ((width_m * (u32)NorthCalib_LonScaleQ10(lat_from)) + 512UL) >> 10;
+
+    if (width_m >= height_m) {
+        max_m = width_m;
+        min_m = height_m;
+    } else {
+        max_m = height_m;
+        min_m = width_m;
+    }
+    distance_m = max_m + ((min_m * 3UL) >> 3);
+    if (distance_m > 65535UL) {
+        return 65535U;
+    }
+    return (u16)distance_m;
+}
+
+static void NorthCalib_WriteLe16(u8 *buf, u8 index, u16 value)
+{
+    buf[index] = (u8)(value & 0xFFU);
+    buf[index + 1U] = (u8)(value >> 8);
+}
+
+static u16 NorthCalib_ReadLe16(const u8 *buf, u8 index)
+{
+    return (u16)((u16)buf[index] | ((u16)buf[index + 1U] << 8));
+}
+
+static void NorthCalib_WriteLe32(u8 *buf, u8 index, u32 value)
+{
+    buf[index] = (u8)(value & 0xFFUL);
+    buf[index + 1U] = (u8)((value >> 8) & 0xFFUL);
+    buf[index + 2U] = (u8)((value >> 16) & 0xFFUL);
+    buf[index + 3U] = (u8)((value >> 24) & 0xFFUL);
+}
+
+static u32 NorthCalib_ReadLe32(const u8 *buf, u8 index)
+{
+    return ((u32)buf[index]) |
+           ((u32)buf[index + 1U] << 8) |
+           ((u32)buf[index + 2U] << 16) |
+           ((u32)buf[index + 3U] << 24);
+}
+
+static void NorthCalib_RecordToBytes(const NorthCalib_Record_t *record, u8 *buf)
+{
+    NorthCalib_WriteLe32(buf, 0U, record->magic);
+    buf[4] = record->version;
+    NorthCalib_WriteLe16(buf, 5U, (u16)record->north_offset_cd);
+    buf[7] = record->confidence;
+    NorthCalib_WriteLe16(buf, 8U, record->sample_distance_m);
+    NorthCalib_WriteLe16(buf, 10U, record->update_count);
+    buf[12] = 0U;
+    buf[13] = 0U;
+    NorthCalib_WriteLe16(buf, 14U, record->checksum);
+}
+
+static void NorthCalib_BytesToRecord(const u8 *buf, NorthCalib_Record_t *record)
+{
+    record->magic = NorthCalib_ReadLe32(buf, 0U);
+    record->version = buf[4];
+    record->north_offset_cd = (int16)NorthCalib_ReadLe16(buf, 5U);
+    record->confidence = buf[7];
+    record->sample_distance_m = NorthCalib_ReadLe16(buf, 8U);
+    record->update_count = NorthCalib_ReadLe16(buf, 10U);
+    record->checksum = NorthCalib_ReadLe16(buf, 14U);
+}
+
+static u16 NorthCalib_RecordChecksum(const NorthCalib_Record_t *record)
+{
+    u8 buf[NCAL_RECORD_SIZE];
+    u8 i;
+    u16 sum;
+
+    NorthCalib_RecordToBytes(record, buf);
+    buf[14] = 0U;
+    buf[15] = 0U;
+    sum = 0U;
+    for (i = 0U; i < NCAL_RECORD_SIZE; i++) {
+        sum = (u16)(sum + (u16)buf[i]);
+    }
+    return (u16)(sum ^ 0xA55AU);
+}
+
+static u8 NorthCalib_RecordValid(const NorthCalib_Record_t *record)
+{
+    u16 checksum;
+
+    if (record == 0) {
+        return 0U;
+    }
+
+    checksum = NorthCalib_RecordChecksum(record);
+    if ((record->magic == NCAL_RECORD_MAGIC) &&
+        (record->version == NCAL_RECORD_VERSION) &&
+        (record->checksum == checksum)) {
+        return 1U;
+    }
+    return 0U;
+}
+
+static u8 NorthCalib_RecordNewer(u16 candidate_count, u16 current_count)
+{
+    u16 delta;
+
+    delta = (u16)(candidate_count - current_count);
+    if ((delta != 0U) && (delta < 32768U)) {
+        return 1U;
+    }
+    return 0U;
+}
+
+static u8 NorthCalib_LoadRecordFrom(u32 addr, NorthCalib_Record_t *record)
+{
+    u8 buf[NCAL_RECORD_SIZE];
+
+    if (record == 0) {
+        return 0U;
+    }
+    EEPROM_read_n(addr, buf, NCAL_RECORD_SIZE);
+    NorthCalib_BytesToRecord(buf, record);
+    return NorthCalib_RecordValid(record);
+}
+
+static u32 NorthCalib_RecordSlotAddr(u8 slot)
+{
+    return (slot == NCAL_EEPROM_SLOT_B) ?
+           NCAL_EEPROM_SLOT_B_ADDR :
+           NCAL_EEPROM_SLOT_A_ADDR;
+}
+
+static u8 NorthCalib_NextSaveSlot(void)
+{
+    if (g_ncal.has_saved_record == 0U) {
+        return NCAL_EEPROM_SLOT_A;
+    }
+    return (g_ncal.active_record_slot == NCAL_EEPROM_SLOT_A) ?
+           NCAL_EEPROM_SLOT_B :
+           NCAL_EEPROM_SLOT_A;
+}
+
+static void NorthCalib_LoadRecord(void)
+{
+    NorthCalib_Record_t record_a;
+    NorthCalib_Record_t record_b;
+    NorthCalib_Record_t *chosen;
+    u8 valid_a;
+    u8 valid_b;
+    u8 chosen_slot;
+
+    valid_a = NorthCalib_LoadRecordFrom(NCAL_EEPROM_SLOT_A_ADDR, &record_a);
+    valid_b = NorthCalib_LoadRecordFrom(NCAL_EEPROM_SLOT_B_ADDR, &record_b);
+    chosen = 0;
+    chosen_slot = NCAL_EEPROM_SLOT_A;
+
+    if ((valid_a != 0U) && (valid_b != 0U)) {
+        if (NorthCalib_RecordNewer(record_b.update_count,
+                                   record_a.update_count) != 0U) {
+            chosen = &record_b;
+            chosen_slot = NCAL_EEPROM_SLOT_B;
+        } else {
+            chosen = &record_a;
+            chosen_slot = NCAL_EEPROM_SLOT_A;
+        }
+    } else if (valid_a != 0U) {
+        chosen = &record_a;
+        chosen_slot = NCAL_EEPROM_SLOT_A;
+    } else if (valid_b != 0U) {
+        chosen = &record_b;
+        chosen_slot = NCAL_EEPROM_SLOT_B;
+    }
+
+    if (chosen != 0) {
+        g_ncal.active_offset_cd = chosen->north_offset_cd;
+        g_ncal.update_count = chosen->update_count;
+        g_ncal.has_saved_record = 1U;
+        g_ncal.active_record_slot = chosen_slot;
+        LOGI(NCAL_TAG, "load slot=%u offset=%d conf=%u dist=%u cnt=%u",
+             (u16)chosen_slot,
+             chosen->north_offset_cd,
+             (u16)chosen->confidence,
+             chosen->sample_distance_m,
+             chosen->update_count);
+    } else {
+        g_ncal.active_offset_cd = 0;
+        g_ncal.update_count = 0U;
+        g_ncal.has_saved_record = 0U;
+        g_ncal.active_record_slot = NCAL_EEPROM_SLOT_A;
+        LOGW(NCAL_TAG, "load default offset=0");
+    }
+}
+
+static u8 NorthCalib_SaveRecord(int16 offset_cd, u8 confidence, u16 distance_m)
+{
+    u8 buf[NCAL_RECORD_SIZE];
+    u8 slot;
+    u32 addr;
+    NorthCalib_Record_t record;
+    NorthCalib_Record_t verify;
+    u16 checksum;
+
+    slot = NorthCalib_NextSaveSlot();
+    addr = NorthCalib_RecordSlotAddr(slot);
+    record.magic = NCAL_RECORD_MAGIC;
+    record.version = NCAL_RECORD_VERSION;
+    record.north_offset_cd = offset_cd;
+    record.confidence = confidence;
+    record.sample_distance_m = distance_m;
+    record.update_count = (u16)(g_ncal.update_count + 1U);
+    record.checksum = 0U;
+    record.checksum = NorthCalib_RecordChecksum(&record);
+
+    NorthCalib_RecordToBytes(&record, buf);
+    EEPROM_SectorErase(addr);
+    EEPROM_write_n(addr, buf, NCAL_RECORD_SIZE);
+    EEPROM_read_n(addr, buf, NCAL_RECORD_SIZE);
+    NorthCalib_BytesToRecord(buf, &verify);
+    checksum = NorthCalib_RecordChecksum(&verify);
+    if ((verify.magic != NCAL_RECORD_MAGIC) ||
+        (verify.version != NCAL_RECORD_VERSION) ||
+        (verify.checksum != checksum) ||
+        (verify.north_offset_cd != offset_cd) ||
+        (verify.update_count != record.update_count)) {
+        return 0U;
+    }
+
+    g_ncal.update_count = verify.update_count;
+    g_ncal.has_saved_record = 1U;
+    g_ncal.active_record_slot = slot;
+    return 1U;
+}

@@ -291,6 +291,8 @@ yaw-hold PID -> 左右电机差速
 
 ## 11. 现场验证
 
+详细测试对接文档见：`doc/project_doc/gps_north_calibration_d_key_test_plan.md`。
+
 岸上准备：
 
 1. 确认 D 键当前没有其他业务。
@@ -308,6 +310,15 @@ yaw-hold PID -> 左右电机差速
 6. 查看日志中的 `course`、`avg_heading`、`offset`。
 7. 重启设备。
 8. 直接执行去点/返航，观察首航大弧线是否明显改善。
+
+更细的测试拆分：
+
+- T1 正常校准：确认 `start -> align -> run -> calc -> save ok` 全链路。
+- T2 重启加载：确认 EEPROM A/B 双槽记录可被重新加载。
+- T3 人工接管退出：确认校准期间打杆不保存。
+- T4 GPS 不 ready 拒绝：确认定位不足时不直跑、不保存。
+- T5 AutoDrive busy 隔离：确认校准和去点/返航不抢控制权。
+- T6 offset 跳变保护：确认新旧 offset 差超过 `45.00°` 时不覆盖旧 EEPROM。
 
 判断标准：
 
@@ -573,6 +584,92 @@ Rollback:
 
 建议每个 goal 完成后再进入下一个 goal，避免多个体验变化互相干扰。
 
+## 14. G1 实现记录
+
+实现日期：2026-05-31
+
+本次已按 G1 做最小侵入式实现，只引入 D 键北向校准主流程，不同时调整 G2/G3/G4/G5 参数。
+
+### 已落地代码
+
+- 新增 `Code_boweny/Device/AutoDrive/NorthCalib.c/.h`，独立维护北向校准状态机。
+- `ship_protocol.c`：
+  - D 键短按仍无业务动作。
+  - D 键保持约 `1500ms` 后调用 `NorthCalib_RequestStart()`。
+  - 校准 busy 时拦截手动电机更新，并拒绝 `0x13/0x14/0x15` 自动巡航命令，避免抢控制权。
+  - `ShipProtocol_RunScheduler()` 继续按 10ms 节拍调用 `AutoDrive_Poll()`，随后调用 `NorthCalib_Poll()`。
+- `User/MainLoop.c/.h`：
+  - 新增 `MainLoop_GetRawHeadingDeg100()`，供校准计算原始融合航向。
+  - `MainLoop_GetHeadingDeg100()` 统一返回 `raw + NorthCalib_GetHeadingOffsetCd()` 后的航向。
+- `RVMDK/STC32G-LIB.uvproj`：
+  - 加入 `NorthCalib.c/.h`。
+  - include path 增加 `Code_boweny/Device/AutoDrive`。
+
+### 当前状态机
+
+```text
+IDLE
+  D 长按触发
+  -> CHECK_READY
+
+CHECK_READY
+  GPS ready / heading ready / 遥控在线 / AutoDrive 空闲 / ShipControl 非自动模式
+  -> ALIGN_NORTH
+
+ALIGN_NORTH
+  ShipControl_RequestGpsAlign(0)
+  航向误差连续约 200ms 进入 ±5.00°
+  -> RUN_STRAIGHT
+
+RUN_STRAIGHT
+  记录 GPS 起点，以首个原始航向为参考持续累计最短角差
+  ShipControl_RequestGpsNav(0, 500)
+  GPS 起终点距离达到约 10m
+  -> CALC
+
+CALC
+  gps_course_cd = bearing(start_gps, end_gps)
+  avg_heading_cd = 参考首样本还原后的原始融合航向平均值
+  north_offset_cd = wrap180(gps_course_cd - avg_heading_cd)
+  -> SAVE 或 FAILED
+
+SAVE
+  EEPROM 写入 magic/version/offset/confidence/distance/update_count/checksum
+  写后读回校验
+  停船退出
+```
+
+### EEPROM 策略
+
+- A/B 双槽地址：`0x000200`、`0x000400`。
+- 单槽记录大小：16 字节。
+- 加载时选择 `update_count` 更新且 checksum 有效的槽。
+- 保存时写入另一个槽，写后读回校验；写入失败时旧有效槽仍保留。
+- 新 offset 与已保存 offset 相差超过 `45.00°` 时，只临时应用本次 offset，并以 `offset jump` 失败退出，不写 EEPROM。
+- 上电读取 EEPROM 校验失败时使用默认 `north_offset_cd = 0`。
+
+### 日志
+
+当前关键日志：
+
+```text
+[NCAL] start
+[NCAL] align heading=... err=...
+[NCAL] run dist=... heading=... gps=...
+[NCAL] calc course=... avg_heading=... offset=... old=...
+[NCAL] save ok offset=... conf=... dist=...
+[NCAL] fail reason=...
+```
+
+### 回退
+
+如现场需要回退 G1：
+
+- 从 `ship_protocol.c` 移除 `NorthCalib` include、D 键长按检测、busy guard 和 `NorthCalib_Poll()` 调用。
+- 从 `MainLoop.c/.h` 移除 `MainLoop_GetRawHeadingDeg100()` 对外接口，并让 `MainLoop_GetHeadingDeg100()` 直接返回 `Heading_GetDeg100()`。
+- 从 `RVMDK/STC32G-LIB.uvproj` 移除 `NorthCalib.c/.h`。
+- 保留 EEPROM 中旧记录不会影响回退后运行，因为没有代码再读取该 offset。
+
 ## 15. Graphify 优先执行规程
 
 本项目已经有 `graphify-out/` 关系图。后续执行本文档中的 goal 时，默认先读关系图，再读少量源文件，避免每次把 README、GRAPH_REPORT 或大段源码全部塞进上下文。
@@ -633,6 +730,7 @@ G1 D键 北向校准 NorthCalib GPS 航迹 EEPROM ShipProtocol HandleKey
 相关文档：
 
 - `doc/project_doc/gps_north_calibration_d_key.md`
+- `doc/project_doc/gps_north_calibration_d_key_test_plan.md`
 - `doc/project_doc/magnetometer_calibration_product_notes.md`
 - `Code_boweny/Function/AHRS/README.md`
 - `doc/build_doc/README_GPS.md`

@@ -80,6 +80,12 @@ QMC6309_ReadXYZFiltered()
   -> Filter_MagLowPass()
 ```
 
+当前在项目里的角色：
+
+- `Filter_GyroLowPass()` 主要服务于 IMU 原始角速度平滑和调试读取。
+- `Filter_MagLowPass()` 主要服务于 `QMC6309_ReadXYZFiltered()`，再进入 `AHRS_UpdateRawMag()`。
+- 本模块不负责姿态融合、不负责磁航向计算，也不负责北向校准。
+
 ## 注意事项
 
 - STC32G 无 FPU，本模块严格使用定点整数实现。

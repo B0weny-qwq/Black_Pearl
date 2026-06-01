@@ -1,5 +1,15 @@
 # Ship Packet Builder
 
+> 当前版本说明：
+> 这个工具用于构造与当前固件兼容的旧版船控协议数据帧。
+> 协议字段解释与实际接收逻辑以 `ship_protocol.c`、`autodrive.c` 和 `GPS.c` 为准。
+
+## 当前关系
+
+- `0x12` 为 GPS 状态上报帧。
+- `0x13 / 0x14 / 0x15` 会进入 `ship_protocol.c`，再交给 `AutoDrive` 处理返航/去钓点逻辑。
+- 该工具只负责离线构造数据帧，不参与固件侧链路状态机。
+
 This helper builds legacy ship protocol packets for:
 
 - `0x13` return-home

@@ -1,3 +1,15 @@
+/**
+ * @file    MainLoop.c
+ * @brief   当前固件主循环与统一航向输出入口。
+ *
+ * @details
+ * 本文件负责组织 GPS、无线协议、AHRS、磁力计和控制层轮询节拍，并提供
+ * 上层统一读取的航向/角速度快照。当前工程里：
+ * - `MainLoop_GetRawHeadingDeg100()` 保留 AHRS 原始融合航向；
+ * - `MainLoop_GetHeadingDeg100()` 在原始航向上叠加
+ *   `NorthCalib_GetHeadingOffsetCd()`，形成导航统一口径；
+ * - AutoDrive、手动 yaw 自稳、E 键定速巡航都必须复用该统一航向接口。
+ */
 #include "config.h"
 #include "system_init.h"
 #include "Task.h"
@@ -7,6 +19,7 @@
 #include "..\Code_boweny\Device\GPS\GPS.h"
 #include "..\Code_boweny\Device\Motor\Motor.h"
 #include "..\Code_boweny\Device\Control\ShipControl.h"
+#include "..\Code_boweny\Device\AutoDrive\NorthCalib.h"
 #include "..\Code_boweny\Device\WIRELESS\wireless.h"
 #include "..\Code_boweny\Device\WIRELESS\ship_protocol.h"
 #include "..\Code_boweny\Function\AHRS\AHRS.h"
@@ -80,12 +93,12 @@ static u8 MainLoop_SensorsReady(void);
 #define MAG_COMPASS_RAW_OFFSET_CD      0L
 #endif
 #ifndef MAG_COMPASS_DIRECTION_SIGN
-/* Current measured heading direction matches real clockwise rotation after sign correction. */
-#define MAG_COMPASS_DIRECTION_SIGN     (1L)
+/* 当前板载安装方向会让原始罗盘角与手机罗盘方向相反。 */
+#define MAG_COMPASS_DIRECTION_SIGN     (-1L)
 #endif
 #ifndef MAG_COMPASS_INSTALL_OFFSET_CD
-/* Old corrected north read 287.0 deg; same-direction total offset is 67.7 deg. */
-#define MAG_COMPASS_INSTALL_OFFSET_CD  6770L
+/* 船头指向真北时，原始罗盘读数约为 219.3 度。 */
+#define MAG_COMPASS_INSTALL_OFFSET_CD  21930L
 #endif
 #ifndef MAG_COMPASS_DECLINATION_CD
 #define MAG_COMPASS_DECLINATION_CD     0L
@@ -919,6 +932,7 @@ void MainLoop_Bootstrap(void)
     g_heading_rel_cd_snapshot = 0;
     g_heading_ready_snapshot = 0U;
 #endif
+    NorthCalib_Init();
 
 #if ENABLE_WIRELESS_MODULE && ENABLE_LT8920_CHIP && MAINLOOP_WIRELESS_BOOT_SELF_TEST
     Wireless_MinimalTestUnit();
@@ -1040,13 +1054,35 @@ u8 MainLoop_IsHeadingReady(void)
     return 0U;
 }
 
-u16 MainLoop_GetHeadingDeg100(void)
+/** @brief 返回 HeadingEstimator 输出的原始融合绝对航向。 */
+u16 MainLoop_GetRawHeadingDeg100(void)
 {
 #if ENABLE_IMU_MODULE && ENABLE_IMU_AHRS_POLL
     int32 heading_cd;
 
     if (g_heading_ready_snapshot != 0U) {
         heading_cd = Heading_GetDeg100(&g_heading);
+        while (heading_cd >= 36000L) {
+            heading_cd -= 36000L;
+        }
+        while (heading_cd < 0L) {
+            heading_cd += 36000L;
+        }
+        return (u16)heading_cd;
+    }
+#endif
+    return 0U;
+}
+
+/** @brief 返回叠加当前北向偏移后的导航航向。 */
+u16 MainLoop_GetHeadingDeg100(void)
+{
+#if ENABLE_IMU_MODULE && ENABLE_IMU_AHRS_POLL
+    int32 heading_cd;
+
+    if (g_heading_ready_snapshot != 0U) {
+        heading_cd = (int32)MainLoop_GetRawHeadingDeg100() +
+                     (int32)NorthCalib_GetHeadingOffsetCd();
         while (heading_cd >= 36000L) {
             heading_cd -= 36000L;
         }

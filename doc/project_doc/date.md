@@ -3,8 +3,8 @@
  * @brief   Black Pearl v1.1 开发日志
  *
  * @author  boweny
- * @date    2026-05-23
- * @version v1.7.67
+ * @date    2026-06-01
+ * @version v1.7.69
  *
  * @details
  * 本文件是 Black Pearl v1.1 项目的变更记录和 Bug 追踪文档。
@@ -21,6 +21,47 @@
 > 本文件是项目的**变更记录和 Bug 追踪文档**。
 > 每一次代码修改、Bug 发现与修复、功能增删都必须记录在此。
 > 这是项目持续维护的核心依据，请务必在每次提交前更新。
+
+---
+
+## [2026-06-01] - v1.7.70 Code_boweny/User 中文 Doxygen 注释审计
+
+### 文档更新
+- **[中文Doxygen]** 复核 `Code_boweny/` 与 `User/` 源码注释风格，结构体字段统一补为字段后置中文说明，覆盖 AHRS、HeadingEstimator、ShipControl、AutoDrive、NorthCalib、QMI8658、Motor、Filter、LT8920 与无线协议运行态。
+- **[关系同步]** 按 `graphify-out/graph.json` 和 `graphify query` 结果同步说明主链：`MainLoop_RunOnce()` 推进 GPS/IMU/AHRS/Wireless，`ShipProtocol_RunScheduler()` 维护旧遥控器协议与 AutoDrive/NorthCalib 调度，最终电机目标仍由 `ShipControl` 仲裁。
+- **[日志文档]** 同步日志维护口径：`Log` 为 UART1 轻量输出模块，`WIRELESS/GPS/AHRS/ShipControl/NorthCalib` 的字段格式会被上位机日志查看器消费，改日志字段时必须同步工具正则和 README。
+
+### 质量门禁
+- 已增加结构体字段扫描，要求 `Code_boweny` 与 `User` 下所有 `typedef struct` 字段具备字段后置中文注释。
+- 本轮只改注释与文档，不改变控制逻辑、协议字节序、PWM 极性或 EEPROM 地址。
+
+## [2026-06-01] - v1.7.69 D 键 GPS 北向校准测试对接文档
+
+### 文档更新
+- **[测试对接]** 新增 `doc/project_doc/gps_north_calibration_d_key_test_plan.md`，把 D 键 GPS 北向校准拆成现场准备、关键参数、标准水面测试、人工接管退出、GPS 不 ready、AutoDrive busy 隔离、offset 跳变保护、重启加载和回退方式，方便硬件、上位机和后续维护人员对接。
+- **[README 入口]** 根 README、AutoDrive README、GPS README 和 `gps_north_calibration_d_key.md` 已补充测试文档入口；原设计文档的现场验证章节增加 T1-T6 测试索引。
+
+### 开发者备注
+- 本次只补充中文测试/对接文档和相关入口，不改代码、不改校准参数、不改 EEPROM 地址。
+- 当前 G1 仍固定以 `0°` 为校准目标方向；“任意方向直跑 10m 校准”属于后续可选改动，不混入本次文档更新。
+
+---
+
+## [2026-05-31] - v1.7.68 D 键 GPS 北向校准 G1
+
+### 新增功能
+- **[D 键北向校准]** 新增 `Code_boweny/Device/AutoDrive/NorthCalib.c/.h`，实现 `CHECK_READY -> ALIGN_NORTH -> RUN_STRAIGHT -> CALC -> SAVE` 状态机：长按 D 约 `1500ms` 后，船先对准 0°，再低速直跑约 10m，用 GPS 航迹角减去原始融合航向均值得到 `north_offset_cd`。
+- **[航向统一修正]** `MainLoop_GetRawHeadingDeg100()` 保留 AHRS 原始融合航向，`MainLoop_GetHeadingDeg100()` 统一叠加 `NorthCalib_GetHeadingOffsetCd()`，让手动 yaw 自稳、E 键定速巡航和 GPS 自动巡航使用同一修正后航向。
+- **[EEPROM 保存]** 北向校准记录写入 STC EEPROM/IAP A/B 双槽 `0x000200`、`0x000400`，包含 magic、version、offset、confidence、直跑距离、update count 和 checksum；上电选择更新的有效槽，两个槽都无效时默认 offset 为 0。
+
+### 安全门控
+- **[失败不覆盖]** GPS/heading 不 ready、遥控超时、AutoDrive/巡航 busy、人工打杆、距离不足、yaw 不稳定或 EEPROM 校验失败时停船退出，不覆盖旧 EEPROM 参数。
+- **[跳变保护]** 新 offset 与已保存 offset 相差超过 `45.00°` 时只临时应用并打印 `offset jump`，不立刻覆盖 EEPROM。
+- **[控制权隔离]** 北向校准 busy 时，协议层拒绝 `0x13/0x14/0x15` 自动巡航命令、暂停低电自动返航触发，并拦截手动电机更新，避免校准状态机和 AutoDrive 抢控制权。
+
+### 文档更新
+- **[README 同步]** 根 README、AutoDrive README、GPS README 和 `doc/project_doc/gps_north_calibration_d_key.md` 已同步 D 键北向校准入口、运行链路、EEPROM 策略、日志和回退方式。
+- **[注释补齐]** `MainLoop.h/.c`、`AutoDrive/autodrive.c`、`AutoDrive/NorthCalib.h/.c` 已补齐文件头和关键接口注释，明确“原始融合航向 / 校准后导航航向 / NorthCalib 与 ShipProtocol、ShipControl、MainLoop 的关系”。
 
 ---
 

@@ -26,6 +26,13 @@
 
 推荐查找顺序：先看本 README 的目录索引，再看对应模块的 `README.md` 和 `.h` 注释，最后再进 `.c` 实现。
 
+当前文档口径：
+
+- `.h` 重点描述接口、参数单位和行为边界。
+- 各模块 `README.md` 重点描述真实接入关系和运行链路。
+- `doc/project_doc/total.md` 记录当前运行档。
+- `doc/project_doc/date.md` 记录每次代码/注释/文档变更原因。
+
 ### GPS 自动巡航 / 自动调整船头方向去哪里找
 
 这部分不要只看 `GPS/`。`GPS/` 只负责定位数据，真正“去点、算方向、调船头、写电机”分散在下面几层：
@@ -42,6 +49,9 @@ GPS 点位和目标航向计算
     AutoDrive_UpdateTargetHeading()
     AutoDrive_ApplyAlignHeadingHold()
     AutoDrive_ApplyHeadingHold()
+  Code_boweny/Device/AutoDrive/NorthCalib.c
+    D 键长按 GPS 北向校准
+    EEPROM A/B 双槽保存 north_offset_cd
 
 船头自动修正 / yaw-hold / 差速输出
   Code_boweny/Device/Control/ShipControl.c
@@ -54,6 +64,7 @@ GPS 点位和目标航向计算
 当前船头角来源
   User/MainLoop.c
     IMU_AhrsPoll()
+    MainLoop_GetRawHeadingDeg100()
     MainLoop_IsHeadingReady()
     MainLoop_GetHeadingDeg100()
 
@@ -74,9 +85,11 @@ GPS 原始定位来源
 - “当前 GPS 点到目标点，目标航向怎么算”：看 `autodrive.c` 的 `AutoDrive_UpdateTargetHeading()`。
 - “为什么先原地转船头再往前跑”：看 `autodrive.c` 的 `AUTO_DRIVE_GET_DIRECTION`、`AutoDrive_ApplyAlignHeadingHold()` 和 `ShipControl_RequestGpsAlign()`。
 - “巡航中怎么持续调整船头方向”：看 `autodrive.c` 的 `AutoDrive_ApplyHeadingHold()`，它会调用 `ShipControl_RequestGpsNav(target_heading, base_speed)`。
+- “D 键北向校准怎么触发和保存”：看 `ship_protocol.c` 的 D 键长按检测、`NorthCalib.c` 的 `CHECK_READY -> ALIGN_NORTH -> RUN_STRAIGHT -> CALC -> SAVE`，以及 `STC32G_EEPROM.c` 的 IAP 读写接口。
+- “D 键北向校准怎么给别人测和对接”：看 `doc/project_doc/gps_north_calibration_d_key_test_plan.md`，里面按现场准备、标准测试、日志判据、失败原因和回退方式写。
 - “PID 怎么把航向误差变成左右电机差速”：看 `ShipControl.c` 的 `ShipControl_ApplyYawHoldTargetEx()`、`ShipControl_ApplyYawHoldDamping()`、`ShipControl_YawControlToSpeed()`。
 - “最终左右电机命令在哪里写”：看 `ShipControl.c` 里调用 `Motor_SetBothSpeed()` 的位置，再追到 `Code_boweny/Device/Motor/Motor.c`。
-- “当前船头角从哪里来”：看 `User/MainLoop.c` 的 `IMU_AhrsPoll()`、`MainLoop_GetHeadingDeg100()`，再追 `HeadingEstimator.c`。
+- “当前船头角从哪里来”：看 `User/MainLoop.c` 的 `IMU_AhrsPoll()`、`MainLoop_GetRawHeadingDeg100()`、`MainLoop_GetHeadingDeg100()`，再追 `HeadingEstimator.c`；`MainLoop_GetHeadingDeg100()` 会叠加北向校准保存的 `north_offset_cd`。
 - “GPS 坐标和更新序号哪里来”：看 `GPS.c` 的 `GPS_Poll()`、`lat_deg1e7`、`lon_deg1e7`、`update_sequence`。
 
 ---
@@ -102,6 +115,8 @@ GPS 原始定位来源
   [doc/project_doc/total.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/total.md)
 - 开发日志 / 变更记录：
   [doc/project_doc/date.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/date.md)
+- D 键 GPS 北向校准测试对接：
+  [doc/project_doc/gps_north_calibration_d_key_test_plan.md](/C:/Users/S/Desktop/STC_PROJECT/Black_Pearl_v1.1/doc/project_doc/gps_north_calibration_d_key_test_plan.md)
 
 ---
 

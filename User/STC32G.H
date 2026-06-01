@@ -1,10 +1,23 @@
+/**
+ * @file    STC32G.H
+ * @brief   STC32G MCU SFR 与位定义表。
+ *
+ * @details
+ * 这是芯片级寄存器映射头，提供 P0~P7、Timer、UART、SPI、I2C、中断和扩展
+ * SFR 位定义。当前工程通过 `Config.h` 间接引用本文件。
+ *
+ * 说明：
+ * - 本文件主要是芯片寄存器清单，不承载业务逻辑说明；
+ * - 与具体模块关系最强的几个关键位包括 `EA`、`EAXFR`、GPIO 端口位和串口/
+ *   I2C/SPI 相关 SFR；
+ * - 若要调整业务行为，应优先改上层驱动或 `FeatureSwitch.h`，不要直接改本文件。
+ */
 #ifndef __STC32G_H_
 #define __STC32G_H_
 
-/////////////////////////////////////////////////
 #include <intrins.h>
 
-//包含本头文件后,不用另外再包含"REG51.H"
+/* 包含本头文件后，不用另外再包含 `REG51.H`。 */
 
 sfr         P0          =           0x80;
 sbit        P00         =           P0^0;

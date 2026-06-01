@@ -1,9 +1,17 @@
 /**
  * @file    PID.c
- * @brief   Fixed-point PID controller implementation.
+ * @brief   定点 PID 控制器实现。
  * @author  boweny
  * @date    2026-04-27
  * @version v1.0
+ *
+ * @details
+ * 本文件提供与平台无关的定点 PID 基础算法，实现比例、积分、微分和
+ * 输出/积分限幅，供 ShipControl 等上层控制模块复用。
+ *
+ * @note 当前职责边界：
+ * - 本文件只负责通用 PID 运算，不感知船体模式、航向或电机硬件。
+ * - 具体控制目标、采样周期和参数整定由上层模块决定。
  */
 
 #include "PID.h"

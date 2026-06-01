@@ -16,6 +16,13 @@ MainLoop_RunOnce()
      -> AHRS_UpdateRawMag()
 ```
 
+关系边界：
+
+- `QMC6309` 只负责地磁三轴采样和基础滤波入口。
+- `AHRS_UpdateRawMag()` 负责姿态侧的磁观测接入。
+- `HeadingEstimator` 只接收由 AHRS 输出的 `yaw_mag_deg`，不直接读 QMC6309。
+- `NorthCalib` 也不直接依赖 QMC6309 寄存器，而是只使用 `MainLoop` 给出的航向结果。
+
 默认运行档：
 
 - `ENABLE_MAG_MODULE = 1`
@@ -163,3 +170,4 @@ QMC6309_ReadXYZFiltered()
 - 首帧有效数据直接透传。
 - 无效原始帧不会更新滤波状态。
 - 每次 `QMC6309_Init()` 成功后会复位滤波状态。
+- `Filter_MagLowPass()` 只做三轴平滑，不负责磁标定、零点修正或北向校准。
