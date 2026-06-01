@@ -33,10 +33,40 @@
 #include "..\..\..\Driver\inc\STC32G_UART.h"
 #include <stdarg.h>
 
+/* Compile-time log filtering. Lower levels are more verbose. */
+#define LOG_LEVEL_DEBUG  0U
+#define LOG_LEVEL_INFO   1U
+#define LOG_LEVEL_WARN   2U
+#define LOG_LEVEL_ERROR  3U
+#define LOG_LEVEL_NONE   4U
+
+#ifndef SERIAL_LOG_LEVEL
+#define SERIAL_LOG_LEVEL LOG_LEVEL_DEBUG
+#endif
+
+#if (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO)
 #define LOGI(tag, ...)   log_info(tag, __VA_ARGS__)   /**< 输出 INFO 级别日志。 */
+#else
+#define LOGI(tag, ...)
+#endif
+
+#if (SERIAL_LOG_LEVEL <= LOG_LEVEL_WARN)
 #define LOGW(tag, ...)   log_warn(tag, __VA_ARGS__)   /**< 输出 WARN 级别日志。 */
+#else
+#define LOGW(tag, ...)
+#endif
+
+#if (SERIAL_LOG_LEVEL <= LOG_LEVEL_ERROR)
 #define LOGE(tag, ...)   log_error(tag, __VA_ARGS__)  /**< 输出 ERROR 级别日志。 */
+#else
+#define LOGE(tag, ...)
+#endif
+
+#if (SERIAL_LOG_LEVEL <= LOG_LEVEL_DEBUG)
 #define LOGD(tag, ...)   log_debug(tag, __VA_ARGS__)  /**< 输出 DEBUG 级别日志。 */
+#else
+#define LOGD(tag, ...)
+#endif
 
 /**
  * @brief   初始化日志系统。
