@@ -21,7 +21,7 @@
 - `AutoDrive` 并非独立主循环入口，而是隐藏在 `ShipProtocol_RunScheduler()` 内初始化与轮询；`0x13/0x14/0x15`、低电返航和链路超时都会走到这条链。当前 `AutoDrive` 只负责 GPS 点位规划、目标航向和到点判断，电机自稳输出必须交给 yaw-hold PID 公共链路。
 - 返航/钓点巡航的 `target_heading_cd` 不是启动时固定一次的角度；`AUTO_DRIVE_RUNING` 状态下每当 `gps->update_sequence` 变化，都会用最新当前 GPS 点和目标点重新计算目标航向，随后继续提交给 `ShipControl_RequestGpsNav(target_heading_cd, base_speed)`。GPS 未更新的 10ms 控制周期内只沿用上一帧目标航向。
 - 当前 GPS 定点巡航的当前船头角必须来自 `MainLoop_GetHeadingDeg100()` 的融合绝对航向；磁力计已按实测 `MAG_COMPASS_DIRECTION_SIGN=-1`、`MAG_COMPASS_INSTALL_OFFSET_CD=21930` 修正正北零点与旋转方向，上位机“船头朝向”应显示 `HDG fused` 才能证明航向链已 ready。
-- D 键 GPS 北向校准当前已接入正式链路：`ship_protocol.c` 负责长按检测，`NorthCalib.c` 负责 `CHECK_READY -> ALIGN_NORTH -> RUN_STRAIGHT -> CALC -> SAVE` 状态机，`MainLoop_GetHeadingDeg100()` 统一叠加 `north_offset_cd`，EEPROM 使用 `0x000200/0x000400` A/B 双槽保存。
+- D 键 GPS 北向校准当前已接入正式链路：`ship_protocol.c` 负责 1s 内双击 D 触发和 busy 期间 E 键取消，`NorthCalib.c` 负责 `CHECK_READY -> ALIGN_NORTH -> RUN_STRAIGHT -> CALC -> SAVE` 状态机，`MainLoop_GetHeadingDeg100()` 统一叠加 `north_offset_cd`，EEPROM 使用 `0x000200/0x000400` A/B 双槽保存。
 - `Code_boweny/` 与 `User/` 当前按中文 Doxygen 口径维护：文件头使用 `@file/@brief/@details`，公开结构体和内部运行态结构体字段采用字段后置中文注释；改结构体、状态机或日志字段时必须同步模块 README、`date.md` 和相关日志工具说明。
 
 ## 2. 当前开关
@@ -143,6 +143,7 @@ MainLoop_RunOnce()
 
 | 日期 | 版本 | 说明 |
 |------|------|------|
+| 2026-06-03 | `v1.7.71` | 修正 D 键北向校准交互：1s 内双击 D 触发，校准 busy 期间 E 键可取消；保留对准、直跑和总流程超时退出。 |
 | 2026-05-31 | `v1.7.68` | 新增 D 键 GPS 北向校准链路：`NorthCalib` 负责状态机和 EEPROM A/B 双槽，`MainLoop_GetHeadingDeg100()` 统一叠加 `north_offset_cd`，README/模块文档同步到当前真实关系。 |
 | 2026-05-18 | `v1.7.65` | 同步 GPS 定点巡航角度策略：`target_heading_cd` 随 GPS 新坐标实时重算，GPS 未更新时沿用上一帧目标角；当前船头角来自融合绝对航向 `MainLoop_GetHeadingDeg100()`，并记录磁罗盘方向/零点修正。 |
 | 2026-05-16 | `v1.7.64` | 明确工程级自稳约束：所有自稳模式、返航循迹和钓点巡航都必须走 yaw-hold PID 公共路线；AutoDrive 只负责 GPS 规划目标航向和到点判断，不允许另写定时左/右转或第二套左右极性。 |

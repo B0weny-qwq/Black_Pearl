@@ -3,11 +3,11 @@
  * @brief   D 键 GPS 北向校准接口。
  *
  * @details
- * 本模块负责长按 D 后的 GPS 航迹北向校准、EEPROM A/B 双槽保存和航向
+ * 本模块负责双击 D 后的 GPS 航迹北向校准、EEPROM A/B 双槽保存和航向
  * `north_offset_cd` 输出。
  *
  * 当前关系：
- * - `ship_protocol.c` 负责 D 键长按检测、遥控输入转发和 busy 期控制权隔离；
+ * - `ship_protocol.c` 负责 D 键双击检测、E 键取消、遥控输入转发和 busy 期控制权隔离；
  * - `MainLoop_GetHeadingDeg100()` 负责在统一航向输出处叠加本模块 offset；
  * - `AutoDrive` 去点/返航状态机不直接感知本模块内部细节。
  */
@@ -29,7 +29,8 @@ typedef enum
     NORTH_CALIB_FAIL_YAW_UNSTABLE,      /**< 融合航向波动过大。 */
     NORTH_CALIB_FAIL_OFFSET_JUMP,       /**< 新旧北向偏移跳变过大。 */
     NORTH_CALIB_FAIL_EEPROM,            /**< EEPROM 读写或校验失败。 */
-    NORTH_CALIB_FAIL_TIMEOUT            /**< 校准状态机超时。 */
+    NORTH_CALIB_FAIL_TIMEOUT,           /**< 校准状态机超时。 */
+    NORTH_CALIB_FAIL_USER_CANCEL        /**< 用户按 E 主动取消校准。 */
 } NorthCalib_FailReason_t;
 
 void NorthCalib_Init(void);

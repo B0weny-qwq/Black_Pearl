@@ -15,6 +15,7 @@
  * - `0x11` 手动控制命令会转交给 ShipControl。
  * - `0x13/0x14/0x15` 会转交给 AutoDrive。
  * - `0x12` 状态上报会复用 GPS、MainLoop 和 NorthCalib 当前状态。
+ * - NorthCalib busy 期间只放行 E 键边沿用于人工取消，其它按键业务仍隔离。
  */
 #include "ship_protocol.h"
 #include "wireless.h"
@@ -1693,7 +1694,12 @@ static u8 ShipProtocol_HandleThrottle(const u8 *payload, u8 payload_len)
         return log_this_sample;
     }
     if (NorthCalib_IsBusy() != 0U) {
-        /* 北向校准独占控制权：保活遥控链路，但吞掉其它按键边沿，避免中途切入巡航或灯控业务。 */
+        /* 北向校准独占控制权：只放行 E 键边沿取消，其它按键不切入巡航或灯控业务。 */
+        if ((g_ship_rt.key != g_ship_rt.last_key) &&
+            (g_ship_rt.key == SHIP_KEY_E_RESERVED)) {
+            NorthCalib_Cancel(NORTH_CALIB_FAIL_USER_CANCEL);
+            SHIP_VIEWER_LOG0(SHIP_TAG, "key action=E north-calib-cancel");
+        }
         g_ship_rt.last_key = g_ship_rt.key;
         AutoDrive_LinkAliveKick();
         return log_this_sample;

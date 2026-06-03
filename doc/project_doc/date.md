@@ -24,6 +24,20 @@
 
 ---
 
+## [2026-06-03] - v1.7.71 D 键北向校准 E 键退出与超时兜底
+
+### Bug 修复
+- **[E 键无法退出校准]** 修复 NorthCalib busy 分支吞掉所有按键边沿的问题：校准期间仍隔离巡航/灯控等业务，但放行 E 键边沿调用 `NorthCalib_Cancel(NORTH_CALIB_FAIL_USER_CANCEL)`，现场可主动退出双击 D 触发的 GPS 北向校准。
+- **[校准超时兜底]** 在 NorthCalib 内新增 `NCAL_TOTAL_TIMEOUT_MS=45000ms` 全流程兜底超时，保留原有对准 `8s` 和直跑 `30s` 超时，避免 CHECK/CALC/SAVE 等短状态异常卡住。
+
+### 文档更新
+- **[交互口径]** 同步 README、AutoDrive/WIRELESS README、`gps_north_calibration_d_key.md`、测试对接文档和 `total.md`：当前真实交互为 `1000ms` 内双击 D 进入校准，校准 busy 期间按 E 退出，不改变旧版空口协议字段。
+
+### 开发者备注
+- 本次只改 NorthCalib 取消/超时和协议层按键门控，不改 GPS 点位格式、不改 EEPROM A/B 地址、不改巡航参数。
+
+---
+
 ## [2026-06-01] - v1.7.70 Code_boweny/User 中文 Doxygen 注释审计
 
 ### 文档更新

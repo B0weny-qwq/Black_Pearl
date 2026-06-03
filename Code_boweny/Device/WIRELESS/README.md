@@ -127,7 +127,7 @@ MainLoop_RunOnce()
 
 - `Wireless_Poll()` 负责把 LT8920 收到的射频载荷推入软件队列。
 - `ShipProtocol_RunScheduler()` 负责从无线队列取 payload，并按旧协议找帧、分发、回 `0x12`；同时它也会内部执行 `AutoDrive_Init()`、`AutoDrive_LinkAliveTick()` 和 `AutoDrive_Poll()`。
-- 同一个调度器里还负责 D 键长按检测、`NorthCalib_RequestStart()` 触发，以及校准期间把最新 `lr/ud/key` 提交给 `NorthCalib_UpdateRemoteInput()`。
+- 同一个调度器里还负责 D 键双击检测、`NorthCalib_RequestStart()` 触发、校准期间 E 键取消，以及把最新 `lr/ud/key` 提交给 `NorthCalib_UpdateRemoteInput()`。
 - 手动开环、手动 yaw 自稳、E 键定速巡航和 GPS 航向保持的最终电机目标统一由 `ShipControl` 仲裁输出。
 - 同一主循环不要同时开启 `ShipProtocol_RunScheduler()` 和 `ShipProtocol_Poll()`，否则会重复消费无线队列。
 
@@ -214,7 +214,7 @@ AA 11 12 <15字节载荷> xor BB
 
 补充：
 
-- D 键北向校准不是新的空口命令号，而是复用 `0x11` 里的 `key` 字段做长按检测。
+- D 键北向校准不是新的空口命令号，而是复用 `0x11` 里的 `key` 字段做 1s 内双击检测；校准 busy 期间 E 键边沿会取消校准。
 - 检测和门控在 `ship_protocol.c`，校准状态机在 `Code_boweny/Device/AutoDrive/NorthCalib.c`。
 - 校准成功后不会改空口协议，只会影响 `MainLoop_GetHeadingDeg100()` 的统一航向输出。
 
@@ -295,17 +295,18 @@ payload[2] = key  // 按键码
 | 按键 | 值 | 当前行为 |
 |------|----|----------|
 | 无按键 | `0xA0` | 不动作 |
-| E | `0xA1` | 带符号油门 `raw_ud-100 >= +60`、`abs(raw_lr-100) <= 8` 且 `abs(gyro_z) <= 8dps` 时进入定速巡航；巡航中再按一次 E 退出；巡航中带符号油门 `raw_ud-100 <= -50` 退出；收到 E 但油门不够会打印 `cruise ignore`，油门够但船体还在转会打印 `cruise ignore reason=not-straight`；同时关闭自动驾驶模式 |
+| E | `0xA1` | 带符号油门 `raw_ud-100 >= +60`、`abs(raw_lr-100) <= 8` 且 `abs(gyro_z) <= 8dps` 时进入定速巡航；巡航中再按一次 E 退出；巡航中带符号油门 `raw_ud-100 <= -50` 退出；NorthCalib busy 期间按 E 取消校准；收到 E 但油门不够会打印 `cruise ignore`，油门够但船体还在转会打印 `cruise ignore reason=not-straight`；同时关闭自动驾驶模式 |
 | A | `0xA3` | 保留船灯入口，但当前未绑定真实灯控 GPIO，只记录 `light-unbound` |
 | B | `0xA5` | 不处理 |
 | C | `0xA7` | 不处理 |
-| D | `0xA9` | 不处理 |
+| D | `0xA9` | 1s 内双击触发 GPS 北向校准；短按或超时的单次点击不触发业务 |
 
 当前控制路径：
 
 - 收到 `0x11` 后刷新 `last_throttle_rx_ms` 和 `last_proto_rx_ms`。
 - 上位机“遥控链路显示在线”按 `AA ... BB` 包活动刷新；这里的 `0x11` 只负责控制输入和电机安全保活。
 - 若 AutoDrive 正忙，只处理按键和链路保活，不接管手动电机。
+- 若 NorthCalib 正忙，只处理 E 键取消和链路保活，不接管手动电机，也不进入巡航/灯控。
 - 非 AutoDrive 状态下，`0x11` 只把 `lr/ud/key` 提交给 `ShipControl_UpdateManualInput()`。
 - 当前工作区的手动控制不是旧版纯开环：`ShipControl` 会做轴滤波、死区曲线、油门/转向混合，并在 `SHIP_YAW_HOLD_MANUAL_ENABLE=1`、前进油门成立且左右输出差小于 20% 时叠加手动航向保持。
 - 如果要求应用层行为严格等同旧版 `WirelessProtoca_Motor_Control()`，需要关闭 `SHIP_YAW_HOLD_MANUAL_ENABLE`。

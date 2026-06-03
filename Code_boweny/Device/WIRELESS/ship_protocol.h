@@ -24,8 +24,8 @@
  * - `GPS_REPORT(0x12)` payload 保持老版 15 字节，不新增字段。
  * - `THROTTLE(0x11)` 空口仍保持老版 `lr/ud/key` 载荷，但应用层已加入
  *   轴滤波、差速映射和可选 yaw-hold 手动直线保持，不再等同旧版纯开环。
- * - D 键长按由本模块检测并转交 `NorthCalib_RequestStart()`；校准期间也由本模块
- *   把最新遥控输入提交给 `NorthCalib_UpdateRemoteInput()`，并隔离
+ * - D 键双击由本模块检测并转交 `NorthCalib_RequestStart()`；校准期间也由本模块
+ *   把最新遥控输入提交给 `NorthCalib_UpdateRemoteInput()`，并允许 E 键主动取消，同时隔离
  *   `0x13/0x14/0x15` 与低电返航触发，避免和 AutoDrive 抢控制权。
  * - `A/C/D` 按键入口保留老版语义，其中 A 键灯控因当前 v1.1 板级引脚未确认，
  *   只保留日志提示，不在本层擅自绑定到未知引脚。

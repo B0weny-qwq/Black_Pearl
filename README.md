@@ -50,7 +50,7 @@ GPS 点位和目标航向计算
     AutoDrive_ApplyAlignHeadingHold()
     AutoDrive_ApplyHeadingHold()
   Code_boweny/Device/AutoDrive/NorthCalib.c
-    D 键长按 GPS 北向校准
+    D 键双击 GPS 北向校准，校准中 E 键可退出
     EEPROM A/B 双槽保存 north_offset_cd
 
 船头自动修正 / yaw-hold / 差速输出
@@ -85,7 +85,7 @@ GPS 原始定位来源
 - “当前 GPS 点到目标点，目标航向怎么算”：看 `autodrive.c` 的 `AutoDrive_UpdateTargetHeading()`。
 - “为什么先原地转船头再往前跑”：看 `autodrive.c` 的 `AUTO_DRIVE_GET_DIRECTION`、`AutoDrive_ApplyAlignHeadingHold()` 和 `ShipControl_RequestGpsAlign()`。
 - “巡航中怎么持续调整船头方向”：看 `autodrive.c` 的 `AutoDrive_ApplyHeadingHold()`，它会调用 `ShipControl_RequestGpsNav(target_heading, base_speed)`。
-- “D 键北向校准怎么触发和保存”：看 `ship_protocol.c` 的 D 键长按检测、`NorthCalib.c` 的 `CHECK_READY -> ALIGN_NORTH -> RUN_STRAIGHT -> CALC -> SAVE`，以及 `STC32G_EEPROM.c` 的 IAP 读写接口。
+- “D 键北向校准怎么触发和保存”：看 `ship_protocol.c` 的 D 键双击检测、E 键取消处理、`NorthCalib.c` 的 `CHECK_READY -> ALIGN_NORTH -> RUN_STRAIGHT -> CALC -> SAVE`，以及 `STC32G_EEPROM.c` 的 IAP 读写接口。
 - “D 键北向校准怎么给别人测和对接”：看 `doc/project_doc/gps_north_calibration_d_key_test_plan.md`，里面按现场准备、标准测试、日志判据、失败原因和回退方式写。
 - “PID 怎么把航向误差变成左右电机差速”：看 `ShipControl.c` 的 `ShipControl_ApplyYawHoldTargetEx()`、`ShipControl_ApplyYawHoldDamping()`、`ShipControl_YawControlToSpeed()`。
 - “最终左右电机命令在哪里写”：看 `ShipControl.c` 里调用 `Motor_SetBothSpeed()` 的位置，再追到 `Code_boweny/Device/Motor/Motor.c`。

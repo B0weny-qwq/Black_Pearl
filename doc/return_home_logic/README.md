@@ -56,7 +56,7 @@ flowchart TD
 
 补充：
 
-- `ShipProtocol_RunScheduler()` 内部还负责 D 键长按检测与 `NorthCalib` busy 门控。
+- `ShipProtocol_RunScheduler()` 内部还负责 D 键双击检测、E 键取消与 `NorthCalib` busy 门控。
 - `AutoDrive_Poll()` 只负责目标航向规划、距离判断和状态推进；不直接维护第二套电机差速逻辑。
 
 ---

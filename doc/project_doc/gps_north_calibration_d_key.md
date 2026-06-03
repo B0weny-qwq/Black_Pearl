@@ -58,12 +58,12 @@ EEPROM 保存上一次可信北向修正
 
 ## 3. 用户操作
 
-使用当前未绑定业务的 D 键作为入口。
+使用当前未绑定普通业务的 D 键作为入口，E 键作为校准中的主动退出键。
 
 建议交互：
 
 ```text
-长按 D 约 1.5s - 2s
+1s 内双击 D
   -> 进入 GPS 北向校准
   -> 船自动朝自己认为的北方对准
   -> 船低速向前直跑约 10m
@@ -76,7 +76,7 @@ EEPROM 保存上一次可信北向修正
 
 ```text
 将船放到空旷水面，确认前方至少 15m 无障碍。
-长按 D 进入北向校准。
+1s 内双击 D 进入北向校准，过程中按 E 可退出。
 船会自动朝北慢速前进一小段，完成后自动停船。
 ```
 
@@ -165,7 +165,7 @@ north_offset_cd ≈ gps_course_cd
 
 - GPS 可用，卫星数不少于 7。
 - 起终点距离不少于 8m，目标距离建议 10m。
-- 校准期间遥控器没有人工打杆接管。
+- 校准期间遥控器没有按 E 取消，也没有人工打杆接管。
 - 校准期间 yaw 角速度不能长期过大。
 - 校准期间航向误差不能长期过大。
 - 船必须处于前进状态，不能原地转圈。
@@ -304,7 +304,7 @@ yaw-hold PID -> 左右电机差速
 
 1. 上电，等待遥控器连接。
 2. 等待 GPS ready 和 heading ready。
-3. 长按 D 进入北向校准。
+3. 在 `1000ms` 内双击 D 进入北向校准。
 4. 观察船是否先原地对准，再低速直跑。
 5. 跑够约 10m 后自动停船。
 6. 查看日志中的 `course`、`avg_heading`、`offset`。
@@ -361,7 +361,7 @@ EEPROM 负责记住可信修正
 
 目标：
 
-- 长按 D 触发一次可控的 GPS 北向校准。
+- 在 `1000ms` 内双击 D 触发一次可控的 GPS 北向校准。
 - 船自动对准自认为的北方，直跑约 10m。
 - 用 GPS 航迹角修正 heading 坐标系。
 - 校验通过后保存 `north_offset_cd`。
@@ -369,13 +369,13 @@ EEPROM 负责记住可信修正
 建议改动：
 
 - 新增 `NorthCalib.c/.h`。
-- 在 `ship_protocol.c` 中对 D 键做长按检测，建议 `1500ms - 2000ms` 触发。
+- 在 `ship_protocol.c` 中对 D 键做双击检测，当前窗口为 `1000ms`。
 - 状态机使用 `CHECK_READY -> ALIGN_NORTH -> RUN_STRAIGHT -> CALC -> SAVE`。
 - 校准期间人工打杆立即退出或失败。
 
 验收标准：
 
-- 长按 D 后进入校准，短按 D 不触发。
+- `1000ms` 内双击 D 后进入校准，单击 D 或超时的两次点击不触发。
 - 校准失败不覆盖旧参数。
 - 成功后日志能看到 `course`、`avg_heading`、`offset`、`save ok`。
 - 重启后自动巡航首航大弧线明显减小。
@@ -594,8 +594,9 @@ Rollback:
 
 - 新增 `Code_boweny/Device/AutoDrive/NorthCalib.c/.h`，独立维护北向校准状态机。
 - `ship_protocol.c`：
-  - D 键短按仍无业务动作。
-  - D 键保持约 `1500ms` 后调用 `NorthCalib_RequestStart()`。
+  - D 键单击仍无业务动作。
+  - D 键在 `1000ms` 窗口内双击后调用 `NorthCalib_RequestStart()`。
+  - 校准 busy 期间 E 键边沿会调用 `NorthCalib_Cancel(NORTH_CALIB_FAIL_USER_CANCEL)`，用于人工退出。
   - 校准 busy 时拦截手动电机更新，并拒绝 `0x13/0x14/0x15` 自动巡航命令，避免抢控制权。
   - `ShipProtocol_RunScheduler()` 继续按 10ms 节拍调用 `AutoDrive_Poll()`，随后调用 `NorthCalib_Poll()`。
 - `User/MainLoop.c/.h`：
@@ -661,11 +662,17 @@ SAVE
 [NCAL] fail reason=...
 ```
 
+超时保护：
+
+- 原地对准超过 `8s` 失败退出。
+- 低速直跑超过 `30s` 失败退出。
+- 全流程超过 `45s` 兜底失败退出，避免 CHECK/CALC/SAVE 等短状态异常卡住。
+
 ### 回退
 
 如现场需要回退 G1：
 
-- 从 `ship_protocol.c` 移除 `NorthCalib` include、D 键长按检测、busy guard 和 `NorthCalib_Poll()` 调用。
+- 从 `ship_protocol.c` 移除 `NorthCalib` include、D 键双击检测、E 键取消、busy guard 和 `NorthCalib_Poll()` 调用。
 - 从 `MainLoop.c/.h` 移除 `MainLoop_GetRawHeadingDeg100()` 对外接口，并让 `MainLoop_GetHeadingDeg100()` 直接返回 `Heading_GetDeg100()`。
 - 从 `RVMDK/STC32G-LIB.uvproj` 移除 `NorthCalib.c/.h`。
 - 保留 EEPROM 中旧记录不会影响回退后运行，因为没有代码再读取该 offset。
@@ -721,7 +728,7 @@ G1 D键 北向校准 NorthCalib GPS 航迹 EEPROM ShipProtocol HandleKey
 
 最小文件集合：
 
-- `Code_boweny/Device/WIRELESS/ship_protocol.c`：D 键长按入口。
+- `Code_boweny/Device/WIRELESS/ship_protocol.c`：D 键双击入口和 E 键取消。
 - `Code_boweny/Device/AutoDrive/autodrive.c`：GPS 点位、bearing、距离计算可复用逻辑。
 - `Code_boweny/Device/Control/ShipControl.c`：`ShipControl_RequestGpsAlign()` 和 `ShipControl_RequestGpsNav()`。
 - `User/MainLoop.c`：`MainLoop_GetHeadingDeg100()` 和 heading ready。

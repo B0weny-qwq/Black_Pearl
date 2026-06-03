@@ -25,7 +25,7 @@ ShipProtocol_RunScheduler()
 低电 / 链路超时:
   -> AutoDrive_TriggerReturn()
 
-D 键长按:
+D 键双击:
   -> NorthCalib_RequestStart()
   -> ShipControl_RequestGpsAlign(0)
   -> ShipControl_RequestGpsNav(0, low_speed)
@@ -81,7 +81,7 @@ int16 NorthCalib_GetHeadingOffsetCd(void);
 当前流程：
 
 ```text
-长按 D 约 1.5s
+1s 内双击 D
   -> CHECK_READY 检查 GPS、heading、遥控链路、AutoDrive/巡航空闲
   -> ALIGN_NORTH 调 ShipControl_RequestGpsAlign(0)
   -> RUN_STRAIGHT 调 ShipControl_RequestGpsNav(0, 500) 直跑约 10m
@@ -94,7 +94,7 @@ int16 NorthCalib_GetHeadingOffsetCd(void);
 - `MainLoop_GetRawHeadingDeg100()` 返回 AHRS 原始融合航向。
 - `MainLoop_GetHeadingDeg100()` 返回 `raw + NorthCalib_GetHeadingOffsetCd()` 后的航向，供手动 yaw 自稳、E 键定速巡航、GPS 自动巡航共用。
 - 直跑采样时以首个原始航向为参考累计最短角差，再还原平均值，避免跨 `0/360°` 或 `±180°` 时把样本算到反向。
-- 校准期间人工打杆、遥控超时、GPS/heading 不 ready、直跑距离不足或 yaw 不稳定都会失败并停船。
+- 校准期间按 E、人工打杆、遥控超时、GPS/heading 不 ready、直跑距离不足或 yaw 不稳定都会失败并停船；对准阶段 `8s`、直跑阶段 `30s`、全流程 `45s` 都有超时退出。
 - 校准 busy 时协议层会拒绝 `0x13/0x14/0x15` 自动巡航命令，并暂停低电自动返航触发，避免 AutoDrive 抢控制权。
 - 新 offset 与已保存 offset 相差超过 `45.00°` 时只临时应用并打印 `offset jump`，不覆盖 EEPROM。
 

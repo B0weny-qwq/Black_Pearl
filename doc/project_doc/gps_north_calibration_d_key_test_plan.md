@@ -18,7 +18,7 @@
 当前 G1 代码行为是：
 
 ```text
-长按 D 约 1.5s
+1s 内双击 D
   -> 检查 GPS / heading / 遥控 / AutoDrive 空闲
   -> 船先对准“系统认为的 0°”
   -> 低速直跑约 10m
@@ -33,7 +33,7 @@
 
 代码入口：
 
-- `Code_boweny/Device/WIRELESS/ship_protocol.c`：D 键长按检测、遥控输入转发、busy 期间命令拦截。
+- `Code_boweny/Device/WIRELESS/ship_protocol.c`：D 键双击检测、E 键取消、遥控输入转发、busy 期间命令拦截。
 - `Code_boweny/Device/AutoDrive/NorthCalib.c`：校准状态机、GPS 航迹角计算、EEPROM 保存。
 - `Code_boweny/Device/AutoDrive/NorthCalib.h`：对外接口和失败原因枚举。
 - `User/MainLoop.c`：`MainLoop_GetRawHeadingDeg100()` 与 `MainLoop_GetHeadingDeg100()`。
@@ -69,7 +69,7 @@
 - GPS ready。
 - Heading ready。
 - AutoDrive 没有正在去钓点/返航。
-- E 键定速巡航未开启。
+- E 键定速巡航未开启；校准过程中按 E 会主动退出本次校准。
 - 遥控摇杆在中位附近，避免一进入校准就被判断为人工接管。
 
 ## 4. 关键参数和判据
@@ -78,11 +78,15 @@
 
 | 项目 | 当前值 | 含义 |
 | --- | --- | --- |
-| D 键长按阈值 | 约 `1500ms` | 触发北向校准 |
+| D 键双击窗口 | `1000ms` | 1s 内双击 D 触发北向校准 |
+| E 键取消 | 按键边沿 | 校准 busy 期间退出本次校准，不保存 |
 | 对准目标 | `0°` | 系统认为的北向 |
 | 对准稳定窗口 | `±5.00°` 连续约 `200ms` | 进入直跑前的放行条件 |
+| 对准超时 | `8s` | 超时失败退出 |
 | 直跑速度 | `500` | 低速直跑基础速度 |
 | 目标距离 | `10m` | 达到后进入计算 |
+| 直跑超时 | `30s` | 超时失败退出 |
+| 总流程超时 | `45s` | 兜底失败退出 |
 | 最小保存距离 | `8m` | 小于该距离失败，不保存 |
 | 最小卫星数 | `7` | 小于该值失败 |
 | offset 跳变保护 | `45.00°` | 与旧值差太大时不覆盖 EEPROM |
@@ -118,7 +122,7 @@
 2. 等待 GPS ready，卫星数不低于 `7`。
 3. 等待 heading ready。
 4. 把船放到空旷水面，确认前方至少 `15m` 无障碍。
-5. 摇杆回中，长按 D 约 `1.5s`。
+5. 摇杆回中，在 `1s` 内双击 D。
 6. 观察船是否先原地对准，再低速直跑。
 7. 船跑到约 `10m` 后应自动停船。
 8. 保存日志，记录 `course/avg_heading/offset/old/dist/conf`。
@@ -148,17 +152,17 @@
 
 ### T3：人工接管退出
 
-目的：确认校准过程中人工打杆能阻止保存。
+目的：确认校准过程中按 E 或人工打杆能阻止保存。
 
 步骤：
 
 1. 按 T1 进入校准。
-2. 在对准或直跑期间轻推前后或左右摇杆，超过中位死区。
+2. 在对准或直跑期间按 E；另一次复测中轻推前后或左右摇杆，超过中位死区。
 3. 观察日志和船体行为。
 
 预期：
 
-- 校准失败退出，原因应接近 `manual override`。
+- 按 E 时校准失败退出，原因应接近 `user cancel`；打杆时原因应接近 `manual override`。
 - 船停止或回到安全控制状态。
 - 不出现 `save ok`。
 - 旧 EEPROM offset 不被覆盖。
@@ -169,7 +173,7 @@
 
 步骤：
 
-1. 在室内、遮挡环境或 GPS 未稳定前长按 D。
+1. 在室内、遮挡环境或 GPS 未稳定前双击 D。
 2. 观察日志。
 
 预期：
@@ -184,7 +188,7 @@
 步骤：
 
 1. 先让 AutoDrive 进入去点或返航状态。
-2. 长按 D。
+2. 双击 D。
 3. 或在 NorthCalib busy 期间发送 `0x13/0x14/0x15`。
 
 预期：
@@ -248,10 +252,11 @@ corrected_heading = wrap360(raw_heading + offset)
 
 | 现象 | 可能原因 | 处理建议 |
 | --- | --- | --- |
-| 长按 D 没反应 | D 键未达到长按阈值，或当前已有任务 busy | 重新长按，确认 AutoDrive/E 键巡航未运行 |
+| 双击 D 没反应 | 两次 D 超过 `1000ms` 窗口，或当前已有任务 busy | 重新在 1s 内双击，确认 AutoDrive/E 键巡航未运行 |
 | `GPS not ready` | 未定位、卫星数不足、经纬度为 0 | 到空旷处等待定位稳定 |
 | `heading not ready` | IMU/AHRS 未完成初始化或磁力计异常 | 先确认上位机 heading 是否稳定 |
 | `remote timeout` | 遥控链路断开或输入快照超时 | 检查配对和遥控电量 |
+| `user cancel` | 校准 busy 期间按下 E | 需要退出时使用；若误触，重新双击 D 开始 |
 | `manual override` | 校准期间摇杆偏离中位 | 摇杆回中后重测 |
 | `distance too short` | 没跑够最小保存距离 | 保证前方空间，避免中途接管 |
 | `yaw unstable` | 浪太大、原地对准不稳、船体持续转动 | 换平稳水域，或后续执行 G2 对准增强 |
@@ -304,7 +309,7 @@ confidence：
 
 软件回退：
 
-- 从 `ship_protocol.c` 移除 D 键长按触发、NorthCalib busy guard 和 `NorthCalib_Poll()` 调用。
+- 从 `ship_protocol.c` 移除 D 键双击触发、E 键取消、NorthCalib busy guard 和 `NorthCalib_Poll()` 调用。
 - 从 `MainLoop.c/.h` 移除 `MainLoop_GetRawHeadingDeg100()` 对外接口，并让 `MainLoop_GetHeadingDeg100()` 直接返回 AHRS 融合航向。
 - 从 Keil 工程移除 `NorthCalib.c/.h`。
 

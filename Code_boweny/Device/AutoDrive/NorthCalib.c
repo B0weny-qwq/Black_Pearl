@@ -8,7 +8,8 @@
  * 统一给 MainLoop 航向接口使用的 `north_offset_cd`。
  *
  * 关键关系：
- * - 触发入口：`ship_protocol.c` 检测 D 键长按后调用 `NorthCalib_RequestStart()`
+ * - 触发入口：`ship_protocol.c` 检测 D 键双击后调用 `NorthCalib_RequestStart()`
+ * - 退出入口：校准 busy 时按 E 调用 `NorthCalib_Cancel(NORTH_CALIB_FAIL_USER_CANCEL)`
  * - 控制执行：复用 `ShipControl_RequestGpsAlign()` / `ShipControl_RequestGpsNav()`
  * - 传感器来源：`GPS_GetState()` + `MainLoop_GetRawHeadingDeg100()`
  * - 输出落点：`MainLoop_GetHeadingDeg100()`
@@ -28,6 +29,8 @@
 /* ==================== 交互与状态机节拍 ==================== */
 /* 遥控输入超时保护，避免校准期间链路断开后继续跑船。 */
 #define NCAL_REMOTE_TIMEOUT_MS           SHIP_THROTTLE_TIMEOUT_MS
+/* 整个校准流程的兜底超时，覆盖 CHECK/CALC/SAVE 等短状态异常卡住的情况。 */
+#define NCAL_TOTAL_TIMEOUT_MS            45000UL
 /* 原地对北最大等待时间。 */
 #define NCAL_ALIGN_TIMEOUT_MS            8000UL
 /* 低速直跑最大等待时间，超过后按失败处理。 */
@@ -96,6 +99,7 @@ typedef struct
     u8 ud;                    /**< 最近一次遥控前后/油门通道值。 */
     u8 key;                   /**< 最近一次遥控按键值。 */
     u32 last_remote_ms;       /**< 最近一次收到遥控输入的时间戳。 */
+    u32 active_start_ms;      /**< 本轮校准流程启动时间戳，用于总超时兜底。 */
     u32 state_start_ms;       /**< 当前状态进入时间戳。 */
     u32 last_log_ms;          /**< 校准过程日志限频时间戳。 */
     int32 start_lat;          /**< 直跑起点纬度，单位 deg*1e7。 */
@@ -204,6 +208,15 @@ void NorthCalib_Poll(void)
 
     now_ms = Task_GetTickMs();
     gps = GPS_GetState();
+
+    if ((g_ncal.state != NCAL_STATE_IDLE) &&
+        (g_ncal.state != NCAL_STATE_DONE) &&
+        (g_ncal.state != NCAL_STATE_FAILED) &&
+        (g_ncal.active_start_ms != 0UL) &&
+        ((now_ms - g_ncal.active_start_ms) >= NCAL_TOTAL_TIMEOUT_MS)) {
+        NorthCalib_Cancel(NORTH_CALIB_FAIL_TIMEOUT);
+        return;
+    }
 
     switch (g_ncal.state) {
     case NCAL_STATE_IDLE:
@@ -450,6 +463,12 @@ void NorthCalib_Poll(void)
 
 void NorthCalib_Cancel(u8 reason)
 {
+    if (g_ncal.initialized == 0U) {
+        NorthCalib_Init();
+    }
+    if (g_ncal.state == NCAL_STATE_IDLE) {
+        return;
+    }
     g_ncal.fail_reason = reason;
     ShipControl_Stop(SHIP_CONTROL_STOP_REASON_GPS_NAV_STOP);
     LOGW(NCAL_TAG, "fail reason=%u", (u16)reason);
@@ -477,6 +496,11 @@ static void NorthCalib_EnterState(u8 state)
     g_ncal.state = state;
     g_ncal.state_start_ms = Task_GetTickMs();
     g_ncal.last_log_ms = 0UL;
+    if (state == NCAL_STATE_CHECK_READY) {
+        g_ncal.active_start_ms = g_ncal.state_start_ms;
+    } else if (state == NCAL_STATE_IDLE) {
+        g_ncal.active_start_ms = 0UL;
+    }
     if (state == NCAL_STATE_ALIGN_NORTH) {
         g_ncal.align_stable_ticks = 0U;
     }
