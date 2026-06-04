@@ -33,6 +33,7 @@
 #define NCAL_TOTAL_TIMEOUT_MS            45000UL
 /* 原地对北最大等待时间。 */
 #define NCAL_ALIGN_TIMEOUT_MS            8000UL
+#define NCAL_ALIGN_FALLBACK_MS           4000UL
 /* 低速直跑最大等待时间，超过后按失败处理。 */
 #define NCAL_RUN_TIMEOUT_MS              30000UL
 /* 日志限频，避免 10ms 调度里刷屏。 */
@@ -95,6 +96,7 @@ typedef struct
     u8 initialized;           /**< 北向校准模块是否已初始化。 */
     u8 state;                 /**< 当前校准状态机状态，见 NorthCalib_State_t。 */
     u8 fail_reason;           /**< 最近一次失败原因，见 NorthCalib_FailReason_t。 */
+    u8 run_start_reason;      /**< 直跑入口来源：0=对北成功，1=对北兜底。 */
     u8 lr;                    /**< 最近一次遥控左右通道值。 */
     u8 ud;                    /**< 最近一次遥控前后/油门通道值。 */
     u8 key;                   /**< 最近一次遥控按键值。 */
@@ -107,6 +109,7 @@ typedef struct
     int32 end_lat;            /**< 直跑终点纬度，单位 deg*1e7。 */
     int32 end_lon;            /**< 直跑终点经度，单位 deg*1e7。 */
     u32 last_sample_seq;      /**< 最近一次处理的 GPS 更新序号。 */
+    u16 run_target_heading_cd; /**< 直跑阶段目标航向，单位 0.01 deg。 */
     int16 heading_ref_cd;     /**< 对北阶段参考航向，单位 0.01 deg。 */
     int32 heading_sum_cd;     /**< 直跑阶段原始航向累计和，单位 0.01 deg。 */
     u16 heading_samples;      /**< 直跑阶段航向累计样本数。 */
@@ -124,6 +127,9 @@ typedef struct
 static NorthCalib_Runtime_t xdata g_ncal;
 
 static void NorthCalib_EnterState(u8 state);
+static void NorthCalib_BeginRunStraight(const GPS_State_t *gps,
+                                        u16 target_heading_cd,
+                                        u8 reason);
 static u8 NorthCalib_GpsReady(const GPS_State_t *gps);
 static u8 NorthCalib_RemoteOnline(u32 now_ms);
 static u8 NorthCalib_ManualOverride(void);
@@ -151,8 +157,10 @@ void NorthCalib_Init(void)
     g_ncal.initialized = 1U;
     g_ncal.state = NCAL_STATE_IDLE;
     g_ncal.fail_reason = NORTH_CALIB_FAIL_NONE;
+    g_ncal.run_start_reason = 0U;
     g_ncal.active_offset_cd = 0;
     g_ncal.pending_offset_cd = 0;
+    g_ncal.run_target_heading_cd = NCAL_TARGET_HEADING_CD;
     g_ncal.has_saved_record = 0U;
     g_ncal.active_record_slot = NCAL_EEPROM_SLOT_A;
     g_ncal.update_count = 0U;
@@ -284,17 +292,12 @@ void NorthCalib_Poll(void)
         }
 
         if (g_ncal.align_stable_ticks >= NCAL_ALIGN_STABLE_TICKS) {
-            g_ncal.start_lat = gps->lat_deg1e7;
-            g_ncal.start_lon = gps->lon_deg1e7;
-            g_ncal.last_sample_seq = gps->update_sequence;
-            g_ncal.heading_ref_cd = 0;
-            g_ncal.heading_sum_cd = 0L;
-            g_ncal.heading_samples = 0U;
-            g_ncal.run_distance_m = 0U;
-            g_ncal.yaw_unstable_ticks = 0U;
-            g_ncal.heading_err_bad_ticks = 0U;
-            ShipControl_ResetYawHoldController();
-            NorthCalib_EnterState(NCAL_STATE_RUN_STRAIGHT);
+            NorthCalib_BeginRunStraight(gps, NCAL_TARGET_HEADING_CD, 0U);
+            return;
+        }
+
+        if ((now_ms - g_ncal.state_start_ms) >= NCAL_ALIGN_FALLBACK_MS) {
+            NorthCalib_BeginRunStraight(gps, MainLoop_GetHeadingDeg100(), 1U);
             return;
         }
 
@@ -320,7 +323,7 @@ void NorthCalib_Poll(void)
             return;
         }
 
-        ShipControl_RequestGpsNav(NCAL_TARGET_HEADING_CD, NCAL_RUN_BASE_SPEED);
+        ShipControl_RequestGpsNav(g_ncal.run_target_heading_cd, NCAL_RUN_BASE_SPEED);
         raw_heading_cd = MainLoop_GetRawHeadingDeg100();
         raw_heading_signed_cd =
             NorthCalib_WrapSignedCd((int32)raw_heading_cd);
@@ -342,7 +345,7 @@ void NorthCalib_Poll(void)
         }
 
         heading_error_cd =
-            NorthCalib_WrapSignedCd((int32)NCAL_TARGET_HEADING_CD -
+            NorthCalib_WrapSignedCd((int32)g_ncal.run_target_heading_cd -
                                     (int32)MainLoop_GetHeadingDeg100());
         if ((heading_error_cd > (int16)NCAL_HEADING_ERR_LIMIT_CD) ||
             (heading_error_cd < (int16)(-NCAL_HEADING_ERR_LIMIT_CD))) {
@@ -362,9 +365,10 @@ void NorthCalib_Poll(void)
 
         if ((now_ms - g_ncal.last_log_ms) >= NCAL_LOG_PERIOD_MS) {
             g_ncal.last_log_ms = now_ms;
-            LOGI(NCAL_TAG, "run dist=%u heading=%u gps=%ld/%ld",
+            LOGI(NCAL_TAG, "run dist=%u heading=%u tgt=%u gps=%ld/%ld",
                  g_ncal.run_distance_m,
                  MainLoop_GetHeadingDeg100(),
+                 g_ncal.run_target_heading_cd,
                  (long)gps->lat_deg1e7,
                  (long)gps->lon_deg1e7);
         }
@@ -463,15 +467,37 @@ void NorthCalib_Poll(void)
 
 void NorthCalib_Cancel(u8 reason)
 {
+    const GPS_State_t *gps;
+    u8 sat_count;
+
     if (g_ncal.initialized == 0U) {
         NorthCalib_Init();
     }
     if (g_ncal.state == NCAL_STATE_IDLE) {
         return;
     }
+
+    gps = GPS_GetState();
+    sat_count = 0U;
+    if (gps != 0) {
+        sat_count = (gps->satellites_used_gsa > 0U) ?
+                    gps->satellites_used_gsa :
+                    gps->satellites_used;
+    }
+
     g_ncal.fail_reason = reason;
     ShipControl_Stop(SHIP_CONTROL_STOP_REASON_GPS_NAV_STOP);
-    LOGW(NCAL_TAG, "fail reason=%u", (u16)reason);
+    LOGW(NCAL_TAG, "fail r=%u st=%u rs=%u lr=%u ud=%u hd=%u gps=%u sat=%u dist=%u tgt=%u",
+         (u16)reason,
+         (u16)g_ncal.state,
+         (u16)g_ncal.run_start_reason,
+         (u16)g_ncal.lr,
+         (u16)g_ncal.ud,
+         MainLoop_GetHeadingDeg100(),
+         (u16)((gps != 0) ? gps->fix_valid : 0U),
+         (u16)sat_count,
+         g_ncal.run_distance_m,
+         g_ncal.run_target_heading_cd);
     NorthCalib_EnterState(NCAL_STATE_FAILED);
 }
 
@@ -504,6 +530,37 @@ static void NorthCalib_EnterState(u8 state)
     if (state == NCAL_STATE_ALIGN_NORTH) {
         g_ncal.align_stable_ticks = 0U;
     }
+}
+
+static void NorthCalib_BeginRunStraight(const GPS_State_t *gps,
+                                        u16 target_heading_cd,
+                                        u8 reason)
+{
+    if (gps == 0) {
+        NorthCalib_Cancel(NORTH_CALIB_FAIL_GPS_NOT_READY);
+        return;
+    }
+
+    g_ncal.run_start_reason = reason;
+    g_ncal.start_lat = gps->lat_deg1e7;
+    g_ncal.start_lon = gps->lon_deg1e7;
+    g_ncal.end_lat = gps->lat_deg1e7;
+    g_ncal.end_lon = gps->lon_deg1e7;
+    g_ncal.last_sample_seq = gps->update_sequence;
+    g_ncal.run_target_heading_cd =
+        NorthCalib_WrapUnsignedCd((int32)target_heading_cd);
+    g_ncal.heading_ref_cd = 0;
+    g_ncal.heading_sum_cd = 0L;
+    g_ncal.heading_samples = 0U;
+    g_ncal.run_distance_m = 0U;
+    g_ncal.yaw_unstable_ticks = 0U;
+    g_ncal.heading_err_bad_ticks = 0U;
+    ShipControl_ResetYawHoldController();
+    LOGI(NCAL_TAG, "run start tgt=%u reason=%u heading=%u",
+         g_ncal.run_target_heading_cd,
+         (u16)g_ncal.run_start_reason,
+         MainLoop_GetHeadingDeg100());
+    NorthCalib_EnterState(NCAL_STATE_RUN_STRAIGHT);
 }
 
 static u8 NorthCalib_GpsReady(const GPS_State_t *gps)
