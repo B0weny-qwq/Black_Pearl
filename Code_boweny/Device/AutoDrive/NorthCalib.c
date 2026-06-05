@@ -30,10 +30,9 @@
 /* 遥控输入超时保护，避免校准期间链路断开后继续跑船。 */
 #define NCAL_REMOTE_TIMEOUT_MS           SHIP_THROTTLE_TIMEOUT_MS
 /* 整个校准流程的兜底超时，覆盖 CHECK/CALC/SAVE 等短状态异常卡住的情况。 */
-#define NCAL_TOTAL_TIMEOUT_MS            45000UL
+#define NCAL_TOTAL_TIMEOUT_MS            60000UL
 /* 原地对北最大等待时间。 */
-#define NCAL_ALIGN_TIMEOUT_MS            8000UL
-#define NCAL_ALIGN_FALLBACK_MS           4000UL
+#define NCAL_ALIGN_TIMEOUT_MS            20000UL
 /* 低速直跑最大等待时间，超过后按失败处理。 */
 #define NCAL_RUN_TIMEOUT_MS              30000UL
 /* 日志限频，避免 10ms 调度里刷屏。 */
@@ -46,7 +45,6 @@
 #define NCAL_MIN_SAVE_DISTANCE_M         8U
 #define NCAL_MIN_SATELLITES              7U
 #define NCAL_ALIGN_EXIT_ERROR_CD         500
-#define NCAL_ALIGN_STABLE_TICKS          20U
 #define NCAL_YAW_UNSTABLE_DPS            45
 #define NCAL_YAW_UNSTABLE_LIMIT_TICKS    80U
 #define NCAL_HEADING_ERR_LIMIT_CD        1500
@@ -68,7 +66,7 @@ typedef enum
     NCAL_STATE_IDLE = 0,
     /** 检查 GPS、航向、遥控链路和控制权。 */
     NCAL_STATE_CHECK_READY,
-    /** 原地转向，直到修正航向稳定在真北附近。 */
+    /** 原地转向，直到修正航向进入真北附近或对北超时。 */
     NCAL_STATE_ALIGN_NORTH,
     /** 低速直跑并累计原始航向样本。 */
     NCAL_STATE_RUN_STRAIGHT,
@@ -96,7 +94,7 @@ typedef struct
     u8 initialized;           /**< 北向校准模块是否已初始化。 */
     u8 state;                 /**< 当前校准状态机状态，见 NorthCalib_State_t。 */
     u8 fail_reason;           /**< 最近一次失败原因，见 NorthCalib_FailReason_t。 */
-    u8 run_start_reason;      /**< 直跑入口来源：0=对北成功，1=对北兜底。 */
+    u8 run_start_reason;      /**< 直跑入口来源：0=对北成功，1=对北20s超时。 */
     u8 lr;                    /**< 最近一次遥控左右通道值。 */
     u8 ud;                    /**< 最近一次遥控前后/油门通道值。 */
     u8 key;                   /**< 最近一次遥控按键值。 */
@@ -114,7 +112,6 @@ typedef struct
     int32 heading_sum_cd;     /**< 直跑阶段原始航向累计和，单位 0.01 deg。 */
     u16 heading_samples;      /**< 直跑阶段航向累计样本数。 */
     u16 run_distance_m;       /**< 当前 GPS 航迹距离，单位 m。 */
-    u16 align_stable_ticks;   /**< 对北误差稳定连续 tick 数。 */
     u16 yaw_unstable_ticks;   /**< 偏航角速度异常连续 tick 数。 */
     u16 heading_err_bad_ticks; /**< 航向误差超限连续 tick 数。 */
     int16 active_offset_cd;   /**< 当前生效的北向偏移，单位 0.01 deg。 */
@@ -275,15 +272,6 @@ void NorthCalib_Poll(void)
         heading_error_cd =
             NorthCalib_WrapSignedCd((int32)NCAL_TARGET_HEADING_CD -
                                     (int32)MainLoop_GetHeadingDeg100());
-        if ((heading_error_cd <= (int16)NCAL_ALIGN_EXIT_ERROR_CD) &&
-            (heading_error_cd >= (int16)(-NCAL_ALIGN_EXIT_ERROR_CD))) {
-            if (g_ncal.align_stable_ticks < 255U) {
-                g_ncal.align_stable_ticks++;
-            }
-        } else {
-            g_ncal.align_stable_ticks = 0U;
-        }
-
         if ((now_ms - g_ncal.last_log_ms) >= NCAL_LOG_PERIOD_MS) {
             g_ncal.last_log_ms = now_ms;
             LOGI(NCAL_TAG, "align heading=%u err=%d",
@@ -291,18 +279,17 @@ void NorthCalib_Poll(void)
                  heading_error_cd);
         }
 
-        if (g_ncal.align_stable_ticks >= NCAL_ALIGN_STABLE_TICKS) {
+        if ((heading_error_cd <= (int16)NCAL_ALIGN_EXIT_ERROR_CD) &&
+            (heading_error_cd >= (int16)(-NCAL_ALIGN_EXIT_ERROR_CD))) {
             NorthCalib_BeginRunStraight(gps, NCAL_TARGET_HEADING_CD, 0U);
             return;
         }
 
-        if ((now_ms - g_ncal.state_start_ms) >= NCAL_ALIGN_FALLBACK_MS) {
-            NorthCalib_BeginRunStraight(gps, MainLoop_GetHeadingDeg100(), 1U);
-            return;
-        }
-
         if ((now_ms - g_ncal.state_start_ms) >= NCAL_ALIGN_TIMEOUT_MS) {
-            NorthCalib_Cancel(NORTH_CALIB_FAIL_TIMEOUT);
+            LOGW(NCAL_TAG, "align timeout heading=%u err=%d",
+                 MainLoop_GetHeadingDeg100(),
+                 heading_error_cd);
+            NorthCalib_BeginRunStraight(gps, MainLoop_GetHeadingDeg100(), 1U);
         }
         return;
 
@@ -526,9 +513,6 @@ static void NorthCalib_EnterState(u8 state)
         g_ncal.active_start_ms = g_ncal.state_start_ms;
     } else if (state == NCAL_STATE_IDLE) {
         g_ncal.active_start_ms = 0UL;
-    }
-    if (state == NCAL_STATE_ALIGN_NORTH) {
-        g_ncal.align_stable_ticks = 0U;
     }
 }
 
