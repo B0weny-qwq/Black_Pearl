@@ -15,7 +15,7 @@
         <TargetCommonOption>
           <Device>STC32G12K128 Series</Device>
           <Vendor>STC</Vendor>
-          <Cpu>IRAM(0-0xFFF) XRAM(0x10000-0x11FFF) IROM(0xFE0000-0xFFFFFF) CLOCK(35000000)</Cpu>
+          <Cpu>IRAM(0-0xFFF) XRAM(0x10000-0x11FFF) IROM(0xFE1400-0xFFFFFF) CLOCK(35000000)</Cpu>
           <FlashUtilSpec></FlashUtilSpec>
           <StartupFile>"LIB\STARTUP251.ASM" ("80251 Startup Code")</StartupFile>
           <FlashDriverDll></FlashDriverDll>
@@ -211,8 +211,8 @@
               </RCB>
               <IROM>
                 <Type>1</Type>
-                <StartAddress>0xfe0000</StartAddress>
-                <Size>0x20000</Size>
+                <StartAddress>0xfe1400</StartAddress>
+                <Size>0x1ec00</Size>
               </IROM>
               <IRAM>
                 <Type>0</Type>
