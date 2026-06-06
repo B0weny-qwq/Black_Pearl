@@ -389,12 +389,20 @@ static const char *ShipProtocol_FishNavResultName(u8 result)
     switch (result) {
     case AUTODRIVE_FISH_CMD_BUSY:
         return "busy";
+    case AUTODRIVE_FISH_CMD_SAVED_WAIT:
+        return "saved-wait";
+    case AUTODRIVE_FISH_CMD_REPEAT_WAIT:
+        return "repeat-wait";
+    case AUTODRIVE_FISH_CMD_CONFIRM_READY:
+        return "confirm-ready";
     case AUTODRIVE_FISH_CMD_REJECT_DISTANCE:
         return "reject-distance";
     case AUTODRIVE_FISH_CMD_STARTED:
         return "start";
     case AUTODRIVE_FISH_CMD_INVALID:
         return "invalid";
+    case AUTODRIVE_FISH_CMD_REJECT_FULL:
+        return "reject-full";
     default:
         return "unknown";
     }

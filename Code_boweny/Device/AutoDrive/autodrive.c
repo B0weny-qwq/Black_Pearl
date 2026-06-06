@@ -72,6 +72,12 @@
 /* 对准放行容差，单位 0.01 度；500 表示目标航向 +/-5.00 度。 */
 #define AUTODRIVE_ALIGN_EXIT_ERROR_CD      500
 
+/* 0x14 去钓点确认状态机：同坐标重发必须静默 1s 后再发才算确认。 */
+#define AUTODRIVE_FISH_CONFIRM_QUIET_MS    1000UL
+#define AUTODRIVE_FISH_PENDING_IDLE        0U
+#define AUTODRIVE_FISH_PENDING_REPEAT      1U
+#define AUTODRIVE_FISH_PENDING_ARMED       2U
+
 static u8 g_autoDrive_switch = 0U;
 static u8 g_autoDrive_state = AUTO_DRIVE_IDLE;
 static u8 g_autoDrive_mode = AUTO_DRIVE_CLOSE;
@@ -88,6 +94,10 @@ static AutoDrive_FishPointStore_t g_fish_points;
 static u8 g_last_fish_cmd_index = 0U;
 static u8 g_last_fish_save_result = AUTODRIVE_FISH_SAVE_NONE;
 static AutoDrive_ReturnConfig_t g_autodrv_cfg;
+static AutoDrive_PointRaw_t g_fish_pending_point;
+static u8 g_fish_pending_state = AUTODRIVE_FISH_PENDING_IDLE;
+static u8 g_fish_pending_index = 0U;
+static u32 g_fish_pending_last_rx_ms = 0UL;
 
 static u8 g_destination_direction = POSITION_EAST;
 static u8 g_nowrun_direction = POSITION_EAST;
@@ -105,6 +115,7 @@ static u32 g_last_link_tick_ms = 0UL;
 static u8 g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
 
 static u16 AutoDrive_GetStartHeadingDeg(void);
+static void AutoDrive_ResetFishPending(void);
 static u16 AutoDrive_ReadU16Wire(const u8 *data_m)
 {
     /* 遥控器协议中的 0x13/0x14/0x15 点位字段按大端字节序发送。 */
@@ -298,8 +309,69 @@ static void AutoDrive_ClearFishPoints(void)
         AutoDrive_ClearPoint(&g_fish_points.point[i]);
     }
     g_fish_points.valid_mask = 0U;
+    g_fish_points.confirmed_mask = 0U;
     g_fish_points.next_index = 0U;
     g_fish_points.latest_index = 0xFFU;
+}
+
+static void AutoDrive_ResetFishPending(void)
+{
+    AutoDrive_ClearPoint(&g_fish_pending_point);
+    g_fish_pending_state = AUTODRIVE_FISH_PENDING_IDLE;
+    g_fish_pending_index = 0U;
+    g_fish_pending_last_rx_ms = 0UL;
+}
+
+static u8 AutoDrive_FishPointConfirmed(u8 index)
+{
+    u8 slot;
+
+    if ((index == 0U) || (index > AUTODRIVE_FISH_POINT_COUNT)) {
+        return 0U;
+    }
+
+    slot = (u8)(index - 1U);
+    return ((g_fish_points.confirmed_mask & (u8)(1U << slot)) != 0U) ? 1U : 0U;
+}
+
+static void AutoDrive_ConfirmFishPoint(u8 index)
+{
+    u8 slot;
+
+    if ((index == 0U) || (index > AUTODRIVE_FISH_POINT_COUNT)) {
+        return;
+    }
+
+    slot = (u8)(index - 1U);
+    g_fish_points.confirmed_mask |= (u8)(1U << slot);
+}
+
+static void AutoDrive_FishPendingStart(const AutoDrive_PointRaw_t *point,
+                                       u8 index,
+                                       u32 now_ms)
+{
+    if ((point == 0) || (index == 0U)) {
+        AutoDrive_ResetFishPending();
+        return;
+    }
+
+    AutoDrive_CopyPoint(&g_fish_pending_point, point);
+    g_fish_pending_state = AUTODRIVE_FISH_PENDING_REPEAT;
+    g_fish_pending_index = index;
+    g_fish_pending_last_rx_ms = now_ms;
+}
+
+static void AutoDrive_FishPendingPoll(u32 now_ms)
+{
+    if (g_fish_pending_state != AUTODRIVE_FISH_PENDING_REPEAT) {
+        return;
+    }
+    if ((now_ms - g_fish_pending_last_rx_ms) >= AUTODRIVE_FISH_CONFIRM_QUIET_MS) {
+        g_fish_pending_state = AUTODRIVE_FISH_PENDING_ARMED;
+        log_info((u8 *)"AD",
+                 (u8 *)"fish confirm-ready idx=%u",
+                 (u16)g_fish_pending_index);
+    }
 }
 
 static u8 AutoDrive_FishPointsReady(void)
@@ -758,6 +830,7 @@ void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
     }
 
     AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
+    AutoDrive_ResetFishPending();
     g_autoDrive_state = AUTO_DRIVE_START;
     g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
     g_autoDrive_fail_flag = 0U;
@@ -765,6 +838,7 @@ void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
 
 static u8 AutoDrive_StartFishPoint(const AutoDrive_PointRaw_t *point)
 {
+    AutoDrive_ResetFishPending();
     AutoDrive_CopyPoint(&g_fish_position, point);
     if (AutoDrive_IsCanActive(&g_fish_position) == 0U) {
         return AUTODRIVE_FISH_CMD_REJECT_DISTANCE;
@@ -782,6 +856,7 @@ u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
     AutoDrive_PointRaw_t rx_point;
     u8 matched_index;
     u8 stored_index;
+    u32 now_ms;
 
     AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT);
     g_last_fish_cmd_index = 0U;
@@ -797,20 +872,48 @@ u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
         return AUTODRIVE_FISH_CMD_INVALID;
     }
 
+    now_ms = Task_GetTickMs();
+    AutoDrive_FishPendingPoll(now_ms);
+
     matched_index = AutoDrive_FindFishPointIndex(&rx_point);
     if (matched_index != 0U) {
+        g_last_fish_cmd_index = matched_index;
         g_last_fish_save_result = AUTODRIVE_FISH_SAVE_EXISTS;
+        if (AutoDrive_FishPointConfirmed(matched_index) == 0U) {
+            if ((g_fish_pending_index == matched_index) &&
+                (AutoDrive_PointRawEqual(&g_fish_pending_point, &rx_point) != 0U)) {
+                if (g_fish_pending_state == AUTODRIVE_FISH_PENDING_ARMED) {
+                    AutoDrive_ConfirmFishPoint(matched_index);
+                    AutoDrive_ResetFishPending();
+                    return AutoDrive_StartFishPoint(&rx_point);
+                }
+
+                g_fish_pending_state = AUTODRIVE_FISH_PENDING_REPEAT;
+                g_fish_pending_last_rx_ms = now_ms;
+                return AUTODRIVE_FISH_CMD_REPEAT_WAIT;
+            }
+
+            AutoDrive_FishPendingStart(&rx_point, matched_index, now_ms);
+            return AUTODRIVE_FISH_CMD_SAVED_WAIT;
+        }
     } else {
         if (AutoDrive_FishPointsReady() == 0U) {
             stored_index = AutoDrive_StoreFishPoint(&rx_point);
             if (stored_index != 0xFFU) {
                 matched_index = (u8)(stored_index + 1U);
+                g_last_fish_cmd_index = matched_index;
                 g_last_fish_save_result = AUTODRIVE_FISH_SAVE_STORED;
+                AutoDrive_FishPendingStart(&rx_point, matched_index, now_ms);
+                return AUTODRIVE_FISH_CMD_SAVED_WAIT;
             } else {
                 g_last_fish_save_result = AUTODRIVE_FISH_SAVE_FULL_TEMP;
+                AutoDrive_ResetFishPending();
+                return AUTODRIVE_FISH_CMD_REJECT_FULL;
             }
         } else {
             g_last_fish_save_result = AUTODRIVE_FISH_SAVE_FULL_TEMP;
+            AutoDrive_ResetFishPending();
+            return AUTODRIVE_FISH_CMD_REJECT_FULL;
         }
     }
 
@@ -831,6 +934,7 @@ void AutoDrive_TriggerReturnWithReason(u8 reason)
         if (AutoDrive_IsCanActive(&g_autodrv_cfg.ret_point) != 0U) {
             AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
             AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
+            AutoDrive_ResetFishPending();
             g_autoDrive_state = AUTO_DRIVE_START;
             g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
         }
@@ -1197,6 +1301,7 @@ void AutoDrive_Init(void)
     AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
     AutoDrive_ClearPoint(&g_fish_position);
     AutoDrive_ClearFishPoints();
+    AutoDrive_ResetFishPending();
     g_last_fish_cmd_index = 0U;
     g_last_fish_save_result = AUTODRIVE_FISH_SAVE_NONE;
 
@@ -1263,6 +1368,7 @@ void AutoDrive_Poll(void)
         return;
     }
     g_last_poll_tick_ms = now_ms;
+    AutoDrive_FishPendingPoll(now_ms);
 
     gps = GPS_GetState();
     if ((gps != 0) && (g_autoDrive_state == AUTO_DRIVE_IDLE)) {

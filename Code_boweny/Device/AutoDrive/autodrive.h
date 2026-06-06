@@ -57,9 +57,13 @@ typedef struct
 #define AUTODRIVE_FISH_POINT_COUNT      5U
 
 #define AUTODRIVE_FISH_CMD_BUSY            0U
+#define AUTODRIVE_FISH_CMD_SAVED_WAIT      1U
+#define AUTODRIVE_FISH_CMD_REPEAT_WAIT     2U
+#define AUTODRIVE_FISH_CMD_CONFIRM_READY   3U
 #define AUTODRIVE_FISH_CMD_REJECT_DISTANCE 4U
 #define AUTODRIVE_FISH_CMD_STARTED         5U
 #define AUTODRIVE_FISH_CMD_INVALID         6U
+#define AUTODRIVE_FISH_CMD_REJECT_FULL     7U
 
 #define AUTODRIVE_FISH_SAVE_NONE           0U
 #define AUTODRIVE_FISH_SAVE_STORED         1U
@@ -78,6 +82,7 @@ typedef struct
 {
     AutoDrive_PointRaw_t point[AUTODRIVE_FISH_POINT_COUNT]; /**< 钓点环形存储槽。 */
     u8 valid_mask;                                          /**< 钓点有效位图，bitN 对应 point[N]。 */
+    u8 confirmed_mask;                                      /**< 已确认可导航的钓点位图。 */
     u8 next_index;                                          /**< 下一次写入的钓点槽位。 */
     u8 latest_index;                                        /**< 最近一次成功写入的钓点槽位。 */
 } AutoDrive_FishPointStore_t;
