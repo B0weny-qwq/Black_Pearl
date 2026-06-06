@@ -54,38 +54,17 @@ typedef struct
 } AutoDrive_PointRaw_t;
 
 #define AUTODRIVE_LEGACY_POINT_WIRE_LEN 10U
-#define AUTODRIVE_FISH_POINT_COUNT      5U
 
 #define AUTODRIVE_FISH_CMD_BUSY            0U
-#define AUTODRIVE_FISH_CMD_SAVED_WAIT      1U
-#define AUTODRIVE_FISH_CMD_REPEAT_WAIT     2U
-#define AUTODRIVE_FISH_CMD_CONFIRM_READY   3U
 #define AUTODRIVE_FISH_CMD_REJECT_DISTANCE 4U
 #define AUTODRIVE_FISH_CMD_STARTED         5U
 #define AUTODRIVE_FISH_CMD_INVALID         6U
-#define AUTODRIVE_FISH_CMD_REJECT_FULL     7U
-
-#define AUTODRIVE_FISH_SAVE_NONE           0U
-#define AUTODRIVE_FISH_SAVE_STORED         1U
-#define AUTODRIVE_FISH_SAVE_EXISTS         2U
-#define AUTODRIVE_FISH_SAVE_FULL_TEMP      3U
-#define AUTODRIVE_FISH_SAVE_BUSY           4U
-#define AUTODRIVE_FISH_SAVE_INVALID        5U
 
 typedef struct
 {
     u8 auto_ret_onoff;              /**< 自动返航开关状态，1=允许自动返航。 */
     AutoDrive_PointRaw_t ret_point; /**< 保存的返航目标点。 */
 } AutoDrive_ReturnConfig_t;
-
-typedef struct
-{
-    AutoDrive_PointRaw_t point[AUTODRIVE_FISH_POINT_COUNT]; /**< 钓点环形存储槽。 */
-    u8 valid_mask;                                          /**< 钓点有效位图，bitN 对应 point[N]。 */
-    u8 confirmed_mask;                                      /**< 已确认可导航的钓点位图。 */
-    u8 next_index;                                          /**< 下一次写入的钓点槽位。 */
-    u8 latest_index;                                        /**< 最近一次成功写入的钓点槽位。 */
-} AutoDrive_FishPointStore_t;
 
 typedef enum
 {
@@ -139,9 +118,6 @@ void AutoDrive_GetStoredConfig(AutoDrive_ReturnConfig_t *cfg);
 void AutoDrive_GetCurrentPointRaw(AutoDrive_PointRaw_t *point);
 u8 AutoDrive_GetReturnPositionRaw(AutoDrive_PointRaw_t *point);
 u8 AutoDrive_GetFishPositionRaw(AutoDrive_PointRaw_t *point);
-u8 AutoDrive_GetFishPositionByIndexRaw(u8 index, AutoDrive_PointRaw_t *point);
-u8 AutoDrive_GetLastFishCommandIndex(void);
-u8 AutoDrive_GetLastFishSaveResult(void);
 void AutoDrive_GetDebugSnapshot(AutoDrive_DebugSnapshot_t *snapshot);
 
 u16 AutoDrive_GetDistanceNowToDestination(const u8 *nowpositionData,

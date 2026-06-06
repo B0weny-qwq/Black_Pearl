@@ -127,14 +127,14 @@ MainLoop_RunOnce()
 | `0x11` 遥控 | payload 仍为 `lr, ud, key`；当前应用层叠加手动 yaw-hold，非旧版纯开环，且在小转向输入下会直接输出电机 PWM |
 | `0x12` GPS 回传 | 固定 15 字节：`sat, angle, E, lon1, lon2, W, lat1, lat2, power_level, autodrive_status` |
 | `0x13/0x14` 点位 | 10 字节旧格式：`lon_dir, lon1, lon2, lat_dir, lat1, lat2` |
-| `0x15` 自动返航配置 | 正常 11 字节帧为 `switch + 10 字节点位`，写入当前 MCU flash 配置区 |
+| `0x15` 自动返航配置 | 正常 11 字节帧为 `switch + 10 字节点位`；有效点位写入返航原点，开关只在本次运行 RAM 中生效 |
 | 返航/钓点巡航自稳 | `AutoDrive` 在 GPS `update_sequence` 变化时用最新当前点和目标点重算 `target_heading_cd` 与距离；电机修正统一提交给 `ShipControl_RequestGpsNav()`，必须复用 yaw-hold PID，不允许定时左/右转 |
 | 电量回传 | 使用当前工程检测电压 ADC 通道 `ADC_CH8`，按旧版电量等级 `0..4` 回传 |
 | 低电返航 | 电量等级 `0`、600 tick、自动驾驶关闭、当前油门小于 10 时触发返航入口 |
 
 ## 6. 存储与已知差异
 
-- 当前无外置 EEPROM；自动返航配置通过 `AutoDriveCfg_Save()` 写入 STC flash/EEPROM 区，地址为 `0x0001F800`；D 键北向校准记录单独写入 `0x000200/0x000400` A/B 双槽。
+- 当前无外置 EEPROM；`AutoDriveCfg_Save()` 只把返航原点写入 STC flash/EEPROM 区 `0x000600`，钓点不保存，自动返航开关只在运行期 RAM 中生效；D 键北向校准记录单独写入 `0x000200/0x000400` A/B 双槽。
 - `0x15` 短包行为比旧版更防御：短包只保存开关，只有完整 `1 + 10` 字节时才更新返航点；正常旧遥控器完整帧不受影响。
 - 自稳路径是工程级公共能力，不是手动遥控专用能力；手动直线自稳、定速巡航、GPS 返航、GPS 钓点巡航都必须共用 `ShipControl` / yaw-hold PID 输出链。
 - 当前文档按工作区真实状态记录；如果后续要发布“严格旧版应用行为”，需要先关闭 `SHIP_YAW_HOLD_MANUAL_ENABLE` 或移除手动自稳门控，再更新本文档。

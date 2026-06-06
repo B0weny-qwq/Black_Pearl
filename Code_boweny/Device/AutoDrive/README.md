@@ -60,8 +60,8 @@ u8 AutoDrive_SetFishPositionRaw(const u8 *data_m);
 void AutoDrive_SetSwitchRaw(const u8 *data_m, u8 len);
 void AutoDrive_GetStoredConfig(AutoDrive_ReturnConfig_t *cfg);
 void AutoDrive_GetCurrentPointRaw(AutoDrive_PointRaw_t *point);
-u8 AutoDrive_GetFishPositionByIndexRaw(u8 index, AutoDrive_PointRaw_t *point);
-u8 AutoDrive_GetLastFishCommandIndex(void);
+u8 AutoDrive_GetReturnPositionRaw(AutoDrive_PointRaw_t *point);
+u8 AutoDrive_GetFishPositionRaw(AutoDrive_PointRaw_t *point);
 
 void AutoDrive_LinkAliveTick(void);
 void AutoDrive_LinkAliveKick(void);
@@ -250,25 +250,21 @@ lat_frac[BE]
 
 对应命令：
 
-- `0x13` 设置返航点到 RAM，并在条件满足时尝试返航
-- `0x14` 接收钓点坐标，按收到顺序自动分配到 `1..5` 号 RAM 钓点
-- `0x15` 更新 RAM 中的自动返航开关，若长度至少 `11` 字节，同时更新 RAM 返航点；开关不为 `0x30` 时立即尝试返航
+- `0x13` 设置返航原点；坐标有效时写入 EEPROM，并在条件满足时尝试返航。
+- `0x14` 接收钓点坐标；不保存、不编号、不匹配历史表，只把本帧坐标作为本次去点目标。
+- `0x15` 更新运行期自动返航开关；若长度至少 `11` 字节且点位有效，同时更新并持久化返航原点；开关不为 `0x30` 时立即尝试返航。
 
-`0x14` 钓点鉴别逻辑：
+`0x14` 钓点逻辑：
 
-- 最多保存 5 个钓点，编号按遥控器先后发来的顺序自动分配为 `1..5`。
-- 不要求一次收满 5 个钓点；只有 1 号钓点有效时，也可以正常去 1 号。
-- 第一次收到未知有效坐标时会保存到下一个空槽，并同时按当前收到坐标尝试进入去钓点流程。
-- 同一坐标重复发送时不会重复占用槽位，但仍会按该坐标尝试进入去钓点流程。
-- 已保存坐标再次收到时会匹配对应编号，并按该坐标尝试进入去钓点流程。
-- 已保存的钓点在本次上电期间一直保留；去过一次、到点停车、手动停止、超时失败或切换模式都不会删除 1..5 表。
-- 5 个槽位已满后，未匹配任何已保存钓点的新坐标不会写入 1..5 表，但仍会作为本次临时目标尝试前往；`idx=0` 表示未入库。
-- `AutoDrive_GetLastFishCommandIndex()` 记录最近一次 `0x14` 保存或匹配到的钓点编号；`AutoDrive_GetLastFishSaveResult()` 记录保存结果，供无线日志打印。
+- 船端不维护 `1..5` 钓点表，也不在 Flash/EEPROM 保存钓点。
+- 每次 `0x14` 都只消费遥控器当前下发的 10 字节点位。
+- AutoDrive 非空闲时返回 `busy`，不会覆盖当前目标。
+- 坐标无效返回 `invalid`；GPS/距离/航向条件不满足返回 `reject-distance`；满足条件返回 `start`。
+- 到点、手动停止、超时失败或重新上电后，旧 `0x14` 坐标不会作为可复用钓点保留。
 
 ## 当前配置存储
 
-当前自动返航配置是 RAM-only。
-`AutoDriveCfg_Load()` / `AutoDriveCfg_Save()` 仍保留接口，但只读写 `autodrive_cfg.c` 内部 RAM 变量，不再擦写 STC flash/EEPROM。
+Flash/EEPROM 只保存返航原点。`AutoDriveCfg_Load()` / `AutoDriveCfg_Save()` 仍保留接口，内部使用 STC EEPROM/IAP 地址 `0x000600` 保存带 magic/version/checksum 的返航点记录，避开 NorthCalib 的 `0x000200/0x000400` A/B 槽。
 
 默认配置：
 
@@ -277,8 +273,9 @@ lat_frac[BE]
 
 注意：
 
-- `0x13`、`0x15` 更新的返航点和开关掉电后不会保留。
-- 钓点列表也只保存在 RAM 中，本次上电期间不会因去点/到点/停车而清空；复位或重新上电后清空。
+- `0x13` 和完整 `0x15` 携带的有效返航点会写入 EEPROM；无效点不会擦掉旧原点。
+- `auto_ret_onoff` 只在本次运行 RAM 中生效，重启后回到默认 `0x30`。
+- `0x14` 钓点永远不进入 `AutoDriveCfg`，也不会写入 Flash/EEPROM。
 
 ## 当前已知边界
 

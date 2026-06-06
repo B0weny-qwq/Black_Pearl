@@ -277,7 +277,6 @@ static void ShipProtocol_LogCoordBE(const u8 *buf, u8 len);
 static u8 ShipProtocol_ShouldLogRcInputSample(u32 now_ms);
 static u16 ShipProtocol_ReadU16Legacy(const u8 *buf);
 static const char *ShipProtocol_FishNavResultName(u8 result);
-static const char *ShipProtocol_FishSaveResultName(u8 result);
 static void ShipProtocol_LogGotoPointUart(const u8 *frame,
                                           u8 frame_len,
                                           const u8 *payload,
@@ -389,39 +388,11 @@ static const char *ShipProtocol_FishNavResultName(u8 result)
     switch (result) {
     case AUTODRIVE_FISH_CMD_BUSY:
         return "busy";
-    case AUTODRIVE_FISH_CMD_SAVED_WAIT:
-        return "saved-wait";
-    case AUTODRIVE_FISH_CMD_REPEAT_WAIT:
-        return "repeat-wait";
-    case AUTODRIVE_FISH_CMD_CONFIRM_READY:
-        return "confirm-ready";
     case AUTODRIVE_FISH_CMD_REJECT_DISTANCE:
         return "reject-distance";
     case AUTODRIVE_FISH_CMD_STARTED:
         return "start";
     case AUTODRIVE_FISH_CMD_INVALID:
-        return "invalid";
-    case AUTODRIVE_FISH_CMD_REJECT_FULL:
-        return "reject-full";
-    default:
-        return "unknown";
-    }
-}
-
-static const char *ShipProtocol_FishSaveResultName(u8 result)
-{
-    switch (result) {
-    case AUTODRIVE_FISH_SAVE_NONE:
-        return "none";
-    case AUTODRIVE_FISH_SAVE_STORED:
-        return "stored";
-    case AUTODRIVE_FISH_SAVE_EXISTS:
-        return "exists";
-    case AUTODRIVE_FISH_SAVE_FULL_TEMP:
-        return "full-temp";
-    case AUTODRIVE_FISH_SAVE_BUSY:
-        return "busy";
-    case AUTODRIVE_FISH_SAVE_INVALID:
         return "invalid";
     default:
         return "unknown";
@@ -438,8 +409,6 @@ static void ShipProtocol_LogGotoPointUart(const u8 *frame,
 {
 #if SHIP_GOTO_POINT_UART_LOG_ENABLE
     AutoDrive_PointRaw_t point;
-    u8 fish_index;
-    u8 save_result;
 
     if ((payload == 0) || (payload_len < AUTODRIVE_LEGACY_POINT_WIRE_LEN)) {
         log_warn((u8 *)SHIP_DATA_TAG,
@@ -457,20 +426,15 @@ static void ShipProtocol_LogGotoPointUart(const u8 *frame,
     point.lat_ns = payload[5];
     point.lat_whole = ShipProtocol_ReadU16Legacy(&payload[6]);
     point.lat_frac = ShipProtocol_ReadU16Legacy(&payload[8]);
-    fish_index = AutoDrive_GetLastFishCommandIndex();
-    save_result = AutoDrive_GetLastFishSaveResult();
 
     log_info((u8 *)SHIP_DATA_TAG,
-             (u8 *)"0x14 rx fl=%u pl=%u xor=%02X/%02X save=%u(%s) nav=%u(%s) idx=%u",
+             (u8 *)"0x14 rx fl=%u pl=%u xor=%02X/%02X nav=%u(%s)",
              (u16)frame_len,
              (u16)payload_len,
              (u16)xor_calc,
              (u16)xor_recv,
-             (u16)save_result,
-             ShipProtocol_FishSaveResultName(save_result),
              (u16)nav_result,
-             ShipProtocol_FishNavResultName(nav_result),
-             (u16)fish_index);
+             ShipProtocol_FishNavResultName(nav_result));
     log_info((u8 *)SHIP_DATA_TAG,
              (u8 *)"0x14 point ew=0x%02X lon=%u.%u ns=0x%02X lat=%u.%u",
              (u16)point.lon_ew,
