@@ -72,6 +72,16 @@
 /* 对准放行容差，单位 0.01 度；500 表示目标航向 +/-5.00 度。 */
 #define AUTODRIVE_ALIGN_EXIT_ERROR_CD      500
 
+#define AUTODRIVE_REJECT_NONE              0U
+#define AUTODRIVE_REJECT_BUSY              1U
+#define AUTODRIVE_REJECT_INVALID_POINT     2U
+#define AUTODRIVE_REJECT_HEADING_NOT_READY 3U
+#define AUTODRIVE_REJECT_GPS_NOT_READY     4U
+#define AUTODRIVE_REJECT_DISTANCE_NEAR     5U
+#define AUTODRIVE_REJECT_DISTANCE_FAR      6U
+#define AUTODRIVE_REJECT_FAIL_LATCH        7U
+#define AUTODRIVE_REJECT_SWITCH_OFF        8U
+
 static u8 g_autoDrive_switch = 0U;
 static u8 g_autoDrive_state = AUTO_DRIVE_IDLE;
 static u8 g_autoDrive_mode = AUTO_DRIVE_CLOSE;
@@ -101,6 +111,10 @@ static u32 g_last_link_tick_ms = 0UL;
 static u8 g_last_diag_reason = AUTODRIVE_DIAG_REASON_NONE;
 
 static u16 AutoDrive_GetStartHeadingDeg(void);
+static u8 AutoDrive_CheckCanActive(const AutoDrive_PointRaw_t *point,
+                                   AutoDrive_PointRaw_t *current_point,
+                                   u16 *distance_m);
+static void AutoDrive_LogReject(u8 ctx, u8 reject_reason, u16 distance_m);
 static u16 AutoDrive_ReadU16Wire(const u8 *data_m)
 {
     /* 遥控器协议中的 0x13/0x14/0x15 点位字段按大端字节序发送。 */
@@ -335,6 +349,9 @@ static u8 AutoDrive_GpsReady(void)
     if (gps == 0) {
         return 0U;
     }
+    if (gps->fix_valid == 0U) {
+        return 0U;
+    }
     sat_count = (gps->satellites_used_gsa > 0U) ? gps->satellites_used_gsa : gps->satellites_used;
     if (sat_count < 7U) {
         return 0U;
@@ -377,6 +394,78 @@ static u8 AutoDrive_GetReadyCurrentPoint(AutoDrive_PointRaw_t *point)
 
     AutoDrive_PointFromGps(point, gps);
     return AutoDrive_PointRawValid(point);
+}
+
+static u8 AutoDrive_CheckCanActive(const AutoDrive_PointRaw_t *point,
+                                   AutoDrive_PointRaw_t *current_point,
+                                   u16 *distance_m)
+{
+    AutoDrive_PointRaw_t local_current;
+    u16 distance;
+
+    if (distance_m != 0) {
+        *distance_m = 0U;
+    }
+
+    if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
+        return AUTODRIVE_REJECT_BUSY;
+    }
+    if (AutoDrive_PointRawValid(point) == 0U) {
+        return AUTODRIVE_REJECT_INVALID_POINT;
+    }
+    if (MainLoop_IsHeadingReady() == 0U) {
+        return AUTODRIVE_REJECT_HEADING_NOT_READY;
+    }
+    if (AutoDrive_GetReadyCurrentPoint(&local_current) == 0U) {
+        return AUTODRIVE_REJECT_GPS_NOT_READY;
+    }
+
+    distance = AutoDrive_GetDistanceNowToDestination((const u8 *)point,
+                                                     (const u8 *)&local_current);
+    if (distance_m != 0) {
+        *distance_m = distance;
+    }
+    if (distance <= AUTODRIVE_MIN_ACTIVE_DISTANCE_M) {
+        return AUTODRIVE_REJECT_DISTANCE_NEAR;
+    }
+    if (distance >= AUTODRIVE_MAX_ACTIVE_DISTANCE_M) {
+        return AUTODRIVE_REJECT_DISTANCE_FAR;
+    }
+
+    if (current_point != 0) {
+        AutoDrive_CopyPoint(current_point, &local_current);
+    }
+    return AUTODRIVE_REJECT_NONE;
+}
+
+static void AutoDrive_LogReject(u8 ctx, u8 reject_reason, u16 distance_m)
+{
+    const GPS_State_t *gps;
+    u8 sat_count;
+    u8 fix_valid;
+
+    gps = GPS_GetState();
+    sat_count = 0U;
+    fix_valid = 0U;
+    if (gps != 0) {
+        fix_valid = gps->fix_valid;
+        sat_count = (gps->satellites_used_gsa > 0U) ?
+                    gps->satellites_used_gsa :
+                    gps->satellites_used;
+    }
+
+    LOGW((u8 *)"AD",
+         (u8 *)"rej c=%u r=%u st=%u md=%u sw=%u ff=%u hd=%u gp=%u sat=%u d=%u",
+         (u16)ctx,
+         (u16)reject_reason,
+         (u16)g_autoDrive_state,
+         (u16)g_autoDrive_mode,
+         (u16)g_autodrv_cfg.auto_ret_onoff,
+         (u16)g_autoDrive_fail_flag,
+         (u16)MainLoop_IsHeadingReady(),
+         (u16)fix_valid,
+         (u16)sat_count,
+         distance_m);
 }
 
 static void AutoDrive_SetDiagReason(u8 reason)
@@ -639,51 +728,54 @@ u8 AutoDrive_IsCanActive(const AutoDrive_PointRaw_t *point)
 {
     AutoDrive_PointRaw_t current_point;
     u16 distance;
+    u8 reject_reason;
 
-    if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
-        return 0U;
-    }
-    if (AutoDrive_PointRawValid(point) == 0U) {
-        return 0U;
-    }
-    if (MainLoop_IsHeadingReady() == 0U) {
-        return 0U;
-    }
-    if (AutoDrive_GetReadyCurrentPoint(&current_point) == 0U) {
+    reject_reason = AutoDrive_CheckCanActive(point, &current_point, &distance);
+    if (reject_reason != AUTODRIVE_REJECT_NONE) {
         return 0U;
     }
 
-    distance = AutoDrive_GetDistanceNowToDestination((const u8 *)point,
-                                                     (const u8 *)&current_point);
-    if ((distance > AUTODRIVE_MIN_ACTIVE_DISTANCE_M) &&
-        (distance < AUTODRIVE_MAX_ACTIVE_DISTANCE_M)) {
-        AutoDrive_CopyPoint(&g_idle_position, &current_point);
-        return 1U;
-    }
-    return 0U;
+    AutoDrive_CopyPoint(&g_idle_position, &current_point);
+    return 1U;
 }
 
 void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
 {
     AutoDrive_PointRaw_t rx_point;
+    AutoDrive_PointRaw_t current_point;
+    u16 distance;
+    u8 reject_reason;
 
     AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_CMD_RETURN_HOME);
     if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
+        AutoDrive_LogReject(AUTODRIVE_DIAG_REASON_CMD_RETURN_HOME,
+                            AUTODRIVE_REJECT_BUSY,
+                            0U);
         return;
     }
 
     AutoDrive_PointFromLegacyWire(&rx_point, data_m);
     if (AutoDrive_PointRawValid(&rx_point) == 0U) {
+        AutoDrive_LogReject(AUTODRIVE_DIAG_REASON_CMD_RETURN_HOME,
+                            AUTODRIVE_REJECT_INVALID_POINT,
+                            0U);
         return;
     }
 
     AutoDrive_CopyPoint(&g_return_position, &rx_point);
     AutoDrive_CopyPoint(&g_autodrv_cfg.ret_point, &rx_point);
     (void)AutoDriveCfg_Save(&g_autodrv_cfg);
-    if (AutoDrive_IsCanActive(&g_return_position) == 0U) {
+    reject_reason = AutoDrive_CheckCanActive(&g_return_position,
+                                             &current_point,
+                                             &distance);
+    if (reject_reason != AUTODRIVE_REJECT_NONE) {
+        AutoDrive_LogReject(AUTODRIVE_DIAG_REASON_CMD_RETURN_HOME,
+                            reject_reason,
+                            distance);
         return;
     }
 
+    AutoDrive_CopyPoint(&g_idle_position, &current_point);
     AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
     g_autoDrive_state = AUTO_DRIVE_START;
     g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
@@ -692,10 +784,19 @@ void AutoDrive_SetReturnPositionRaw(const u8 *data_m)
 
 static u8 AutoDrive_StartFishPoint(const AutoDrive_PointRaw_t *point)
 {
-    if (AutoDrive_IsCanActive(point) == 0U) {
+    AutoDrive_PointRaw_t current_point;
+    u16 distance;
+    u8 reject_reason;
+
+    reject_reason = AutoDrive_CheckCanActive(point, &current_point, &distance);
+    if (reject_reason != AUTODRIVE_REJECT_NONE) {
+        AutoDrive_LogReject(AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT,
+                            reject_reason,
+                            distance);
         return AUTODRIVE_FISH_CMD_REJECT_DISTANCE;
     }
 
+    AutoDrive_CopyPoint(&g_idle_position, &current_point);
     AutoDrive_CopyPoint(&g_fish_position, point);
     AutoDrive_SetMode(AUTO_DRIVE_GO_FISISH_POSITION);
     g_autoDrive_state = AUTO_DRIVE_START;
@@ -710,11 +811,17 @@ u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
 
     AutoDrive_SetDiagReason(AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT);
     if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
+        AutoDrive_LogReject(AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT,
+                            AUTODRIVE_REJECT_BUSY,
+                            0U);
         return AUTODRIVE_FISH_CMD_BUSY;
     }
 
     AutoDrive_PointFromLegacyWire(&rx_point, data_m);
     if (AutoDrive_PointRawValid(&rx_point) == 0U) {
+        AutoDrive_LogReject(AUTODRIVE_DIAG_REASON_CMD_GOTO_POINT,
+                            AUTODRIVE_REJECT_INVALID_POINT,
+                            0U);
         return AUTODRIVE_FISH_CMD_INVALID;
     }
 
@@ -723,21 +830,33 @@ u8 AutoDrive_SetFishPositionRaw(const u8 *data_m)
 
 void AutoDrive_TriggerReturnWithReason(u8 reason)
 {
+    AutoDrive_PointRaw_t current_point;
+    u16 distance;
+    u8 reject_reason;
+
     AutoDrive_SetDiagReason(reason);
-    if (g_autodrv_cfg.auto_ret_onoff != 0x30U) {
-        if (g_autoDrive_fail_flag != 0U) {
-            return;
-        }
-        if (g_autoDrive_state != AUTO_DRIVE_IDLE) {
-            return;
-        }
-        if (AutoDrive_IsCanActive(&g_autodrv_cfg.ret_point) != 0U) {
-            AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
-            AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
-            g_autoDrive_state = AUTO_DRIVE_START;
-            g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
-        }
+    if (g_autodrv_cfg.auto_ret_onoff == 0x30U) {
+        AutoDrive_LogReject(reason, AUTODRIVE_REJECT_SWITCH_OFF, 0U);
+        return;
     }
+    if (g_autoDrive_fail_flag != 0U) {
+        AutoDrive_LogReject(reason, AUTODRIVE_REJECT_FAIL_LATCH, 0U);
+        return;
+    }
+
+    reject_reason = AutoDrive_CheckCanActive(&g_autodrv_cfg.ret_point,
+                                             &current_point,
+                                             &distance);
+    if (reject_reason != AUTODRIVE_REJECT_NONE) {
+        AutoDrive_LogReject(reason, reject_reason, distance);
+        return;
+    }
+
+    AutoDrive_CopyPoint(&g_idle_position, &current_point);
+    AutoDrive_CopyPoint(&g_return_position, &g_autodrv_cfg.ret_point);
+    AutoDrive_SetMode(AUTO_DRIVE_GO_HOME_POSITION);
+    g_autoDrive_state = AUTO_DRIVE_START;
+    g_autodrive_work_overtime = AUTODRIVE_WORK_OVERTIME;
 }
 
 void AutoDrive_TriggerReturn(void)

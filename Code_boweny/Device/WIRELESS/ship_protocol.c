@@ -1732,12 +1732,19 @@ static void ShipProtocol_Dispatch(u8 cmd,
         break;
     case SHIP_CMD_RETURN_HOME:
         if (NorthCalib_IsBusy() != 0U) {
+            SHIP_VIEWER_LOG0(SHIP_TAG, "cmd=0x13 ignored north-calib busy");
             LOGW(SHIP_TAG, "cmd=0x13 ignored north-calib busy");
             break;
         }
         if (payload_len < AUTODRIVE_LEGACY_POINT_WIRE_LEN) {
+            SHIP_VIEWER_LOGW(SHIP_TAG,
+                             "cmd=0x13 short len=%u",
+                             (u16)payload_len);
             break;
         }
+        SHIP_VIEWER_LOGI(SHIP_TAG,
+                         "cmd=0x13 return-home rx len=%u",
+                         (u16)payload_len);
         LOGI(SHIP_TAG, "cmd=0x13 return-home rx len=%u", (u16)payload_len);
         ShipProtocol_LogCoordBE(payload, payload_len);
         AutoDrive_SetReturnPositionRaw(payload);
@@ -1765,13 +1772,21 @@ static void ShipProtocol_Dispatch(u8 cmd,
         break;
     case SHIP_CMD_RETURN_SWITCH:
         if (NorthCalib_IsBusy() != 0U) {
+            SHIP_VIEWER_LOG0(SHIP_TAG, "cmd=0x15 ignored north-calib busy");
             LOGW(SHIP_TAG, "cmd=0x15 ignored north-calib busy");
             break;
         }
         if (payload_len < 1U) {
+            SHIP_VIEWER_LOGW(SHIP_TAG,
+                             "cmd=0x15 short len=%u",
+                             (u16)payload_len);
             LOGW(SHIP_TAG, "return-switch short len=%u", (u16)payload_len);
             break;
         }
+        SHIP_VIEWER_LOGI(SHIP_TAG,
+                         "cmd=0x15 return-switch rx len=%u state=%u",
+                         (u16)payload_len,
+                         (u16)payload[0]);
         LOGI(SHIP_TAG, "cmd=0x15 return-switch rx len=%u state=%u",
              (u16)payload_len,
              (u16)payload[0]);
