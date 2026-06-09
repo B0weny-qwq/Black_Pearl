@@ -1726,7 +1726,8 @@ static void ShipProtocol_Dispatch(u8 cmd,
     case SHIP_CMD_PAIR:
         break;
     case SHIP_CMD_THROTTLE:
-        log_gps_after_rsp = ShipProtocol_HandleThrottle(payload, payload_len);
+        ShipProtocol_HandleThrottle(payload, payload_len);
+        log_gps_after_rsp = 0U;
         break;
     case SHIP_CMD_GPS_REPORT:
         break;

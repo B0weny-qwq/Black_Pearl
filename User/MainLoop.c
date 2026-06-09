@@ -406,6 +406,74 @@ static char xdata g_hm_buf[10];
 static char xdata g_ahrs_log_buf[192];
 #endif
 
+static u32 AHRS_Abs32Local(int32 value);
+static void AHRS_LogSensorWarn(const AHRS_State_t *att,
+                               u32 now_ms,
+                               int16 mag_x,
+                               int16 mag_y,
+                               int16 mag_z,
+                               u8 mag_valid,
+                               u8 mag_ready,
+                               u8 mag_settled,
+                               u8 mag_used,
+                               u8 heading_seeded,
+                               u8 heading_ready,
+                               u8 heading_static)
+{
+#if ENABLE_IMU_AHRS_POLL
+    static u32 last_gyro_log_ms = 0UL;
+    static u32 last_mag_log_ms = 0UL;
+    u32 mag_norm;
+
+    if (att == 0) {
+        return;
+    }
+
+    if ((SHIP_IMU_LOG_PERIOD_MS == 0U) ||
+        ((now_ms - last_gyro_log_ms) >= SHIP_IMU_LOG_PERIOD_MS)) {
+        last_gyro_log_ms = now_ms;
+        LOGW("GYRO", "g=%d %d %d f=%02X hd=%u st=%u seed=%u",
+             att->gyro_x_dps100,
+             att->gyro_y_dps100,
+             att->gyro_z_dps100,
+             (u16)att->flags,
+             (u16)heading_ready,
+             (u16)heading_static,
+             (u16)heading_seeded);
+    }
+
+    if ((SHIP_MAG_LOG_PERIOD_MS == 0U) ||
+        ((now_ms - last_mag_log_ms) >= SHIP_MAG_LOG_PERIOD_MS)) {
+        last_mag_log_ms = now_ms;
+        mag_norm = (u32)(AHRS_Abs32Local((int32)(mag_valid ? mag_x : 0)) +
+                         AHRS_Abs32Local((int32)(mag_valid ? mag_y : 0)) +
+                         AHRS_Abs32Local((int32)(mag_valid ? mag_z : 0)));
+        LOGW("MAG", "raw=%d %d %d n=%lu mv=%u mr=%u ms=%u mu=%u",
+             mag_valid ? mag_x : 0,
+             mag_valid ? mag_y : 0,
+             mag_valid ? mag_z : 0,
+             mag_norm,
+             (u16)mag_valid,
+             (u16)mag_ready,
+             (u16)mag_settled,
+             (u16)mag_used);
+    }
+#else
+    (void)att;
+    (void)now_ms;
+    (void)mag_x;
+    (void)mag_y;
+    (void)mag_z;
+    (void)mag_valid;
+    (void)mag_ready;
+    (void)mag_settled;
+    (void)mag_used;
+    (void)heading_seeded;
+    (void)heading_ready;
+    (void)heading_static;
+#endif
+}
+
 static u8 IMU_ServicePoll(void)
 {
     static u8 service_error_latched = 0;
@@ -742,6 +810,18 @@ static void IMU_AhrsPoll(void)
                 yaw_zero_valid = 0U;
                 g_heading_rel_cd_snapshot = 0;
                 g_heading_ready_snapshot = 0U;
+                AHRS_LogSensorWarn(att,
+                                   now_ms,
+                                   last_mag_x,
+                                   last_mag_y,
+                                   last_mag_z,
+                                   last_mag_valid,
+                                   g_mag_heading_ready_snapshot,
+                                   heading_mag_settled,
+                                   0U,
+                                   heading_seeded,
+                                   g_heading_ready_snapshot,
+                                   heading_static_flag);
                 return;
             }
             heading_seed_deg = (float)g_mag_heading_deg100_snapshot * 0.01f;
@@ -771,6 +851,19 @@ static void IMU_AhrsPoll(void)
         g_heading_rel_cd_snapshot = 0;
         g_heading_ready_snapshot = 0U;
     }
+
+    AHRS_LogSensorWarn(att,
+                       now_ms,
+                       last_mag_x,
+                       last_mag_y,
+                       last_mag_z,
+                       last_mag_valid,
+                       g_mag_heading_ready_snapshot,
+                       heading_mag_settled,
+                       g_heading.mag_used,
+                       heading_seeded,
+                       g_heading_ready_snapshot,
+                       heading_static_flag);
 
     sample_div++;
     if (sample_div < AHRS_LOG_DECIMATION) {
