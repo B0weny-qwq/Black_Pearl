@@ -199,15 +199,78 @@
 /* GPS 原地对准微分增益，Q10；用于抑制接近目标航向时的过冲。 */
 #define SHIP_GPS_ALIGN_KD_Q10            0
 #endif
-#ifndef SHIP_GPS_ALIGN_DIFF_PERCENT
-/* 原地对准最大差速，占电机最大命令的百分比；30 表示 30%。 */
-#define SHIP_GPS_ALIGN_DIFF_PERCENT      18U
+#ifndef SHIP_GPS_ALIGN_DIFF_LIMIT_COMMAND
+/* GPS 原地对准软档最大差速命令；30 表示左右电机最多 +30/-30。 */
+#define SHIP_GPS_ALIGN_DIFF_LIMIT_COMMAND 30
+#endif
+#ifndef SHIP_GPS_ALIGN_DIFF_SLEW_PER_STEP
+#define SHIP_GPS_ALIGN_DIFF_SLEW_PER_STEP SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP
+#endif
+#ifndef SHIP_GPS_ALIGN_HARD_ERROR_CD
+#define SHIP_GPS_ALIGN_HARD_ERROR_CD     1000
+#endif
+#ifndef SHIP_GPS_ALIGN_HARD_KP_Q10
+#define SHIP_GPS_ALIGN_HARD_KP_Q10       SHIP_GPS_ALIGN_KP_Q10
+#endif
+#ifndef SHIP_GPS_ALIGN_HARD_KI_Q10
+#define SHIP_GPS_ALIGN_HARD_KI_Q10       SHIP_GPS_ALIGN_KI_Q10
+#endif
+#ifndef SHIP_GPS_ALIGN_HARD_KD_Q10
+#define SHIP_GPS_ALIGN_HARD_KD_Q10       SHIP_GPS_ALIGN_KD_Q10
+#endif
+#ifndef SHIP_GPS_ALIGN_HARD_DIFF_LIMIT_COMMAND
+#define SHIP_GPS_ALIGN_HARD_DIFF_LIMIT_COMMAND SHIP_GPS_ALIGN_DIFF_LIMIT_COMMAND
+#endif
+#ifndef SHIP_GPS_ALIGN_HARD_DIFF_SLEW_PER_STEP
+#define SHIP_GPS_ALIGN_HARD_DIFF_SLEW_PER_STEP SHIP_GPS_ALIGN_DIFF_SLEW_PER_STEP
+#endif
+
+#ifndef SHIP_GPS_NAV_KP_Q10
+#define SHIP_GPS_NAV_KP_Q10              SHIP_YAW_HOLD_KP_Q10
+#endif
+#ifndef SHIP_GPS_NAV_KI_Q10
+#define SHIP_GPS_NAV_KI_Q10              SHIP_YAW_HOLD_KI_Q10
+#endif
+#ifndef SHIP_GPS_NAV_KD_Q10
+#define SHIP_GPS_NAV_KD_Q10              SHIP_YAW_HOLD_KD_Q10
+#endif
+#ifndef SHIP_GPS_NAV_DIFF_LIMIT_PERMILLE
+#define SHIP_GPS_NAV_DIFF_LIMIT_PERMILLE SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE
+#endif
+#ifndef SHIP_GPS_NAV_DIFF_SLEW_PER_STEP
+#define SHIP_GPS_NAV_DIFF_SLEW_PER_STEP  SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP
+#endif
+#ifndef SHIP_GPS_NAV_HARD_ERROR_CD
+#define SHIP_GPS_NAV_HARD_ERROR_CD       1000
+#endif
+#ifndef SHIP_GPS_NAV_HARD_KP_Q10
+#define SHIP_GPS_NAV_HARD_KP_Q10         SHIP_GPS_NAV_KP_Q10
+#endif
+#ifndef SHIP_GPS_NAV_HARD_KI_Q10
+#define SHIP_GPS_NAV_HARD_KI_Q10         SHIP_GPS_NAV_KI_Q10
+#endif
+#ifndef SHIP_GPS_NAV_HARD_KD_Q10
+#define SHIP_GPS_NAV_HARD_KD_Q10         SHIP_GPS_NAV_KD_Q10
+#endif
+#ifndef SHIP_GPS_NAV_HARD_DIFF_LIMIT_PERMILLE
+#define SHIP_GPS_NAV_HARD_DIFF_LIMIT_PERMILLE SHIP_GPS_NAV_DIFF_LIMIT_PERMILLE
+#endif
+#ifndef SHIP_GPS_NAV_HARD_DIFF_SLEW_PER_STEP
+#define SHIP_GPS_NAV_HARD_DIFF_SLEW_PER_STEP SHIP_GPS_NAV_DIFF_SLEW_PER_STEP
 #endif
 
 #define SHIP_CONTROL_REASON_MANUAL_OPEN  20U
 #define SHIP_CONTROL_REASON_MANUAL_YAW   21U
 #define SHIP_CONTROL_REASON_CRUISE       22U
 #define SHIP_CONTROL_REASON_GPS_NAV      23U
+
+#define SHIP_YAW_PID_PROFILE_NONE        0xFFU
+#define SHIP_YAW_PID_PROFILE_MANUAL      0U
+#define SHIP_YAW_PID_PROFILE_CRUISE      1U
+#define SHIP_YAW_PID_PROFILE_GPS_NAV     2U
+#define SHIP_YAW_PID_PROFILE_GPS_NAV_HARD 3U
+#define SHIP_YAW_PID_PROFILE_GPS_ALIGN   4U
+#define SHIP_YAW_PID_PROFILE_GPS_ALIGN_HARD 5U
 
 #define SHIP_CTRL_GATE_INVALID           0xFFU
 #define SHIP_CTRL_GATE_CENTER            0U
@@ -279,11 +342,15 @@ typedef struct
     u8 motor_last_log_motion;       /**< 上一次日志记录的运动方向。 */
     u8 last_logged_mode;            /**< 上一次输出模式切换日志的模式。 */
     ShipControl_Motion_t motion;    /**< 当前运动方向判定结果。 */
+    u8 yaw_pid_profile;             /**< active yaw PID profile for log and reset. */
 } ShipControl_Runtime_t;
 
 static ShipControl_Runtime_t xdata g_ship_ctrl;
 static PID_Controller_t xdata g_ship_ctrl_yaw_pid;
+static PID_Controller_t xdata g_ship_ctrl_gps_nav_pid;
+static PID_Controller_t xdata g_ship_ctrl_gps_nav_hard_pid;
 static PID_Controller_t xdata g_ship_ctrl_align_pid;
+static PID_Controller_t xdata g_ship_ctrl_align_hard_pid;
 
 /** @brief 确保电机 PWM 层已初始化。 */
 static void ShipControl_EnsureMotorInit(void);
@@ -301,20 +368,29 @@ static int16 ShipControl_LimitSpeed(int16 speed);
 static int16 ShipControl_WrapSignedCd(int32 angle_cd);
 /** @brief 将角度归一化为 [0, 36000) 的无符号 0.01 度。 */
 static u16 ShipControl_WrapUnsignedCd(int32 angle_cd);
+static int16 ShipControl_AbsHeadingErrorCd(int16 yaw_error_cd);
+static u8 ShipControl_SelectYawPidProfile(u8 mode, u8 use_align_pid, int16 yaw_error_cd);
+static void ShipControl_ResetInactiveYawPidProfiles(u8 profile);
+static PID_Controller_t *ShipControl_GetYawPid(u8 profile);
+static int16 ShipControl_GetYawDiffLimitPermille(u8 profile);
+static int16 ShipControl_GetYawDiffSlewStep(u8 profile);
+static int16 ShipControl_GetGpsAlignDiffLimitCommand(u8 profile);
 /** @brief 将航向误差映射为 PID 使用的归一化控制量。 */
 static int16 ShipControl_YawErrorToControl(int16 yaw_error_cd);
 /** @brief 叠加陀螺 Z 轴阻尼，抑制转向过冲。 */
 static int16 ShipControl_ApplyYawHoldDamping(int16 yaw_control);
 /** @brief 对航向差速输出做限斜率处理。 */
-static int16 ShipControl_ApplyYawOutputSlew(int16 yaw_output);
+static int16 ShipControl_ApplyYawOutputSlew(int16 yaw_output, int16 step);
 /** @brief 限制 GPS 原地对准阶段的最大差速输出。 */
-static int16 ShipControl_LimitGpsAlignYawOutput(int16 yaw_output);
+static int16 ShipControl_LimitGpsAlignYawOutput(int16 yaw_output, int16 diff_limit);
 /** @brief 定速巡航进入阶段基础速度软启动。 */
 static int16 ShipControl_ApplyCruiseBaseRamp(int16 base_speed);
 /** @brief 偏航误差较大时降低基础速度，优先完成转向修正。 */
 static int16 ShipControl_ApplyYawHoldBaseDerate(int16 base_speed, int16 yaw_error_cd);
 /** @brief 将归一化 yaw 控制量转换为左右电机差速量。 */
-static int16 ShipControl_YawControlToSpeed(int16 yaw_control, int16 base_speed);
+static int16 ShipControl_YawControlToSpeed(int16 yaw_control,
+                                           int16 base_speed,
+                                           int16 diff_limit_permille);
 /** @brief 手动自稳进入前的连续稳定帧门控。 */
 static u8 ShipControl_YawHoldGateStable(void);
 /** @brief 对摇杆原始值做一阶 IIR 滤波。 */
@@ -354,8 +430,11 @@ static void ShipControl_LogSample(u32 now_ms);
 /** @brief 输出电机目标日志，支持强制打印。 */
 static void ShipControl_LogMotorOutput(u8 force);
 /** @brief 输出控制模式变化事件日志。 */
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
 static void ShipControl_LogModeEvent(u8 old_mode, u8 new_mode, u8 reason);
+#endif
 /** @brief 输出手动航向自稳门控状态变化日志。 */
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
 static void ShipControl_LogManualGate(u8 state,
                                       int16 throttle_speed,
                                       int16 steering_speed,
@@ -363,6 +442,7 @@ static void ShipControl_LogManualGate(u8 state,
                                       int16 right_speed,
                                       int16 diff,
                                       int16 gate);
+#endif
 /** @brief 设置当前控制模式并在变化时记录事件。 */
 static void ShipControl_SetMode(u8 mode, u8 reason);
 
@@ -396,6 +476,7 @@ void ShipControl_Init(void)
     g_ship_ctrl.yaw_hold_last_yaw_speed = 0;
     g_ship_ctrl.yaw_hold_last_update_ms = 0UL;
     g_ship_ctrl.yaw_hold_stable_count = 0U;
+    g_ship_ctrl.yaw_pid_profile = SHIP_YAW_PID_PROFILE_NONE;
     g_ship_ctrl.cruise_start_ms = 0UL;
     g_ship_ctrl.left_speed = 0;
     g_ship_ctrl.right_speed = 0;
@@ -423,10 +504,34 @@ void ShipControl_Init(void)
              SHIP_YAW_HOLD_OUTPUT_LIMIT,
              -((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L),
              ((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L));
+    PID_Init(&g_ship_ctrl_gps_nav_pid,
+             SHIP_GPS_NAV_KP_Q10,
+             SHIP_GPS_NAV_KI_Q10,
+             SHIP_GPS_NAV_KD_Q10,
+             -SHIP_YAW_HOLD_OUTPUT_LIMIT,
+             SHIP_YAW_HOLD_OUTPUT_LIMIT,
+             -((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L),
+             ((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L));
+    PID_Init(&g_ship_ctrl_gps_nav_hard_pid,
+             SHIP_GPS_NAV_HARD_KP_Q10,
+             SHIP_GPS_NAV_HARD_KI_Q10,
+             SHIP_GPS_NAV_HARD_KD_Q10,
+             -SHIP_YAW_HOLD_OUTPUT_LIMIT,
+             SHIP_YAW_HOLD_OUTPUT_LIMIT,
+             -((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L),
+             ((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L));
     PID_Init(&g_ship_ctrl_align_pid,
              SHIP_GPS_ALIGN_KP_Q10,
              SHIP_GPS_ALIGN_KI_Q10,
              SHIP_GPS_ALIGN_KD_Q10,
+             -SHIP_YAW_HOLD_OUTPUT_LIMIT,
+             SHIP_YAW_HOLD_OUTPUT_LIMIT,
+             -((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L),
+             ((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L));
+    PID_Init(&g_ship_ctrl_align_hard_pid,
+             SHIP_GPS_ALIGN_HARD_KP_Q10,
+             SHIP_GPS_ALIGN_HARD_KI_Q10,
+             SHIP_GPS_ALIGN_HARD_KD_Q10,
              -SHIP_YAW_HOLD_OUTPUT_LIMIT,
              SHIP_YAW_HOLD_OUTPUT_LIMIT,
              -((int32)SHIP_YAW_HOLD_OUTPUT_LIMIT * 64L),
@@ -659,9 +764,13 @@ void ShipControl_ResetYawHoldController(void)
     g_ship_ctrl.yaw_hold_last_yaw_speed = 0;
     g_ship_ctrl.yaw_hold_last_update_ms = 0UL;
     g_ship_ctrl.yaw_hold_stable_count = 0U;
+    g_ship_ctrl.yaw_pid_profile = SHIP_YAW_PID_PROFILE_NONE;
     g_ship_ctrl.cruise_start_ms = 0UL;
     PID_Reset(&g_ship_ctrl_yaw_pid);
+    PID_Reset(&g_ship_ctrl_gps_nav_pid);
+    PID_Reset(&g_ship_ctrl_gps_nav_hard_pid);
     PID_Reset(&g_ship_ctrl_align_pid);
+    PID_Reset(&g_ship_ctrl_align_hard_pid);
 }
 
 /**
@@ -720,9 +829,9 @@ static void ShipControl_ResetAxisFilter(void)
     g_ship_ctrl.filtered_ud_q8 = ((int32)SHIP_AXIS_CENTER << 8);
 }
 
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
 static void ShipControl_LogModeEvent(u8 old_mode, u8 new_mode, u8 reason)
 {
-#if SHIP_YAW_HOLD_LOG_ENABLE
     LOGI(SHIP_CONTROL_TAG,
          "ev old=%u new=%u rsn=%u yaw=%u tgt=%u",
          (u16)old_mode,
@@ -730,13 +839,10 @@ static void ShipControl_LogModeEvent(u8 old_mode, u8 new_mode, u8 reason)
          (u16)reason,
          (u16)g_ship_ctrl.yaw_hold_active,
          g_ship_ctrl.yaw_hold_target_cd);
-#else
-    (void)old_mode;
-    (void)new_mode;
-    (void)reason;
-#endif
 }
+#endif
 
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
 static void ShipControl_LogManualGate(u8 state,
                                       int16 throttle_speed,
                                       int16 steering_speed,
@@ -745,7 +851,6 @@ static void ShipControl_LogManualGate(u8 state,
                                       int16 diff,
                                       int16 gate)
 {
-#if SHIP_YAW_HOLD_LOG_ENABLE
     u32 now_ms;
 
     now_ms = Task_GetTickMs();
@@ -770,16 +875,8 @@ static void ShipControl_LogManualGate(u8 state,
          gate,
          (u16)g_ship_ctrl.yaw_hold_stable_count,
          (u16)MainLoop_IsHeadingReady());
-#else
-    (void)state;
-    (void)throttle_speed;
-    (void)steering_speed;
-    (void)left_speed;
-    (void)right_speed;
-    (void)diff;
-    (void)gate;
-#endif
 }
+#endif
 
 static void ShipControl_SetMode(u8 mode, u8 reason)
 {
@@ -788,9 +885,19 @@ static void ShipControl_SetMode(u8 mode, u8 reason)
     old_mode = g_ship_ctrl.mode;
     g_ship_ctrl.mode = mode;
     if ((old_mode != mode) || (g_ship_ctrl.last_logged_mode != mode)) {
+        LOGW(SHIP_CONTROL_TAG, "mode %u>%u r=%u",
+             (u16)old_mode,
+             (u16)mode,
+             (u16)reason);
+    }
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
+    if ((old_mode != mode) || (g_ship_ctrl.last_logged_mode != mode)) {
         ShipControl_LogModeEvent(old_mode, mode, reason);
         g_ship_ctrl.last_logged_mode = mode;
     }
+#else
+    g_ship_ctrl.last_logged_mode = mode;
+#endif
 }
 
 static u8 ShipControl_ConfirmCenterStop(void)
@@ -852,6 +959,109 @@ static u16 ShipControl_WrapUnsignedCd(int32 angle_cd)
         angle_cd += 36000L;
     }
     return (u16)angle_cd;
+}
+
+static int16 ShipControl_AbsHeadingErrorCd(int16 yaw_error_cd)
+{
+    return (yaw_error_cd >= 0) ? yaw_error_cd : (int16)(-yaw_error_cd);
+}
+
+static u8 ShipControl_SelectYawPidProfile(u8 mode, u8 use_align_pid, int16 yaw_error_cd)
+{
+    int16 abs_error_cd;
+
+    abs_error_cd = ShipControl_AbsHeadingErrorCd(yaw_error_cd);
+    if (use_align_pid != 0U) {
+        if (abs_error_cd > (int16)SHIP_GPS_ALIGN_HARD_ERROR_CD) {
+            return SHIP_YAW_PID_PROFILE_GPS_ALIGN_HARD;
+        }
+        return SHIP_YAW_PID_PROFILE_GPS_ALIGN;
+    }
+
+    if (mode == SHIP_CONTROL_MODE_GPS_NAV_HEADING_HOLD) {
+        if (abs_error_cd > (int16)SHIP_GPS_NAV_HARD_ERROR_CD) {
+            return SHIP_YAW_PID_PROFILE_GPS_NAV_HARD;
+        }
+        return SHIP_YAW_PID_PROFILE_GPS_NAV;
+    }
+
+    if (mode == SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD) {
+        return SHIP_YAW_PID_PROFILE_CRUISE;
+    }
+    return SHIP_YAW_PID_PROFILE_MANUAL;
+}
+
+static void ShipControl_ResetInactiveYawPidProfiles(u8 profile)
+{
+    if ((profile != SHIP_YAW_PID_PROFILE_MANUAL) &&
+        (profile != SHIP_YAW_PID_PROFILE_CRUISE)) {
+        PID_Reset(&g_ship_ctrl_yaw_pid);
+    }
+    if (profile != SHIP_YAW_PID_PROFILE_GPS_NAV) {
+        PID_Reset(&g_ship_ctrl_gps_nav_pid);
+    }
+    if (profile != SHIP_YAW_PID_PROFILE_GPS_NAV_HARD) {
+        PID_Reset(&g_ship_ctrl_gps_nav_hard_pid);
+    }
+    if (profile != SHIP_YAW_PID_PROFILE_GPS_ALIGN) {
+        PID_Reset(&g_ship_ctrl_align_pid);
+    }
+    if (profile != SHIP_YAW_PID_PROFILE_GPS_ALIGN_HARD) {
+        PID_Reset(&g_ship_ctrl_align_hard_pid);
+    }
+}
+
+static PID_Controller_t *ShipControl_GetYawPid(u8 profile)
+{
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_NAV) {
+        return &g_ship_ctrl_gps_nav_pid;
+    }
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_NAV_HARD) {
+        return &g_ship_ctrl_gps_nav_hard_pid;
+    }
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_ALIGN) {
+        return &g_ship_ctrl_align_pid;
+    }
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_ALIGN_HARD) {
+        return &g_ship_ctrl_align_hard_pid;
+    }
+    return &g_ship_ctrl_yaw_pid;
+}
+
+static int16 ShipControl_GetYawDiffLimitPermille(u8 profile)
+{
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_NAV) {
+        return (int16)SHIP_GPS_NAV_DIFF_LIMIT_PERMILLE;
+    }
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_NAV_HARD) {
+        return (int16)SHIP_GPS_NAV_HARD_DIFF_LIMIT_PERMILLE;
+    }
+    return (int16)SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE;
+}
+
+static int16 ShipControl_GetYawDiffSlewStep(u8 profile)
+{
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_NAV) {
+        return (int16)SHIP_GPS_NAV_DIFF_SLEW_PER_STEP;
+    }
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_NAV_HARD) {
+        return (int16)SHIP_GPS_NAV_HARD_DIFF_SLEW_PER_STEP;
+    }
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_ALIGN) {
+        return (int16)SHIP_GPS_ALIGN_DIFF_SLEW_PER_STEP;
+    }
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_ALIGN_HARD) {
+        return (int16)SHIP_GPS_ALIGN_HARD_DIFF_SLEW_PER_STEP;
+    }
+    return (int16)SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP;
+}
+
+static int16 ShipControl_GetGpsAlignDiffLimitCommand(u8 profile)
+{
+    if (profile == SHIP_YAW_PID_PROFILE_GPS_ALIGN_HARD) {
+        return (int16)SHIP_GPS_ALIGN_HARD_DIFF_LIMIT_COMMAND;
+    }
+    return (int16)SHIP_GPS_ALIGN_DIFF_LIMIT_COMMAND;
 }
 
 /**
@@ -926,12 +1136,10 @@ static int16 ShipControl_ApplyYawHoldDamping(int16 yaw_control)
     return (int16)output;
 }
 
-static int16 ShipControl_ApplyYawOutputSlew(int16 yaw_output)
+static int16 ShipControl_ApplyYawOutputSlew(int16 yaw_output, int16 step)
 {
     int16 delta;
-    int16 step;
 
-    step = (int16)SHIP_YAW_HOLD_DIFF_SLEW_PER_STEP;
     if (step <= 0) {
         g_ship_ctrl.yaw_hold_last_yaw_speed = yaw_output;
         return yaw_output;
@@ -947,17 +1155,19 @@ static int16 ShipControl_ApplyYawOutputSlew(int16 yaw_output)
     return yaw_output;
 }
 
-static int16 ShipControl_LimitGpsAlignYawOutput(int16 yaw_output)
+static int16 ShipControl_LimitGpsAlignYawOutput(int16 yaw_output, int16 diff_limit)
 {
-    int32 limit;
+    int16 limit;
 
-    limit = ((int32)SHIP_MOTOR_OUTPUT_MAX_COMMAND *
-             (int32)SHIP_GPS_ALIGN_DIFF_PERCENT) / 100L;
-    if (limit < 0L) {
-        limit = 0L;
+    limit = diff_limit;
+    if (limit < 0) {
+        limit = 0;
     }
-    if (yaw_output > (int16)limit) {
-        return (int16)limit;
+    if (limit > SHIP_MOTOR_OUTPUT_MAX_COMMAND) {
+        limit = SHIP_MOTOR_OUTPUT_MAX_COMMAND;
+    }
+    if (yaw_output > limit) {
+        return limit;
     }
     if (yaw_output < (int16)(-limit)) {
         return (int16)(-limit);
@@ -1087,26 +1297,26 @@ static int16 ShipControl_ApplyYawHoldBaseDerate(int16 base_speed, int16 yaw_erro
  *
  * @return 电机差速量，正负方向由 @ref SHIP_YAW_HOLD_OUTPUT_SIGN 决定。
  */
-static int16 ShipControl_YawControlToSpeed(int16 yaw_control, int16 base_speed)
+static int16 ShipControl_YawControlToSpeed(int16 yaw_control,
+                                           int16 base_speed,
+                                           int16 diff_limit_permille)
 {
     int32 scale;
     int32 yaw_limit;
     int32 yaw_speed;
-    int32 diff_limit_permille;
 
     scale = (base_speed >= 0) ? (int32)base_speed : -(int32)base_speed;
     if (scale == 0L) {
         scale = (int32)SHIP_MOTOR_OUTPUT_MAX_COMMAND;
     }
 
-    diff_limit_permille = (int32)SHIP_YAW_HOLD_DIFF_LIMIT_PERMILLE;
-    if (diff_limit_permille < 0L) {
-        diff_limit_permille = 0L;
-    } else if (diff_limit_permille > 1000L) {
-        diff_limit_permille = 1000L;
+    if (diff_limit_permille < 0) {
+        diff_limit_permille = 0;
+    } else if (diff_limit_permille > 1000) {
+        diff_limit_permille = 1000;
     }
 
-    yaw_limit = (scale * diff_limit_permille) / 1000L;
+    yaw_limit = (scale * (int32)diff_limit_permille) / 1000L;
     if (yaw_limit <= 0L) {
         return 0;
     }
@@ -1314,6 +1524,9 @@ static u8 ShipControl_ApplyYawHoldTargetEx(u16 target_heading_cd,
     int16 left_speed;
     int16 right_speed;
     int16 pid_output;
+    int16 diff_limit_permille;
+    int16 diff_slew_step;
+    u8 yaw_pid_profile;
     PID_Controller_t *pid;
 
     if (MainLoop_IsHeadingReady() == 0U) {
@@ -1332,18 +1545,33 @@ static u8 ShipControl_ApplyYawHoldTargetEx(u16 target_heading_cd,
         g_ship_ctrl.yaw_hold_last_update_ms = now_ms - SHIP_YAW_HOLD_PERIOD_MS;
         g_ship_ctrl.yaw_hold_stable_count = SHIP_YAW_HOLD_STEER_STABLE_FRAMES;
         PID_Reset(&g_ship_ctrl_yaw_pid);
-        PID_Reset(&g_ship_ctrl_align_pid);
         PID_SetTarget(&g_ship_ctrl_yaw_pid, 0);
+        PID_Reset(&g_ship_ctrl_gps_nav_pid);
+        PID_SetTarget(&g_ship_ctrl_gps_nav_pid, 0);
+        PID_Reset(&g_ship_ctrl_gps_nav_hard_pid);
+        PID_SetTarget(&g_ship_ctrl_gps_nav_hard_pid, 0);
+        PID_Reset(&g_ship_ctrl_align_pid);
         PID_SetTarget(&g_ship_ctrl_align_pid, 0);
+        PID_Reset(&g_ship_ctrl_align_hard_pid);
+        PID_SetTarget(&g_ship_ctrl_align_hard_pid, 0);
+        g_ship_ctrl.yaw_pid_profile = SHIP_YAW_PID_PROFILE_NONE;
     }
 
-    pid = (use_align_pid != 0U) ? &g_ship_ctrl_align_pid : &g_ship_ctrl_yaw_pid;
     g_ship_ctrl.yaw_hold_target_cd = target_heading_cd;
     if ((now_ms - g_ship_ctrl.yaw_hold_last_update_ms) >= SHIP_YAW_HOLD_PERIOD_MS) {
         g_ship_ctrl.yaw_hold_last_update_ms = now_ms;
         yaw_error_cd = ShipControl_WrapSignedCd((int32)target_heading_cd -
                                                 (int32)current_heading_cd);
         yaw_error_ctrl = ShipControl_YawErrorToControl(yaw_error_cd);
+        yaw_pid_profile = ShipControl_SelectYawPidProfile(mode,
+                                                          use_align_pid,
+                                                          yaw_error_cd);
+        pid = ShipControl_GetYawPid(yaw_pid_profile);
+        if (g_ship_ctrl.yaw_pid_profile != yaw_pid_profile) {
+            ShipControl_ResetInactiveYawPidProfiles(yaw_pid_profile);
+            g_ship_ctrl.yaw_pid_profile = yaw_pid_profile;
+            g_ship_ctrl.yaw_hold_last_yaw_speed = 0;
+        }
         g_ship_ctrl.yaw_hold_error_cd = yaw_error_cd;
         g_ship_ctrl.yaw_hold_error_ctrl = yaw_error_ctrl;
         if (yaw_error_ctrl == 0) {
@@ -1357,21 +1585,34 @@ static u8 ShipControl_ApplyYawHoldTargetEx(u16 target_heading_cd,
         }
     }
 
+    yaw_pid_profile = g_ship_ctrl.yaw_pid_profile;
+    if (yaw_pid_profile == SHIP_YAW_PID_PROFILE_NONE) {
+        yaw_pid_profile = ShipControl_SelectYawPidProfile(mode,
+                                                          use_align_pid,
+                                                          g_ship_ctrl.yaw_hold_error_cd);
+        ShipControl_ResetInactiveYawPidProfiles(yaw_pid_profile);
+        g_ship_ctrl.yaw_pid_profile = yaw_pid_profile;
+    }
     if (mode == SHIP_CONTROL_MODE_CRUISE_HEADING_HOLD) {
         yaw_base_speed = ShipControl_ApplyCruiseBaseRamp(base_speed);
     } else {
         yaw_base_speed = ShipControl_ApplyYawHoldBaseDerate(base_speed,
                                                             g_ship_ctrl.yaw_hold_error_cd);
     }
+    diff_limit_permille = ShipControl_GetYawDiffLimitPermille(yaw_pid_profile);
+    diff_slew_step = ShipControl_GetYawDiffSlewStep(yaw_pid_profile);
     yaw_output = ShipControl_YawControlToSpeed(g_ship_ctrl.yaw_hold_output,
-                                               yaw_base_speed);
+                                               yaw_base_speed,
+                                               diff_limit_permille);
 #if SHIP_YAW_HOLD_OUTPUT_SIGN < 0
     yaw_output = (int16)(-yaw_output);
 #endif
     if (use_align_pid != 0U) {
-        yaw_output = ShipControl_LimitGpsAlignYawOutput(yaw_output);
+        yaw_output = ShipControl_LimitGpsAlignYawOutput(
+            yaw_output,
+            ShipControl_GetGpsAlignDiffLimitCommand(yaw_pid_profile));
     }
-    yaw_output = ShipControl_ApplyYawOutputSlew(yaw_output);
+    yaw_output = ShipControl_ApplyYawOutputSlew(yaw_output, diff_slew_step);
     left_speed = ShipControl_LimitSpeed((int16)(yaw_base_speed + yaw_output));
     right_speed = ShipControl_LimitSpeed((int16)(yaw_base_speed - yaw_output));
 
@@ -1433,6 +1674,7 @@ static void ShipControl_ApplyManualControl(void)
 
     if ((g_ship_ctrl.lr >= SHIP_LR_DEAD_LOW) && (g_ship_ctrl.lr <= SHIP_LR_DEAD_HIGH) &&
         (g_ship_ctrl.ud >= SHIP_FB_DEAD_LOW) && (g_ship_ctrl.ud <= SHIP_FB_DEAD_HIGH)) {
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
         ShipControl_LogManualGate(SHIP_CTRL_GATE_CENTER,
                                   0,
                                   0,
@@ -1440,6 +1682,7 @@ static void ShipControl_ApplyManualControl(void)
                                   0,
                                   0,
                                   0);
+#endif
         if (ShipControl_ConfirmCenterStop() == 0U) {
             return;
         }
@@ -1471,6 +1714,7 @@ static void ShipControl_ApplyManualControl(void)
     yaw_hold_gate_open = 0U;
 
     if ((abs_throttle == 0) && (abs_steering == 0)) {
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
         ShipControl_LogManualGate(SHIP_CTRL_GATE_NO_INPUT,
                                   throttle_speed,
                                   steering_speed,
@@ -1478,6 +1722,7 @@ static void ShipControl_ApplyManualControl(void)
                                   right_speed,
                                   manual_input_diff,
                                   manual_diff_gate);
+#endif
         ShipControl_Stop(SHIP_CONTROL_STOP_REASON_MANUAL_CENTER);
         g_ship_ctrl.manual_valid = 1U;
         return;
@@ -1496,6 +1741,7 @@ static void ShipControl_ApplyManualControl(void)
         if (ShipControl_YawHoldGateStable() != 0U) {
             if (g_ship_ctrl.yaw_hold_active == 0U) {
                 if (MainLoop_IsHeadingReady() == 0U) {
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
                     ShipControl_LogManualGate(SHIP_CTRL_GATE_HEADING_LOST,
                                               throttle_speed,
                                               steering_speed,
@@ -1503,8 +1749,10 @@ static void ShipControl_ApplyManualControl(void)
                                               right_speed,
                                               manual_input_diff,
                                               manual_diff_gate);
+#endif
                     goto ship_control_manual_open_loop;
                 }
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
                 ShipControl_LogManualGate(SHIP_CTRL_GATE_READY,
                                           throttle_speed,
                                           steering_speed,
@@ -1512,13 +1760,16 @@ static void ShipControl_ApplyManualControl(void)
                                           right_speed,
                                           manual_input_diff,
                                           manual_diff_gate);
+#endif
                 g_ship_ctrl.yaw_hold_active = 1U;
                 g_ship_ctrl.yaw_hold_target_cd = MainLoop_GetHeadingDeg100();
                 g_ship_ctrl.yaw_hold_output = 0;
                 g_ship_ctrl.yaw_hold_last_yaw_speed = 0;
                 g_ship_ctrl.yaw_hold_last_update_ms = Task_GetTickMs() - SHIP_YAW_HOLD_PERIOD_MS;
+                g_ship_ctrl.yaw_pid_profile = SHIP_YAW_PID_PROFILE_NONE;
                 PID_Reset(&g_ship_ctrl_yaw_pid);
                 PID_SetTarget(&g_ship_ctrl_yaw_pid, 0);
+                ShipControl_ResetInactiveYawPidProfiles(SHIP_YAW_PID_PROFILE_MANUAL);
             }
 
             yaw_base_speed = throttle_speed;
@@ -1528,6 +1779,7 @@ static void ShipControl_ApplyManualControl(void)
                 return;
             }
         } else {
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
             ShipControl_LogManualGate(SHIP_CTRL_GATE_WAIT_STABLE,
                                       throttle_speed,
                                       steering_speed,
@@ -1535,10 +1787,12 @@ static void ShipControl_ApplyManualControl(void)
                                       right_speed,
                                       manual_input_diff,
                                       manual_diff_gate);
+#endif
         }
     }
 
     if (yaw_hold_gate_open == 0U) {
+#if (SHIP_YAW_HOLD_LOG_ENABLE && (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO))
         ShipControl_LogManualGate(
 #if SHIP_YAW_HOLD_FORWARD_ONLY
             (throttle_speed <= 0) ? SHIP_CTRL_GATE_THROTTLE : SHIP_CTRL_GATE_DIFF,
@@ -1551,6 +1805,7 @@ static void ShipControl_ApplyManualControl(void)
             right_speed,
             manual_input_diff,
             manual_diff_gate);
+#endif
         g_ship_ctrl.yaw_hold_stable_count = 0U;
         g_ship_ctrl.yaw_hold_last_yaw_speed = 0;
     }
@@ -1648,6 +1903,18 @@ static void ShipControl_LogMotorOutput(u8 force)
     g_ship_ctrl.motor_last_log_right = g_ship_ctrl.right_speed;
     g_ship_ctrl.motor_last_log_mode = g_ship_ctrl.mode;
     g_ship_ctrl.motor_last_log_motion = g_ship_ctrl.motion;
+    if (g_ship_ctrl.mode == SHIP_CONTROL_MODE_GPS_NAV_HEADING_HOLD) {
+        LOGW(SHIP_CONTROL_TAG,
+             "gpsout mo=%u t=%u e=%d b=%d d=%d l=%d r=%d",
+             (u16)g_ship_ctrl.motion,
+             g_ship_ctrl.yaw_hold_target_cd,
+             g_ship_ctrl.yaw_hold_error_cd,
+             g_ship_ctrl.base_speed,
+             g_ship_ctrl.yaw_diff_speed,
+             g_ship_ctrl.left_speed,
+             g_ship_ctrl.right_speed);
+    }
+#if (SERIAL_LOG_LEVEL <= LOG_LEVEL_INFO)
     LOGI(SHIP_CONTROL_TAG,
          "out m=%u mo=%u th=%d base=%d st=%d df=%d l=%d r=%d",
          (u16)g_ship_ctrl.mode,
@@ -1658,6 +1925,7 @@ static void ShipControl_LogMotorOutput(u8 force)
          g_ship_ctrl.yaw_diff_speed,
          g_ship_ctrl.left_speed,
          g_ship_ctrl.right_speed);
+#endif
 #else
     (void)force;
 #endif

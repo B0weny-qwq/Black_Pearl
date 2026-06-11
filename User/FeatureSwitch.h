@@ -182,6 +182,36 @@
  */
 #define SHIP_YAW_HOLD_KD_Q10           96
 
+/* GPS auto navigation yaw-hold PID, independent from manual yaw-hold. */
+#define SHIP_GPS_NAV_KP_Q10            384
+#define SHIP_GPS_NAV_KI_Q10            0
+#define SHIP_GPS_NAV_KD_Q10            96
+#define SHIP_GPS_NAV_DIFF_LIMIT_PERMILLE 320
+#define SHIP_GPS_NAV_DIFF_SLEW_PER_STEP 20
+
+/* GPS auto navigation hard profile: abs(heading error) >= threshold. */
+#define SHIP_GPS_NAV_HARD_ERROR_CD     1000
+#define SHIP_GPS_NAV_HARD_KP_Q10       1024
+#define SHIP_GPS_NAV_HARD_KI_Q10       0
+#define SHIP_GPS_NAV_HARD_KD_Q10       128
+#define SHIP_GPS_NAV_HARD_DIFF_LIMIT_PERMILLE 520
+#define SHIP_GPS_NAV_HARD_DIFF_SLEW_PER_STEP 45
+
+/* GPS in-place align PID, independent from forward navigation. */
+#define SHIP_GPS_ALIGN_KP_Q10          384
+#define SHIP_GPS_ALIGN_KI_Q10          128
+#define SHIP_GPS_ALIGN_KD_Q10          0
+#define SHIP_GPS_ALIGN_DIFF_LIMIT_COMMAND 30
+#define SHIP_GPS_ALIGN_DIFF_SLEW_PER_STEP 20
+
+/* GPS in-place align hard profile. */
+#define SHIP_GPS_ALIGN_HARD_ERROR_CD   1000
+#define SHIP_GPS_ALIGN_HARD_KP_Q10     1024
+#define SHIP_GPS_ALIGN_HARD_KI_Q10     0
+#define SHIP_GPS_ALIGN_HARD_KD_Q10     0
+#define SHIP_GPS_ALIGN_HARD_DIFF_LIMIT_COMMAND 60
+#define SHIP_GPS_ALIGN_HARD_DIFF_SLEW_PER_STEP 45
+
 /* 核心模块 */
 /**
  * @name   核心模块开关
